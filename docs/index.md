@@ -85,13 +85,13 @@ hide:
       <div class="toc-entries">
         <a href="part2-engine-internals/chapter06.html" class="toc-entry"><span class="toc-num">6</span><span class="toc-etitle">PagedAttention and the Block Manager</span></a>
         <a href="part2-engine-internals/chapter07.html" class="toc-entry"><span class="toc-num">7</span><span class="toc-etitle">The Scheduler and Request Lifecycle</span></a>
-        <a href="part2-engine-internals/chapter07b.html" class="toc-entry"><span class="toc-num">7b</span><span class="toc-etitle">Continuous Batching — The Iteration-Level Scheduling Loop</span></a>
+        <a href="part2-engine-internals/chapter07b.html" class="toc-entry"><span class="toc-num">7.5</span><span class="toc-etitle">Continuous Batching — The Iteration-Level Scheduling Loop</span></a>
         <a href="part2-engine-internals/chapter08.html" class="toc-entry"><span class="toc-num">8</span><span class="toc-etitle">Startup and Initialization</span></a>
-        <a href="part2-engine-internals/chapter08b.html" class="toc-entry"><span class="toc-num">8b</span><span class="toc-etitle">CUDA Graphs — Capture, Replay, and Production Latency</span></a>
+        <a href="part2-engine-internals/chapter08b.html" class="toc-entry"><span class="toc-num">8.5</span><span class="toc-etitle">CUDA Graphs — Capture, Replay, and Production Latency</span></a>
         <a href="part2-engine-internals/chapter09.html" class="toc-entry"><span class="toc-num">9</span><span class="toc-etitle">The Forward Pass — CUDA vs. GGML</span></a>
         <a href="part2-engine-internals/chapter10.html" class="toc-entry"><span class="toc-num">10</span><span class="toc-etitle">Quantization Internals — GGUF, AWQ, FP8</span></a>
         <a href="part2-engine-internals/chapter11.html" class="toc-entry"><span class="toc-num">11</span><span class="toc-etitle">Prefill, Chunked Prefill, and Prompt Caching</span></a>
-        <a href="part2-engine-internals/chapter11b.html" class="toc-entry"><span class="toc-num">11b</span><span class="toc-etitle">KV Cache Eviction — Attention Sinks, H2O, and SnapKV</span></a>
+        <a href="part2-engine-internals/chapter11b.html" class="toc-entry"><span class="toc-num">11.5</span><span class="toc-etitle">KV Cache Eviction — Attention Sinks, H2O, and SnapKV</span></a>
         <a href="part2-engine-internals/chapter12.html" class="toc-entry"><span class="toc-num">12</span><span class="toc-etitle">Sampling — From Logits to Tokens</span></a>
         <a href="part2-engine-internals/chapter13.html" class="toc-entry"><span class="toc-num">13</span><span class="toc-etitle">Token Streaming — The Last Mile</span></a>
       </div>
@@ -106,7 +106,7 @@ hide:
       <div class="toc-entries">
         <a href="part3-production/chapter14.html" class="toc-entry"><span class="toc-num">14</span><span class="toc-etitle">The Eight vLLM Knobs + llama.cpp Equivalents</span></a>
         <a href="part3-production/chapter15.html" class="toc-entry"><span class="toc-num">15</span><span class="toc-etitle">Multi-GPU Serving and Tensor Parallelism</span></a>
-        <a href="part3-production/chapter15b.html" class="toc-entry"><span class="toc-num">15b</span><span class="toc-etitle">Flash Decoding and Context Parallelism</span></a>
+        <a href="part3-production/chapter15b.html" class="toc-entry"><span class="toc-num">15.5</span><span class="toc-etitle">Flash Decoding and Context Parallelism</span></a>
         <a href="part3-production/chapter16.html" class="toc-entry"><span class="toc-num">16</span><span class="toc-etitle">Observability — Metrics, Logging, Tracing</span></a>
         <a href="part3-production/chapter17.html" class="toc-entry"><span class="toc-num">17</span><span class="toc-etitle">Benchmarking — Fair Comparisons Between Engines</span></a>
         <a href="part3-production/chapter18.html" class="toc-entry"><span class="toc-num">18</span><span class="toc-etitle">Disaggregated Prefill and Decode</span></a>
@@ -135,7 +135,7 @@ hide:
         <a href="part4-advanced/chapter31.html" class="toc-entry"><span class="toc-num">31</span><span class="toc-etitle">Model Routing and Cascading</span></a>
         <a href="part4-advanced/chapter32.html" class="toc-entry"><span class="toc-num">32</span><span class="toc-etitle">Debugging Inference Systems</span></a>
         <a href="part4-advanced/chapter33.html" class="toc-entry"><span class="toc-num">33</span><span class="toc-etitle">The Full Engine Landscape — 2026</span></a>
-        <a href="part4-advanced/chapter33b.html" class="toc-entry"><span class="toc-num">33b</span><span class="toc-etitle">Choosing Your Engine — SGLang, TRT-LLM, MLC-LLM, Ollama</span></a>
+        <a href="part4-advanced/chapter33b.html" class="toc-entry"><span class="toc-num">33.5</span><span class="toc-etitle">Choosing Your Engine — SGLang, TRT-LLM, MLC-LLM, Ollama</span></a>
       </div>
     </div>
 

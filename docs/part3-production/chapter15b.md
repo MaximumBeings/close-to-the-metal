@@ -1,4 +1,4 @@
-# Chapter 15b: Flash Decoding and Context Parallelism — Parallelising Across Sequence Length
+# Chapter 15.5: Flash Decoding and Context Parallelism — Parallelising Across Sequence Length
 
 > *"Tensor parallelism splits across heads. Data parallelism splits across batches. Flash Decoding splits across the one dimension everyone forgot: the sequence itself."*
 

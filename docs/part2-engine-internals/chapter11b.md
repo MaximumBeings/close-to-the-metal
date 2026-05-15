@@ -1,4 +1,4 @@
-# Chapter 11b: KV Cache Eviction and Compression — When the Cache Is Full
+# Chapter 11.5: KV Cache Eviction and Compression — When the Cache Is Full
 
 > *"You cannot remember everything forever. The question is not whether to forget —
 > it is which memories to keep, and which to let go without losing the thread."*

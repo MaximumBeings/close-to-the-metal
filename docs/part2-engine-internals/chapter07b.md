@@ -1,4 +1,4 @@
-# Chapter 7b: Continuous Batching — The Iteration-Level Scheduling Loop
+# Chapter 7.5: Continuous Batching — The Iteration-Level Scheduling Loop
 
 > *"Naïve batching waits for the slowest request. Continuous batching never waits. It just keeps feeding the GPU, one token-step at a time."*
 

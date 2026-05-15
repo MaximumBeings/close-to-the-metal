@@ -1,4 +1,4 @@
-# Chapter 8b: CUDA Graphs — Capture, Replay, and Production Latency
+# Chapter 8.5: CUDA Graphs — Capture, Replay, and Production Latency
 
 > *"The GPU is fast. The path from Python to the GPU is not. CUDA Graphs collapse that path to a single launch."*
 

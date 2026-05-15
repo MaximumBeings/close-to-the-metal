@@ -1,4 +1,4 @@
-# Chapter 33b: Choosing Your Engine — SGLang, TRT-LLM, MLC-LLM, and Ollama
+# Chapter 33.5: Choosing Your Engine — SGLang, TRT-LLM, MLC-LLM, and Ollama
 
 > *"The right engine is the one that fits your model, your hardware, your latency budget, and your team's tolerance for operational complexity. There is no universal winner."*
 

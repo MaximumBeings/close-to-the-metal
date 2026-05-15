@@ -73,20 +73,20 @@ nav:
   - "Part II — Engine Internals":
     - "Ch 6: PagedAttention and the Block Manager": part2-engine-internals/chapter06.md
     - "Ch 7: The Scheduler and Request Lifecycle": part2-engine-internals/chapter07.md
-    - "Ch 7b: Continuous Batching — The Iteration-Level Scheduling Loop": part2-engine-internals/chapter07b.md
+    - "Ch 7.5: Continuous Batching — The Iteration-Level Scheduling Loop": part2-engine-internals/chapter07b.md
     - "Ch 8: Startup and Initialization": part2-engine-internals/chapter08.md
-    - "Ch 8b: CUDA Graphs — Capture, Replay, and Production Latency": part2-engine-internals/chapter08b.md
+    - "Ch 8.5: CUDA Graphs — Capture, Replay, and Production Latency": part2-engine-internals/chapter08b.md
     - "Ch 9: The Forward Pass — CUDA vs. GGML": part2-engine-internals/chapter09.md
     - "Ch 10: Quantization Internals": part2-engine-internals/chapter10.md
     - "Ch 11: Prefill, Chunked Prefill, and Prompt Caching": part2-engine-internals/chapter11.md
-    - "Ch 11b: KV Cache Eviction — Attention Sinks, H2O, and SnapKV": part2-engine-internals/chapter11b.md
+    - "Ch 11.5: KV Cache Eviction — Attention Sinks, H2O, and SnapKV": part2-engine-internals/chapter11b.md
     - "Ch 12: Sampling — From Logits to Tokens": part2-engine-internals/chapter12.md
     - "Ch 13: Token Streaming — The Last Mile": part2-engine-internals/chapter13.md
 
   - "Part III — Production":
     - "Ch 14: The Eight vLLM Knobs": part3-production/chapter14.md
     - "Ch 15: Multi-GPU Serving": part3-production/chapter15.md
-    - "Ch 15b: Flash Decoding and Context Parallelism": part3-production/chapter15b.md
+    - "Ch 15.5: Flash Decoding and Context Parallelism": part3-production/chapter15b.md
     - "Ch 16: Observability": part3-production/chapter16.md
     - "Ch 17: Benchmarking": part3-production/chapter17.md
     - "Ch 18: Disaggregated Prefill and Decode": part3-production/chapter18.md
@@ -107,7 +107,7 @@ nav:
     - "Ch 31: Model Routing and Cascading": part4-advanced/chapter31.md
     - "Ch 32: Debugging Inference Systems": part4-advanced/chapter32.md
     - "Ch 33: The Full Engine Landscape — 2026": part4-advanced/chapter33.md
-    - "Ch 33b: Choosing Your Engine — SGLang, TRT-LLM, MLC-LLM, Ollama": part4-advanced/chapter33b.md
+    - "Ch 33.5: Choosing Your Engine — SGLang, TRT-LLM, MLC-LLM, Ollama": part4-advanced/chapter33b.md
 
   - "Part V — Model Zoo":
     - "Ch 34: DeepSeek — MLA, MoE, FP8": part5-model-zoo/chapter34.md
