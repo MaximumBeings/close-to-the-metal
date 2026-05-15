@@ -135,6 +135,37 @@ n_kv_heads = 4  (MHA: each query head owns its own KV head)
 cache per token per layer = 2(K+V) × 4(heads) × 2(d_head) × 4(bytes) = 64 bytes (FP32)
 ```
 
+**MHA KV Cache Layout** — for the full 10-token trace (`N=10`, `Hkv=4`, `D=2`):
+
+```
+K_cache shape = N × Hkv × D = 10 × 4 × 2
+V_cache shape = N × Hkv × D = 10 × 4 × 2
+
+  K_cache (per layer):
+  ┌──────────────────────────────────────────────┐
+  │ token 0: K[head0] K[head1] K[head2] K[head3]│
+  │ token 1: K[head0] K[head1] K[head2] K[head3]│
+  │ token 2: K[head0] K[head1] K[head2] K[head3]│
+  │ token 3: K[head0] K[head1] K[head2] K[head3]│
+  │ token 4: K[head0] K[head1] K[head2] K[head3]│
+  │ token 5: K[head0] K[head1] K[head2] K[head3]│
+  │ token 6: K[head0] K[head1] K[head2] K[head3]│
+  │ token 7: K[head0] K[head1] K[head2] K[head3]│
+  │ token 8: K[head0] K[head1] K[head2] K[head3]│
+  │ token 9: K[head0] K[head1] K[head2] K[head3]│
+  └──────────────────────────────────────────────┘
+  V_cache has the same shape.
+```
+
+Every token row contains all four head-specific K vectors and all four head-specific V vectors. When sequence length grows, all rows must remain in GPU HBM for decode. This is the cost of full head independence.
+
+After the 4-head context vectors are computed, they are **concatenated** and mixed through an output projection:
+
+```
+context_all = [context_h0 | context_h1 | context_h2 | context_h3]  shape 1×8
+output = context_all @ W_O   shape 1×d_model
+```
+
 ### 4.4.2 Weight Matrices (Head 0)
 
 All projections below use `seed=42`-derived weights. Each `W_Q`, `W_K`, `W_V` is 8×2.
@@ -587,6 +618,29 @@ n_kv_heads = 1  (MQA: single shared KV head)
 cache per token per layer = 2(K+V) × 1(head) × 2(d_head) × 4 bytes = 16 bytes (FP32)
 ```
 
+**MQA KV Cache Layout** — all 4 query heads read the same single cache:
+
+```
+K_cache shape = N × 1 × D = 10 × 1 × 2
+V_cache shape = N × 1 × D = 10 × 1 × 2
+
+  K_cache (per layer):
+  ┌────────────────────┐
+  │ token 0: K[shared] │
+  │ token 1: K[shared] │
+  │ token 2: K[shared] │
+  │ token 3: K[shared] │
+  │ token 4: K[shared] │
+  │ token 5: K[shared] │
+  │ token 6: K[shared] │
+  │ token 7: K[shared] │
+  │ token 8: K[shared] │
+  │ token 9: K[shared] │
+  └────────────────────┘
+```
+
+The query side remains multi-headed — each head still has its own `W_Q` and produces a distinct query vector — but they all read the same K/V rows.
+
 This is a **4× reduction** in cache size compared to MHA. For LLaMA-3 70B at 128K context this means the difference between ~85 GB of KV cache (MHA) and ~21 GB (MQA).
 
 The shared W_K and W_V are identical to Head 0's matrices from MHA.
@@ -653,6 +707,32 @@ cache per token per layer = 2 × 2 × 2 × 4 = 32 bytes (FP32)
 
 GQA is a 2× reduction vs MHA. Most production models in 2024–2025 use GQA: Llama-3 (8B: 8 KV heads, 32 Q heads; 70B: 8 KV heads, 64 Q heads), Mistral, Gemma, Qwen2.
 
+**GQA KV Cache Layout** — the middle ground between MHA (4 heads) and MQA (1 head):
+
+```
+K_cache shape = N × Hkv × D = 10 × 2 × 2
+V_cache shape = N × Hkv × D = 10 × 2 × 2
+
+  K_cache (per layer):
+  ┌──────────────────────────────┐
+  │ token 0: K[group0] K[group1] │
+  │ token 1: K[group0] K[group1] │
+  │ token 2: K[group0] K[group1] │
+  │ token 3: K[group0] K[group1] │
+  │ token 4: K[group0] K[group1] │
+  │ token 5: K[group0] K[group1] │
+  │ token 6: K[group0] K[group1] │
+  │ token 7: K[group0] K[group1] │
+  │ token 8: K[group0] K[group1] │
+  │ token 9: K[group0] K[group1] │
+  └──────────────────────────────┘
+
+  Q heads 0, 1 → read group 0   (K[group0], V[group0])
+  Q heads 2, 3 → read group 1   (K[group1], V[group1])
+```
+
+Compare the shapes directly: MHA is `10 × 4 × 2`, MQA is `10 × 1 × 2`, and GQA is `10 × 2 × 2`. GQA stores more than MQA but less than MHA — and more groups means more expressivity at the cost of more memory.
+
 ### 4.7.2 Decode Step 1: "bright" Under GQA
 
 KV head 0 is shared by Q heads 0 and 1. KV head 1 is shared by Q heads 2 and 3.
@@ -684,6 +764,23 @@ Scores against KV head 0:
 MHA: 320 bytes    GQA: 2×5×2×2×4 = 160 bytes   MQA: 80 bytes
 ```
 
+**What GQA Buys and Costs:**
+
+```
+Good:
+  - much smaller cache than MHA (2× reduction here; 4–8× in production models)
+  - more head specialization than MQA (each group still learns its own K/V)
+  - quality closely tracks MHA at G ≥ 4 groups (Ainslie et al., 2023)
+  - standard in all modern LLMs: LLaMA-3, Mistral, Gemma, Qwen2
+
+Cost:
+  - query heads within the same group cannot see different K/V perspectives
+  - group count (Hkv) becomes a quality / memory tuning knob at training time
+  - still scales linearly with context length N (MLA or sparse needed to break that)
+```
+
+The group assignment is permanent (baked into the trained weights), so you cannot change it at inference time. vLLM reads `num_key_value_heads` from the model config and automatically allocates the right KV layout without user intervention.
+
 ---
 
 ## 4.8 Multi-head Latent Attention (MLA) `[ADVANCED]`
@@ -710,6 +807,59 @@ cache per token per layer = 3 × 4 bytes = 12 bytes (FP32)
 ```
 
 Compared to MHA's 64 bytes, MLA achieves a **~5× reduction** in the toy example — and in real models like DeepSeek-V2 (128K context, d_model=5120), the savings are over 10×.
+
+**MLA Latent Cache Layout** — stores the recipe, not the finished dishes:
+
+```
+Instead of caching K and V directly:
+  K_cache: N × Hkv × D
+  V_cache: N × Hkv × D
+
+MLA caches the compressed latent:
+  C_cache: N × latent_dim = 10 × 3
+
+  ┌─────┬────────┬──────────────────────┐
+  │ pos │ token  │ C_KV stored in cache │
+  ├─────┼────────┼──────────────────────┤
+  │  0  │ The    │ [+0.4776, -1.8234, +1.4821] │
+  │  1  │ next   │ [computed from e_next @ W_DKV] │
+  │  2  │ day    │ [computed from e_day  @ W_DKV] │
+  │  3  │ is     │ [computed from e_is   @ W_DKV] │
+  │  4  │ bright │ [...] │
+  │  …  │  …     │  …    │
+  │  9  │ the    │ [computed from e_the  @ W_DKV] │
+  └─────┴────────┴──────────────────────┘
+```
+
+K and V are never stored — they are reconstructed on-demand at decode time.
+
+**MLA Data Flow — Two Paths:**
+
+```
+                    query path
+  X ─────────────── W_Q ─────────────────► Q
+  │                                         │
+  │  key/value latent path                  │
+  └── W_DKV ─► C_KV ── W_UK ─► K ──► Q @ K^T ─► scores
+                 │                              │
+                 └── W_UV ─► V ──── weights @ V ─► context
+```
+
+The query path is unchanged from MHA. The K/V path first compresses X into a latent `C_KV`, then expands it back into K and V only when needed. The long-lived cache stores `C_KV`; K and V are ephemeral.
+
+**Algebraic rearrangement:** Because `K = C_KV @ W_UK` and the up-projection matrices are fixed weights, DeepSeek showed that the attention scores can be rewritten as:
+
+```
+Scores = Q @ K^T
+       = Q @ (C_KV @ W_UK)^T
+       = Q @ W_UK^T @ C_KV^T
+
+Define A_K = W_Q @ W_UK^T  (precomputed once at load time)
+
+Scores = X @ A_K @ C_KV^T
+```
+
+This means the cache only needs to store `C_KV` — the fixed learned matrices handle the rest. The same rearrangement applies to the value side: `Context = weights @ C_KV @ (W_UV @ W_O)`.
 
 ### 4.8.2 MLA Worked Arithmetic
 
@@ -752,6 +902,183 @@ MLA: 10×3×4     = 120 bytes  ← cheapest!
 
 The trade-off: at query time, MLA must multiply each cached vector through `W_UK` and `W_UV` to reconstruct K and V. This adds FLOPs at decode time. DeepSeek-V2 showed that this compute cost is affordable — the GPU has spare FLOP capacity — but the memory bandwidth savings are dramatic.
 
+### 4.8.3 MLA K/V Reconstruction: Manual Step for `the`
+
+Using the up-projection matrices from the gist walkthrough (latent_dim=4 extended trace):
+
+```
+W_UK =
+  ┌                     ┐
+  │ 0.5  0.0  0.2  0.0  │
+  │ 0.0  0.5  0.0  0.2  │
+  │ 0.0  0.3  0.8  0.0  │
+  │ 0.2  0.0  0.0  0.8  │
+  └                     ┘
+
+W_UV =
+  ┌                     ┐
+  │ 1.0  0.0  0.5  0.0  │
+  │ 0.0  1.0  0.0  0.5  │
+  │ 0.0  0.5  1.0  0.0  │
+  │ 0.5  0.0  0.0  1.0  │
+  └                     ┘
+
+Cached latent for "the":  c_the = [1.0, 0.25, 0.0, 1.0]
+```
+
+**Reconstruct K:**
+
+```
+k_the = c_the @ W_UK
+
+[1.0, 0.25, 0.0, 1.0] @
+  ┌                     ┐
+  │ 0.5  0.0  0.2  0.0  │
+  │ 0.0  0.5  0.0  0.2  │
+  │ 0.0  0.3  0.8  0.0  │
+  │ 0.2  0.0  0.0  0.8  │
+  └                     ┘
+
+k0 = 1.0×0.5  + 0.25×0.0 + 0.0×0.0 + 1.0×0.2 = 0.70
+k1 = 1.0×0.0  + 0.25×0.5 + 0.0×0.3 + 1.0×0.0 = 0.125
+k2 = 1.0×0.2  + 0.25×0.0 + 0.0×0.8 + 1.0×0.0 = 0.20
+k3 = 1.0×0.0  + 0.25×0.2 + 0.0×0.0 + 1.0×0.8 = 0.85
+
+k_the = [0.70, 0.125, 0.20, 0.85]
+```
+
+**Reconstruct V:**
+
+```
+v_the = c_the @ W_UV
+
+v0 = 1.0×1.0 + 0.25×0.0 + 0.0×0.0 + 1.0×0.5 = 1.50
+v1 = 1.0×0.0 + 0.25×1.0 + 0.0×0.5 + 1.0×0.0 = 0.25
+v2 = 1.0×0.5 + 0.25×0.0 + 0.0×1.0 + 1.0×0.0 = 0.50
+v3 = 1.0×0.0 + 0.25×0.5 + 0.0×0.0 + 1.0×1.0 = 1.125
+
+v_the = [1.50, 0.25, 0.50, 1.125]
+```
+
+From a single cached 4-dim latent vector, MLA reconstructed both a 4-dim key and a 4-dim value. After reconstruction, attention proceeds exactly as in MHA.
+
+### 4.8.4 MLA Downward Projection: `X @ W_DKV → C_KV` (4-Token Prefill)
+
+The first write to the MLA cache happens at prefill. Each token's embedding is down-projected into the latent space. Using the figure-style toy with `d_model=8`, `latent_dim=4`, and the four-token prompt "The next day is":
+
+```
+X (4 × 8):
+  ┌────────────────────────────────────────┐
+  │ token │ x0 x1 x2 x3 x4 x5 x6 x7       │
+  ├───────┼────────────────────────────────┤
+  │ The   │  1  0  0  0  1  0  0  0        │
+  │ next  │  0  1  0  0  0  1  0  0        │
+  │ day   │  0  0  1  0  1  1  0  0        │
+  │ is    │  0  0  0  1  0  1  1  0        │
+  └────────────────────────────────────────┘
+
+W_DKV (8 × 4):
+  ┌────────────────────┐
+  │ 0.5  0.0  0.0  0.0 │  ← x0
+  │ 0.0  0.5  0.0  0.0 │  ← x1
+  │ 0.5  0.5  0.0  0.0 │  ← x2
+  │ 0.0  0.5  0.5  0.0 │  ← x3
+  │ 0.5  0.0  0.0  0.5 │  ← x4
+  │ 0.0  0.5  0.0  0.0 │  ← x5
+  │ 0.0  0.0  0.5  0.0 │  ← x6
+  │ 0.0  0.0  0.0  0.5 │  ← x7
+  └────────────────────┘
+```
+
+**Token "The"** — `x = [1,0,0,0,1,0,0,0]`:
+
+```
+c0 = 1×0.5 + 0×0.0 + 0×0.5 + 0×0.0 + 1×0.5 + 0×0.0 + 0×0.0 + 0×0.0 = 1.0
+c1 = 1×0.0 + 0×0.5 + 0×0.5 + 0×0.5 + 1×0.0 + 0×0.5 + 0×0.0 + 0×0.0 = 0.0
+c2 = 1×0.0 + 0×0.0 + 0×0.0 + 0×0.5 + 1×0.0 + 0×0.0 + 0×0.5 + 0×0.0 = 0.0
+c3 = 1×0.0 + 0×0.0 + 0×0.0 + 0×0.0 + 1×0.5 + 0×0.0 + 0×0.0 + 0×0.5 = 0.5
+→ C_KV(The) = [1.0, 0.0, 0.0, 0.5]
+```
+
+**Token "next"** — `x = [0,1,0,0,0,1,0,0]`:
+
+```
+c0 = 0×0.5 + 1×0.0 + 0×0.5 + 0×0.0 + 0×0.5 + 1×0.0 + 0×0.0 + 0×0.0 = 0.0
+c1 = 0×0.0 + 1×0.5 + 0×0.5 + 0×0.5 + 0×0.0 + 1×0.5 + 0×0.0 + 0×0.0 = 1.0
+c2 = 0×0.0 + 1×0.0 + 0×0.0 + 0×0.5 + 0×0.0 + 1×0.0 + 0×0.5 + 0×0.0 = 0.0
+c3 = 0×0.0 + 1×0.0 + 0×0.0 + 0×0.0 + 0×0.5 + 1×0.0 + 0×0.0 + 0×0.5 = 0.0
+→ C_KV(next) = [0.0, 1.0, 0.0, 0.0]
+```
+
+**Token "day"** — `x = [0,0,1,0,1,1,0,0]`:
+
+```
+c0 = 0×0.5 + 0×0.0 + 1×0.5 + 0×0.0 + 1×0.5 + 1×0.0 + 0×0.0 + 0×0.0 = 1.0
+c1 = 0×0.0 + 0×0.5 + 1×0.5 + 0×0.5 + 1×0.0 + 1×0.5 + 0×0.0 + 0×0.0 = 1.0
+c2 = 0×0.0 + 0×0.0 + 1×0.0 + 0×0.5 + 1×0.0 + 1×0.0 + 0×0.5 + 0×0.0 = 0.0
+c3 = 0×0.0 + 0×0.0 + 1×0.0 + 0×0.0 + 1×0.5 + 1×0.0 + 0×0.0 + 0×0.5 = 0.5
+→ C_KV(day) = [1.0, 1.0, 0.0, 0.5]
+```
+
+**Token "is"** — `x = [0,0,0,1,0,1,1,0]`:
+
+```
+c0 = 0×0.5 + 0×0.0 + 0×0.5 + 1×0.0 + 0×0.5 + 1×0.0 + 1×0.0 + 0×0.0 = 0.0
+c1 = 0×0.0 + 0×0.5 + 0×0.5 + 1×0.5 + 0×0.0 + 1×0.5 + 1×0.0 + 0×0.0 = 1.0
+c2 = 0×0.0 + 0×0.0 + 0×0.0 + 1×0.5 + 0×0.0 + 1×0.0 + 1×0.5 + 0×0.0 = 1.0
+c3 = 0×0.0 + 0×0.0 + 0×0.0 + 1×0.0 + 0×0.5 + 1×0.0 + 1×0.0 + 0×0.5 = 0.0
+→ C_KV(is) = [0.0, 1.0, 1.0, 0.0]
+```
+
+**C_KV cache after prefill (what MLA stores):**
+
+```
+  ┌───────┬──────────────────────┐
+  │ token │ c0    c1    c2   c3  │
+  ├───────┼──────────────────────┤
+  │ The   │ 1.0   0.0   0.0  0.5 │
+  │ next  │ 0.0   1.0   0.0  0.0 │
+  │ day   │ 1.0   1.0   0.0  0.5 │
+  │ is    │ 0.0   1.0   1.0  0.0 │
+  └───────┴──────────────────────┘
+  shape: 4 × 4   (vs 4 × 4 K-cache + 4 × 4 V-cache = 32 scalars for MHA)
+```
+
+Only when attention needs K and V do we apply `K = C_KV @ W_UK` and `V = C_KV @ W_UV`. The compressed latent is the long-lived object; the full K/V matrices are ephemeral.
+
+### 4.8.5 Six MLA Decode Steps (Summary)
+
+The decode loop appends one latent row per step, not one K row and one V row:
+
+```
+cKV_cache after prefill: [C_KV(The), C_KV(next), C_KV(day), C_KV(is)]  shape: 4 × 4
+
+Step 1 → append bright:   cache 5 × 4  │ q_bright = [1.0,1.0,0.0,0.0]
+Step 2 → append and:      cache 6 × 4  │ q_and    = [1.0,2.0,0.0,0.0]
+Step 3 → append sunny:    cache 7 × 4  │ q_sunny  = [2.0,1.0,0.0,0.0]
+Step 4 → append ,:        cache 8 × 4  │ q_comma  = [0.2,0.2,1.0,0.0]
+Step 5 → append and:      cache 9 × 4  │ q_and    = [1.0,2.0,0.0,0.0]
+Step 6 → append the:      cache 10 × 4 │ q_the    = [1.0,0.5,0.0,0.5]
+```
+
+At each step, the model reconstructs the full K/V matrices from the entire cached latent, computes attention, and predicts the next token. The cache grows in latent space, not in K/V space.
+
+**What MLA Buys and Costs:**
+
+```
+Good:
+  - compresses cache without merely collapsing all heads into one
+  - preserves more modeling expressivity than MQA at similar memory cost
+  - algebraic rearrangement lets learned matrices absorb the up-projection
+  - central to DeepSeek-V2/V3/R1 efficiency at 128K+ context
+
+Cost:
+  - extra reconstruction projections at every decode step (W_UK, W_UV matmuls)
+  - more complex implementation — especially with decoupled RoPE
+  - position-content decoupling requires two separate paths
+  - not yet supported natively in all inference engines (vLLM added MLA in 0.5)
+```
+
 ---
 
 ## 4.9 Sparse / Sliding-Window Attention `[PRODUCTION]`
@@ -781,6 +1108,89 @@ Each position i attends to:
 ```
 
 This is the BigBird/Longformer pattern. It gives O(N) complexity while maintaining a degree of long-range connectivity.
+
+### 4.9.3 Sparse Mask Diagram — Visibility Map
+
+A sparse mask tells the attention operation which token rows to include. A ✓ means "read this row and include it in softmax". A · means "skip this row entirely." The final token `the` (position 9) demonstrates the contrast:
+
+```
+Full dense attention for `the`:
+
+  The  next  day  is  bright  and  sunny  ,  and  the
+   ✓    ✓    ✓    ✓    ✓      ✓    ✓      ✓   ✓    ✓
+
+Sparse local-plus-sink pattern for `the`
+  (keep position 0 as global sink; keep local window = positions 6–9):
+
+  The  next  day  is  bright  and  sunny  ,  and  the
+   ✓    ·    ·    ·    ·      ·    ✓      ✓   ✓    ✓
+```
+
+Because softmax is recomputed only over the visible tokens, the five remaining positions receive all the probability mass. Sparse attention is not merely a compute shortcut — it changes the model's information access.
+
+### 4.9.4 Manual Sparse Step for `the`
+
+Using the same toy scores from §4.4 (dense MHA head 0), the raw dot-product scores at the final token are:
+
+```
+All 10 positions (dense):
+  The:0.5303  next:1.4142  day:0.7955  is:1.2374  bright:1.0607
+  and:1.2374  sunny:0.5303 ,:0.7955   and:1.2374  the:1.0607
+```
+
+The sparse mask keeps only `{The(0), sunny(6), ,(7), and(8), the(9)}`:
+
+```
+Scores over sparse subset:
+  The:    0.5303
+  sunny:  1.4142
+  ,:      0.7955
+  and:    1.2374
+  the:    1.0607
+```
+
+**Softmax over only those five positions:**
+
+```
+  ┌────────┬────────┐
+  │ token  │ weight │
+  ├────────┼────────┤
+  │ The    │ 0.1183 │
+  │ sunny  │ 0.2864 │
+  │ ,      │ 0.1542 │
+  │ and    │ 0.2400 │
+  │ the    │ 0.2011 │
+  └────────┴────────┘
+```
+
+**Sparse context vector** (using 2-dim toy V values where V[sunny]=[2,1], V[,]=[0.5,0.5], V[and]=[1,2], V[the]=[2,0], V[The]=[1,0]):
+
+```
+context[0] = 0.1183×1 + 0.2864×2 + 0.1542×0.5 + 0.2400×1 + 0.2011×2 = 1.4103
+context[1] = 0.1183×0 + 0.2864×1 + 0.1542×0.5 + 0.2400×2 + 0.2011×0 = 0.8434
+
+sparse context = [1.4103, 0.8434]
+```
+
+Compare with the dense context for `the` from §4.4 — the difference shows that omitting 5 tokens does change the output, and the magnitude depends on the sparsity pattern.
+
+**What Sparse Attention Buys and Costs:**
+
+```
+Good:
+  - fewer K/V rows read per decode step → lower bandwidth cost at long context
+  - O(W × d) per step instead of O(N × d) for local-window patterns
+  - orthogonal to GQA/MLA: can stack with either for maximum savings
+  - used in production: Mistral (W=4096), Gemma, many long-context models
+
+Cost:
+  - tokens outside the sparse pattern cannot directly influence this step
+  - quality depends on the chosen pattern — wrong patterns hurt accuracy badly
+  - does not reduce the amount of cache stored, only what is read per step
+  - implementation must handle masks and eviction carefully (see Ch 11b)
+```
+
+**Key distinction:** GQA/MQA/MLA reduce the *bytes stored* in the cache. Sparse attention reduces the *bytes read* per decode step. A production system can combine both: use GQA to shrink the cache footprint, then use sliding-window attention to cap the read bandwidth at each step.
 
 ---
 
