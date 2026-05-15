@@ -1,0 +1,24 @@
+# MkDocs build output (rebuilt by GitHub Actions on deploy)
+site/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+.env
+
+# MkDocs cache
+.cache/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo

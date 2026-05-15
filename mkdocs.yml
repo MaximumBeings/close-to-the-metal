@@ -1,0 +1,181 @@
+site_name: "Close to the Metal: LLM Inference from First Principles"
+site_description: "A Practitioner's Deep Guide to LLM Inference"
+site_author: "Oluwaseyi Awoga"
+docs_dir: docs
+site_dir: site
+use_directory_urls: false
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - navigation.indexes
+    - navigation.prune
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - toc.follow
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - toc:
+      permalink: true
+      title: On this page
+
+extra_css:
+  - stylesheets/extra.css
+
+plugins:
+  - search
+
+nav:
+  - Preface: preface.md
+  - Home: index.md
+
+  - "Part I — Foundations":
+    - "Ch 1: Two Engines, One Problem": part1-foundations/chapter01.md
+    - "Ch 2: The GPU and CPU Memory Landscapes": part1-foundations/chapter02.md
+    - "Ch 3: Tokens, Sequences, and the Batch": part1-foundations/chapter03.md
+    - "Ch 3.5: The Transformer Block": part1-foundations/chapter03b.md
+    - "Ch 4: Attention Mechanics": part1-foundations/chapter04.md
+    - "Ch 5: Flash Attention": part1-foundations/chapter05.md
+
+  - "Part II — Engine Internals":
+    - "Ch 6: PagedAttention and the Block Manager": part2-engine-internals/chapter06.md
+    - "Ch 7: The Scheduler and Request Lifecycle": part2-engine-internals/chapter07.md
+    - "Ch 7b: Continuous Batching — The Iteration-Level Scheduling Loop": part2-engine-internals/chapter07b.md
+    - "Ch 8: Startup and Initialization": part2-engine-internals/chapter08.md
+    - "Ch 8b: CUDA Graphs — Capture, Replay, and Production Latency": part2-engine-internals/chapter08b.md
+    - "Ch 9: The Forward Pass — CUDA vs. GGML": part2-engine-internals/chapter09.md
+    - "Ch 10: Quantization Internals": part2-engine-internals/chapter10.md
+    - "Ch 11: Prefill, Chunked Prefill, and Prompt Caching": part2-engine-internals/chapter11.md
+    - "Ch 11b: KV Cache Eviction — Attention Sinks, H2O, and SnapKV": part2-engine-internals/chapter11b.md
+    - "Ch 12: Sampling — From Logits to Tokens": part2-engine-internals/chapter12.md
+    - "Ch 13: Token Streaming — The Last Mile": part2-engine-internals/chapter13.md
+
+  - "Part III — Production":
+    - "Ch 14: The Eight vLLM Knobs": part3-production/chapter14.md
+    - "Ch 15: Multi-GPU Serving": part3-production/chapter15.md
+    - "Ch 15b: Flash Decoding and Context Parallelism": part3-production/chapter15b.md
+    - "Ch 16: Observability": part3-production/chapter16.md
+    - "Ch 17: Benchmarking": part3-production/chapter17.md
+    - "Ch 18: Disaggregated Prefill and Decode": part3-production/chapter18.md
+    - "Ch 19: Kubernetes and KubeRay": part3-production/chapter19.md
+    - "Ch 20: Cost Engineering": part3-production/chapter20.md
+    - "Ch 21: Security": part3-production/chapter21.md
+
+  - "Part IV — Advanced Topics":
+    - "Ch 22: LoRA Serving": part4-advanced/chapter22.md
+    - "Ch 23: Speculative Decoding": part4-advanced/chapter23.md
+    - "Ch 24: Reasoning Model Inference": part4-advanced/chapter24.md
+    - "Ch 25: RL and Serving Policies": part4-advanced/chapter25.md
+    - "Ch 26: CS336 Alignment Field Guide": part4-advanced/chapter26.md
+    - "Ch 27: Long-Context Inference": part4-advanced/chapter27.md
+    - "Ch 28: llama.cpp as a Platform": part4-advanced/chapter28.md
+    - "Ch 29: Multimodal Inference": part4-advanced/chapter29.md
+    - "Ch 30: Semantic Caching": part4-advanced/chapter30.md
+    - "Ch 31: Model Routing and Cascading": part4-advanced/chapter31.md
+    - "Ch 32: Debugging Inference Systems": part4-advanced/chapter32.md
+    - "Ch 33: The Full Engine Landscape — 2026": part4-advanced/chapter33.md
+    - "Ch 33b: Choosing Your Engine — SGLang, TRT-LLM, MLC-LLM, Ollama": part4-advanced/chapter33b.md
+
+  - "Part V — Model Zoo":
+    - "Ch 34: DeepSeek — MLA, MoE, FP8": part5-model-zoo/chapter34.md
+    - "Ch 35: Qwen — Multilingual and Long-Context": part5-model-zoo/chapter35.md
+    - "Ch 36: Kimi — Long-Context and Moon-Cache": part5-model-zoo/chapter36.md
+    - "Ch 37: Nemotron and TensorRT-LLM": part5-model-zoo/chapter37.md
+    - "Ch 38: The Production Synthesis": part5-model-zoo/chapter38.md
+    - "Ch 39: Evaluation and Regression Testing": part5-model-zoo/chapter39.md
+    - "Ch 40: The vLLM V1 Architecture": part5-model-zoo/chapter40.md
+
+  - "⌨ Companion Code":
+    - "Code 01 — Two Engines": code/chapter_01.md
+    - "Code 02 — Memory Landscapes": code/chapter_02.md
+    - "Code 03 — Tokens and Batches": code/chapter_03.md
+    - "Code 03b — The Transformer Block": code/chapter_03b.md
+    - "Code 04 — Attention Mechanics": code/chapter_04.md
+    - "Code 05 — Flash Attention": code/chapter_05.md
+    - "Code 06 — PagedAttention": code/chapter_06.md
+    - "Code 07 — The Scheduler": code/chapter_07.md
+    - "Code 07b — Continuous Batching": code/chapter_07b.md
+    - "Code 08 — Startup": code/chapter_08.md
+    - "Code 08b — CUDA Graphs": code/chapter_08b.md
+    - "Code 09 — Forward Pass": code/chapter_09.md
+    - "Code 10 — Quantization": code/chapter_10.md
+    - "Code 11 — Prefill and Caching": code/chapter_11.md
+    - "Code 11b — KV Cache Eviction": code/chapter_11b.md
+    - "Code 12 — Sampling": code/chapter_12.md
+    - "Code 13 — Streaming": code/chapter_13.md
+    - "Code 14 — vLLM Knobs": code/chapter_14.md
+    - "Code 15 — Multi-GPU": code/chapter_15.md
+    - "Code 15b — Flash Decoding": code/chapter_15b.md
+    - "Code 16 — Observability": code/chapter_16.md
+    - "Code 17 — Benchmarking": code/chapter_17.md
+    - "Code 18 — Disaggregated Serving": code/chapter_18.md
+    - "Code 19 — Kubernetes": code/chapter_19.md
+    - "Code 20 — Cost Engineering": code/chapter_20.md
+    - "Code 21 — Security": code/chapter_21.md
+    - "Code 22 — LoRA Serving": code/chapter_22.md
+    - "Code 23 — Speculative Decoding": code/chapter_23.md
+    - "Code 24 — Reasoning Models": code/chapter_24.md
+    - "Code 25 — RL Serving Policies": code/chapter_25.md
+    - "Code 26 — Alignment Field Guide": code/chapter_26.md
+    - "Code 27 — Long-Context": code/chapter_27.md
+    - "Code 28 — llama.cpp Platform": code/chapter_28.md
+    - "Code 29 — Multimodal": code/chapter_29.md
+    - "Code 30 — Semantic Caching": code/chapter_30.md
+    - "Code 31 — Model Routing": code/chapter_31.md
+    - "Code 32 — Debugging": code/chapter_32.md
+    - "Code 33 — Engine Landscape": code/chapter_33.md
+    - "Code 33b — Engine Selection": code/chapter_33b.md
+    - "Code 34 — DeepSeek": code/chapter_34.md
+    - "Code 35 — Qwen": code/chapter_35.md
+    - "Code 36 — Kimi": code/chapter_36.md
+    - "Code 37 — Nemotron": code/chapter_37.md
+    - "Code 38 — Production Synthesis": code/chapter_38.md
+    - "Code 39 — Evaluation Harness": code/chapter_39.md
+    - "Code 40 — vLLM V1 Architecture": code/chapter_40.md
+    - "Code L — TurboQuant": code/appendix_l.md
+
+  - "Appendices":
+    - "A — Mathematical Foundations": appendices/appendix-a.md
+    - "B — Installation Guide": appendices/appendix-b.md
+    - "C — vLLM EngineArgs Reference": appendices/appendix-c.md
+    - "D — llama.cpp CLI Reference": appendices/appendix-d.md
+    - "E — Production Templates": appendices/appendix-e.md
+    - "F — Benchmarking Reference": appendices/appendix-f.md
+    - "G — C++ Build Patterns": appendices/appendix-g.md
+    - "H — Glossary": appendices/appendix-h.md
+    - "I — References": appendices/appendix-i.md
+    - "J — CUDA C++ Introduction": appendices/appendix-j.md
+    - "K — Operational Decision Tree": appendices/appendix-k.md
+    - "L — TurboQuant (Addendum)": appendices/appendix-l.md

@@ -1,0 +1,452 @@
+# Chapter 35: Qwen — Multilingual, Long-Context, and the Full Model Family
+
+> *"Alibaba's Qwen family is the most deployment-tested multilingual model stack outside of the US hyperscalers — 30+ languages, 0.5B to 72B parameters, with vision and audio variants all from one architecture."*
+
+---
+
+**What you will understand after this chapter:**
+- How Qwen's architecture differs from Llama (tokenizer, attention, positional encoding)
+- How to choose the right Qwen size for a given workload and budget
+- Multilingual serving challenges: tokenizer differences, language-specific batching
+- How to serve Qwen2.5/Qwen3 efficiently with vLLM and llama.cpp
+
+**What you need first:**
+- Chapter 3 (Tokens and Batching), Chapter 10 (Quantization), Chapter 14 (vLLM Knobs)
+
+---
+
+## 35.1 The Qwen Family
+
+Qwen (通义千问, Tongyi Qianwen) is Alibaba DAMO Academy's large language model family. Since its first public release in September 2023, Qwen has evolved through three major generations:
+
+```
+  Qwen Family Timeline
+  
+  Qwen (2023-09): 7B/14B/72B, bilingual (Chinese+English)
+  Qwen1.5 (2024-02): 0.5B–110B, multilingual, GQA
+  Qwen2 (2024-06): 0.5B–72B, 30+ languages, improved context
+  Qwen2.5 (2024-09): 0.5B–72B + MoE 57B-A14B/235B-A22B, 128K ctx
+  Qwen3 (2025-04): 0.6B–235B, thinking/non-thinking modes, MoE
+  
+  Specialized variants:
+  Qwen-VL: vision-language (images + text)
+  Qwen-Audio: audio understanding
+  Qwen-Coder: code generation
+  QwQ: reasoning (RL-trained, like DeepSeek-R1)
+```
+
+### 35.1.1 Architecture Overview
+
+Qwen2.5 follows a standard transformer architecture with these specific choices:
+
+```
+  Qwen2.5-72B Architecture
+  ┌──────────────────────────────────────────────────────────────┐
+  │ Embedding layer: vocab=152,064 tokens (BPE, SentencePiece)  │
+  ├──────────────────────────────────────────────────────────────┤
+  │ 80 × Transformer blocks:                                     │
+  │   ┌─────────────────────────────────────────────────────┐   │
+  │   │ RMSNorm → GQA (64 Q heads, 8 KV heads, d_h=128)    │   │
+  │   │ RoPE positional encoding (θ=1,000,000)              │   │
+  │   │ → FFN: SwiGLU (d_model=8192, d_ffn=29,568)         │   │
+  │   │ → RMSNorm                                           │   │
+  │   └─────────────────────────────────────────────────────┘   │
+  ├──────────────────────────────────────────────────────────────┤
+  │ Output: RMSNorm → Linear (8192 → 152,064) → logits          │
+  └──────────────────────────────────────────────────────────────┘
+```
+
+Key architectural choices vs. Llama 3.1 70B:
+
+| Feature | Qwen2.5-72B | Llama 3.1 70B |
+|---|---|---|
+| Vocab size | 152,064 | 128,256 |
+| Q heads | 64 | 64 |
+| KV heads (GQA) | 8 | 8 |
+| Context length | 131,072 | 131,072 |
+| RoPE base θ | 1,000,000 | 500,000 |
+| FFN type | SwiGLU | SwiGLU |
+| Tie embeddings | No | No |
+
+Both are remarkably similar architecturally — the main difference is the tokenizer and training data composition.
+
+---
+
+## 35.2 The Qwen Tokenizer — Why It Matters
+
+Qwen uses a tiktoken-based BPE tokenizer with a vocabulary of 152,064 tokens. This is 24k tokens larger than Llama 3.1's vocabulary.
+
+### 35.2.1 Multilingual Tokenization Efficiency
+
+The large vocabulary includes dedicated tokens for Chinese characters, Japanese kanji, Korean hangul, and common multilingual subwords:
+
+```
+WORKED EXAMPLE 35.1 — Token Count Comparison
+─────────────────────────────────────────────────────────────────────
+Text: "人工智能改变世界" (Chinese: "AI changes the world", 8 characters)
+
+Llama 3.1 tokenizer (128k vocab, less Chinese coverage):
+  Tokens: ["人", "工", "智", "能", "改", "变", "世", "界"] → 8 tokens
+  (Each character may be its own token due to limited Chinese vocab)
+
+Qwen2.5 tokenizer (152k vocab, strong Chinese coverage):
+  Tokens: ["人工智能", "改变", "世界"] → 3 tokens
+  (Multi-character chunks recognized as single tokens)
+
+Implication: Same Chinese text = 2.7× fewer Qwen tokens
+  → 2.7× less KV cache for Chinese conversations
+  → 2.7× higher effective throughput per user turn
+─────────────────────────────────────────────────────────────────────
+```
+
+This tokenization efficiency is why Qwen is often faster in practice for multilingual workloads despite similar architectural specifications.
+
+### 35.2.2 Special Tokens for Chat Format
+
+Qwen uses specific chat template tokens:
+```
+<|im_start|>system
+You are a helpful assistant.
+<|im_end|>
+<|im_start|>user
+What is the capital of France?
+<|im_end|>
+<|im_start|>assistant
+```
+
+These differ from Llama's `[INST]`/`[/INST]` format. When using vLLM or llama.cpp, always use the model's built-in chat template:
+```python
+from transformers import AutoTokenizer
+tok = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-72B-Instruct")
+prompt = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+```
+
+---
+
+## 35.3 The Full Qwen Size Chart
+
+```
+  Qwen2.5 Family — Choose by Workload
+  
+  Size        Params  Active   Layers  d_model  Min VRAM  Use case
+  ─────────────────────────────────────────────────────────────────
+  0.5B        494M    494M      28     896      1 GB      Edge, classification
+  1.5B        1.54B   1.54B     28     1,536    3 GB      Simple chat, IoT
+  3B          3.09B   3.09B     36     2,048    6 GB      Assistant on device
+  7B          7.07B   7.07B     28     3,584   14 GB      Strong assistant (RTX 3090)
+  14B         14.7B   14.7B     48     5,120   28 GB      Professional quality (2×A100)
+  32B         32.5B   32.5B     64     5,120   64 GB      Near-frontier (A100 80G)
+  72B         72.7B   72.7B     80     8,192  144 GB      Frontier (2× H100)
+  57B-A14B MoE 57.4B  14.3B     28     3,584  114 GB      Quality at 14B compute
+  235B-A22B MoE 235B  22.0B     94     4,096  470 GB      Frontier at 22B compute
+```
+
+```
+WORKED EXAMPLE 35.2 — Choosing the Right Qwen Size
+─────────────────────────────────────────────────────────────────────
+Scenario: Customer support chatbot, English+Chinese, response quality
+          needs to match GPT-3.5-turbo, budget: 2× A10G (24GB each)
+
+Available VRAM: 2 × 24 GB = 48 GB
+Budget-maximizing choice:
+
+Qwen2.5-32B (INT4/AWQ): 32.5B × 0.5 bytes = 16.25 GB → fits on 1 GPU
+Qwen2.5-32B (BF16):     32.5B × 2 bytes   = 65 GB   → needs 2 GPUs but exceeds 48GB
+Qwen2.5-14B (BF16):     14.7B × 2 bytes   = 29.4 GB → fits on 1× A10G ✓
+
+Best choice: Qwen2.5-14B-Instruct, BF16, single A10G
+  or: Qwen2.5-32B-Instruct-AWQ on 1× A10G (better quality, same cost)
+─────────────────────────────────────────────────────────────────────
+```
+
+---
+
+## 35.4 Qwen2.5 MoE Variants
+
+Qwen2.5-57B-A14B is a 57B parameter MoE model that activates only 14B parameters per token:
+
+```
+  Qwen2.5-57B-A14B MoE Architecture
+  
+  ┌──────────────────────────────────────────────────────────────┐
+  │ Attention layers: standard GQA (dense, not MoE)              │
+  ├──────────────────────────────────────────────────────────────┤
+  │ FFN layers: MoE                                              │
+  │   64 experts, top-8 routing (vs DeepSeek's 256, top-2)       │
+  │   Each expert: 1/8 of dense FFN size                         │
+  │   Active per token: 8 experts × (1/8 FFN) = 1 full FFN      │
+  └──────────────────────────────────────────────────────────────┘
+  
+  Memory:    57B × 2 bytes = 114 GB (still needs 2× H100)
+  Compute:   14B active → similar throughput to 14B dense
+  Quality:   comparable to Qwen2.5-72B on many benchmarks
+```
+
+---
+
+## 35.5 Serving Qwen with vLLM
+
+### 35.5.1 Standard Deployment
+
+```bash
+# Qwen2.5-7B-Instruct (single GPU)
+vllm serve Qwen/Qwen2.5-7B-Instruct \
+    --max-model-len 32768 \
+    --gpu-memory-utilization 0.85
+
+# Qwen2.5-72B-Instruct (multi-GPU)
+vllm serve Qwen/Qwen2.5-72B-Instruct \
+    --tensor-parallel-size 4 \
+    --max-model-len 131072 \
+    --enable-chunked-prefill
+
+# Qwen2.5-72B-Instruct-GPTQ-Int4 (fewer GPUs)
+vllm serve Qwen/Qwen2.5-72B-Instruct-GPTQ-Int4 \
+    --tensor-parallel-size 2 \
+    --quantization gptq \
+    --max-model-len 131072
+```
+
+### 35.5.2 Multilingual Batch Considerations
+
+When mixing Chinese and English requests, token lengths can differ dramatically:
+
+```python
+# Chinese text tokenizes 2-3× more efficiently in Qwen
+# This creates uneven batch sizes — configure max-padded-len accordingly
+
+from vllm import LLM, SamplingParams
+
+llm = LLM(
+    model="Qwen/Qwen2.5-7B-Instruct",
+    max_model_len=8192,
+    # For multilingual: allow longer decoded lengths
+    # Chinese questions often need longer responses
+)
+
+# Mixed-language batch
+prompts_zh = ["请解释量子计算的原理"]   # Chinese
+prompts_en = ["Explain quantum computing"]  # English
+
+sampling = SamplingParams(
+    temperature=0.7,
+    max_tokens=512,
+)
+outputs = llm.generate(prompts_zh + prompts_en, sampling)
+```
+
+### 35.5.3 Qwen3 Thinking Mode
+
+Qwen3 introduces a "thinking" toggle (similar to DeepSeek-R1's reasoning mode):
+
+```python
+# Enable thinking mode for complex reasoning
+messages = [{"role": "user", "content": "Solve step by step: ..."}]
+
+# With thinking (longer, more accurate for complex problems)
+sampling_think = SamplingParams(
+    temperature=0.6,
+    max_tokens=8192,       # allow long reasoning chain
+    stop=["<|im_end|>"],
+)
+
+# Without thinking (faster, good for simple queries)
+sampling_fast = SamplingParams(
+    temperature=0.7,
+    max_tokens=512,
+)
+```
+
+---
+
+## 35.6 Serving Qwen with llama.cpp
+
+```bash
+# Download Qwen2.5-7B-Instruct Q4_K_M GGUF
+huggingface-cli download Qwen/Qwen2.5-7B-Instruct-GGUF \
+    --include "qwen2.5-7b-instruct-q4_k_m.gguf" --local-dir ./models
+
+# Run with llama.cpp
+./build/bin/llama-cli \
+    -m ./models/qwen2.5-7b-instruct-q4_k_m.gguf \
+    -n 512 \
+    -c 16384 \
+    --chat-template qwen \    # ← important: use Qwen chat format
+    -p "You are a helpful assistant." \
+    --in-prefix "<|im_start|>user\n" \
+    --in-suffix "<|im_end|>\n<|im_start|>assistant\n"
+
+# Server mode for multi-user
+./build/bin/llama-server \
+    -m ./models/qwen2.5-7b-instruct-q4_k_m.gguf \
+    -c 16384 \
+    --chat-template qwen \
+    --port 8080 \
+    -np 4   # 4 parallel slots
+```
+
+`[COMMON TRAP]` Not specifying `--chat-template qwen` results in garbled output because Qwen's `<|im_start|>` tokens get decoded incorrectly. Always explicitly set the template for Qwen models.
+
+---
+
+## 35.7 KV Cache Budget for Qwen2.5
+
+```
+WORKED EXAMPLE 35.3 — KV Cache Budget for Qwen2.5-72B
+─────────────────────────────────────────────────────────────────────
+Architecture: n_layers=80, n_kv_heads=8, head_dim=128, dtype=BF16
+KV per token: 2 × 80 × 8 × 128 × 2 = 327,680 bytes (320 KB)
+
+Hardware: 2× H100 80GB (160 GB total)
+  Model weights (BF16): 72.7B × 2 = 145.4 GB
+  Available for KV:     160 - 145.4 = 14.6 GB (after 90% factor: 13.1 GB)
+
+At 32K context:
+  KV per seq:  32,000 × 320 KB = 10.0 GB
+  Max sequences: 13.1 / 10.0 = 1 (single sequence at 32K context!)
+
+Recommendation for 32K+ context: use INT8 KV cache
+  INT8 KV per token: 320 KB / 2 = 160 KB
+  KV per seq at 32K: 5.0 GB
+  Max sequences: 13.1 / 5.0 = 2 sequences
+
+Or use Qwen2.5-72B-Instruct-GPTQ-Int4:
+  Model weights: 72.7B × 0.5 = 36.4 GB
+  Available for KV: 160 - 36.4 = 123.6 GB
+  Max sequences at 32K: 123.6 / 10.0 = 12 sequences ✓
+─────────────────────────────────────────────────────────────────────
+```
+
+---
+
+## 35.8 Qwen-VL and Qwen2.5-VL — The Vision Stack
+
+Qwen's vision-language models share the same language backbone as the text models,
+with a vision encoder and projection layer grafted on. Chapter 29 covers the VLM
+mechanics in depth; this section covers Qwen-specific deployment decisions.
+
+### 35.8.1 Qwen2.5-VL Architecture Differences
+
+Qwen2.5-VL introduces two serving-relevant changes vs. Qwen2-VL:
+
+**Window attention in the ViT:**
+The vision encoder uses sliding window self-attention within each row of the image.
+Full self-attention only runs every 4 encoder blocks. This reduces ViT compute from
+O(N²) to approximately O(N × W) where W is the window size, enabling processing of
+images up to 4K resolution without quadratic cost.
+
+**Unified image/video representation:**
+Images are treated as single-frame videos. A 1920×1080 image and a 2-second 960×540
+clip at 1fps are processed identically — through the same temporal token budget.
+
+```
+  Qwen2.5-VL token budget (image):
+    Resolution    Tokens (approx)   Window attn saving
+    336×336       256               60% vs. naive
+    672×672       784               65%
+    1080×1080     1,568             70%
+    1920×1080     2,496             72%
+```
+
+### 35.8.2 Serving Qwen2.5-VL Sizes
+
+```
+  Model              VRAM    KV/img(1080p)   Use case
+  ─────────────────────────────────────────────────────────
+  Qwen2.5-VL-3B      6 GB    200 MB          Edge / laptop
+  Qwen2.5-VL-7B      16 GB   200 MB          Single-GPU API server
+  Qwen2.5-VL-32B     80 GB   400 MB          High-accuracy production
+  Qwen2.5-VL-72B     160 GB  400 MB          Best quality, 2× H100
+```
+
+**vLLM configuration:**
+
+```bash
+# 7B — single H100 or A100 (40 GB)
+vllm serve Qwen/Qwen2.5-VL-7B-Instruct \
+    --dtype bfloat16 \
+    --max-model-len 32768 \
+    --limit-mm-per-prompt "image=10,video=3" \
+    --enable-prefix-caching \
+    --gpu-memory-utilization 0.90
+
+# 72B — 2× H100, tensor parallel
+vllm serve Qwen/Qwen2.5-VL-72B-Instruct \
+    --dtype bfloat16 \
+    --tensor-parallel-size 2 \
+    --max-model-len 32768 \
+    --limit-mm-per-prompt "image=5,video=1" \
+    --gpu-memory-utilization 0.90
+```
+
+### 35.8.3 Multi-Image Document Workflows
+
+Qwen2.5-VL-72B scores state-of-the-art on DocVQA and ChartQA benchmarks (2025).
+For document processing (PDFs, spreadsheets, presentations):
+
+```python
+import openai, base64
+from pathlib import Path
+
+client = openai.OpenAI(base_url="http://localhost:8000/v1", api_key="none")
+
+def pdf_page_to_b64(page_path: str) -> str:
+    return base64.b64encode(Path(page_path).read_bytes()).decode()
+
+# Send a multi-page document
+response = client.chat.completions.create(
+    model="Qwen/Qwen2.5-VL-7B-Instruct",
+    messages=[{
+        "role": "user",
+        "content": [
+            # Send up to 10 pages (limit-mm-per-prompt="image=10")
+            {"type": "image_url",
+             "image_url": {"url": f"data:image/png;base64,{pdf_page_to_b64('page_1.png')}"}},
+            {"type": "image_url",
+             "image_url": {"url": f"data:image/png;base64,{pdf_page_to_b64('page_2.png')}"}},
+            {"type": "text",
+             "text": "Summarize the key financial figures from these pages."},
+        ],
+    }],
+    max_tokens=1024,
+)
+```
+
+---
+
+## 35.9 Chapter Summary
+
+Qwen's strengths: the widest model size range (0.5B–235B) from a single architecture family, the most efficient multilingual tokenizer for CJK languages (2–3× fewer tokens vs. Llama for Chinese), production-quality MoE variants, and the Qwen2.5-VL series for multimodal workloads.
+
+Key serving rules: always specify `--chat-template qwen` in llama.cpp; use GPTQ-Int4 for 72B on 2× H100; leverage Qwen's tokenization efficiency for Chinese workloads; enable `--enable-prefix-caching` for repeated-image VLM workloads.
+
+### Where We Go Next
+
+Chapter 36 covers Kimi — Moonshot AI's production system designed specifically for ultra-long contexts (up to 1M tokens), and Moon-Cache, their hierarchical KV caching system.
+
+
+---
+
+## Chapter Summary
+
+- **Qwen model family**: Alibaba's production model series ranging from 0.5B to 72B parameters; variants include Qwen-VL (vision), Qwen-Coder (code), and QwQ (reasoning).
+- **Long context support**: Qwen2.5 models support 128K context natively using YaRN RoPE interpolation; serving requires `--max-model-len 131072` and sufficient KV cache budget.
+- **Multilingual performance**: Qwen models are trained on a higher fraction of Chinese and multilingual data than LLaMA; tokeniser vocabulary (152K) is significantly larger.
+- **GQA architecture**: Qwen2.5 uses grouped query attention with 8 KV heads for most sizes, significantly reducing KV cache vs full MHA.
+- **Model family engineering**: Qwen publishes intermediate checkpoints (0.5B, 1.5B, 3B, 7B, 14B, 32B, 72B) enabling cost-quality router construction across the entire family.
+- **vLLM serving**: Qwen2.5 models use standard vLLM configuration; `--trust-remote-code` is not required for Qwen2.5; FP8 quantization is supported on H100.
+- **Qwen-VL**: uses a ViT encoder with 2D RoPE for image patches; visual tokens are 256–1024 per image depending on resolution.
+
+---
+
+## Self-Check Questions
+
+1. Qwen2.5-72B uses 8 GQA KV heads and d_k = 128 with 80 transformer layers. Compare the KV cache memory per token versus a standard MHA model with 64 KV heads at the same d_k. *(Section 35.2)*
+
+2. Qwen2.5 has a vocabulary of 152 064 tokens. LLaMA-3 has 128 256. For a Chinese-language prompt of 500 characters, estimate the token count for each tokeniser and explain the difference. *(Section 35.3)*
+
+3. You are building a cost router over the Qwen family (7B, 14B, 32B, 72B). For a request mix that is 60% simple queries, 30% medium, and 10% complex, design a two-stage cascade using only two models. *(Section 35.5)*
+
+4. Qwen-VL processes a 1024×1024 image with a ViT encoder that produces 1024 visual tokens. A chat session has 5 images. Compute the total token count and whether this fits in a 32K context window. *(Section 35.6)*
+
+5. `--rope-scaling '{"type":"yarn","factor":4.0}'` is required to serve Qwen2.5 at 128K context. What does factor 4.0 mean, and what perplexity degradation should you expect at position 100K vs position 1K? *(Section 35.4)*
