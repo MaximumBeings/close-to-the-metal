@@ -513,6 +513,43 @@ This is why KV cache management is a first-class engineering problem.
 
 ---
 
+### 4.4.6 The Decode Rhythm — What to Notice `[ESSENTIAL]`
+
+Having traced the prefill and both decode steps in detail, the following observations capture the invariants that hold across **every** attention variant in this chapter:
+
+```text
+1. Prefill fills the first N_prefill K/V rows at once (batch computation).
+2. Decode appends exactly one new K row and one new V row per predicted token.
+3. The newest query is always shape 1 × d_head — a single vector.
+4. K_cache grows from N_prefill × d_head to (N_prefill + t) × d_head at decode step t.
+5. The score vector grows from 1 × (N_prefill+1) to 1 × (N_prefill+t+1).
+6. The context vector stays shape 1 × d_head — always the same output shape.
+7. The multiplication pattern never changes:
+
+   q_new @ K_cache^T       → scores   (1 × N)
+   softmax(scores / √d)    → weights  (1 × N)
+   weights @ V_cache       → context  (1 × d_head)
+
+8. MHA, MQA, GQA, MLA, and sparse attention modify what K/V state exists
+   and how it is read, but this basic decode rhythm remains the anchor.
+```
+
+The table below tracks the cache state across all six decode steps:
+
+| Step | New token | Cache size (tokens) | K_cache shape (per head) | Score vector shape |
+|------|-----------|---------------------|--------------------------|-------------------|
+| 0    | (prefill) | 4                   | 4 × 2                    | 1 × 4             |
+| 1    | bright    | 5                   | 5 × 2                    | 1 × 5             |
+| 2    | and       | 6                   | 6 × 2                    | 1 × 6             |
+| 3    | sunny     | 7                   | 7 × 2                    | 1 × 7             |
+| 4    | with      | 8                   | 8 × 2                    | 1 × 8             |
+| 5    | clear     | 9                   | 9 × 2                    | 1 × 9             |
+| 6    | skies     | 10                  | 10 × 2                   | 1 × 10            |
+
+The context vector dimension never changes — `1 × 2` throughout. Only the **cost of computing it** grows, because `K_cache^T` gains one more column per step.
+
+---
+
 ## 4.5 The KV Cache — Why It Exists `[ESSENTIAL]`
 
 The autoregressive constraint says: to generate token `t`, the model must attend to all tokens `0, 1, …, t-1`. Naïvely this means recomputing K and V for all past tokens at every step. For a 1000-token context, step 1000 would recompute 999 previous K/V pairs — a quadratic total cost.
@@ -764,6 +801,46 @@ bytes = 2(K+V) × N × n_kv_heads × d_head × n_layers × bytes_per_element
 
 For MLA replace `n_kv_heads × d_head` with `latent_dim`.
 
+### Real-Model KV Cache Calculator
+
+Scale the same formula to production numbers. Let:
+
+```
+B  = batch size (concurrent users)
+N  = context length (tokens)
+Hkv = number of K/V heads (or groups)
+D  = head dimension (d_head)
+L  = number of transformer layers
+T  = dtype bytes (2 for BF16/FP16, 4 for FP32)
+```
+
+**Total cache bytes (dense variants — MHA, GQA, MQA):**
+```
+cache_bytes = B × 2(K+V) × N × Hkv × D × L × T
+```
+
+**Bytes read per decode step (cost that drives latency):**
+```
+read_bytes_dense  = 2 × N × Hkv × D × L × T        (dense: reads all N rows)
+read_bytes_sparse = 2 × S × Hkv × D × L × T        (sparse: reads only S rows)
+```
+
+**Key insight:**
+```
+GQA / MQA / MLA → reduce what is STORED  (cache_bytes shrinks)
+Sparse attention → reduces what is READ   (read_bytes shrinks)
+Production systems often combine both.
+```
+
+**Example — LLaMA-3 70B at 128K context, batch=1, BF16:**
+```
+MHA  (Hkv=64, D=128, L=80): 2 × 131072 × 64 × 128 × 80 × 2 = 274 GB
+GQA  (Hkv=8,  D=128, L=80): 2 × 131072 × 8  × 128 × 80 × 2 =  34 GB
+MQA  (Hkv=1,  D=128, L=80): 2 × 131072 × 1  × 128 × 80 × 2 = 4.3 GB
+```
+
+GQA (the actual LLaMA-3 70B configuration) saves `8×` vs. the MHA baseline — the difference between needing 3× A100s for cache alone and fitting comfortably on one.
+
 ---
 
 ## 4.11 vLLM and llama.cpp API `[PRACTICAL]`
@@ -838,6 +915,50 @@ MQA is largely obsolete in current models. GQA is the standard. MLA is unique to
 
 ---
 
+## 4.13 Attention Variant Quick Reference
+
+Use this as your mental model after working through the walkthroughs. The variants differ less in the attention equation itself and more in **what they store, share, compress, or skip**.
+
+```text
+MHA (Multi-Head Attention)
+  Max quality baseline — no sharing or compression.
+  Hkv = Hq
+  Largest KV cache. Every head owns its own K and V rows.
+
+MQA (Multi-Query Attention)
+  All query heads share a single K/V head.
+  Hkv = 1
+  Smallest dense K/V cache (Hq× cheaper than MHA).
+  Quality drops on tasks requiring diverse key-value patterns.
+
+GQA (Grouped-Query Attention)
+  Query heads share K/V by group (G query heads per KV head).
+  1 < Hkv < Hq
+  Practical quality/memory compromise. Current standard (LLaMA-3, Mistral, Qwen2).
+
+MLA (Multi-Head Latent Attention)
+  Store a compressed latent vector C_KV; reconstruct full K/V at attention time.
+  Cache size = N × latent_dim (not N × Hkv × D).
+  Attacks cache size without merely collapsing heads. DeepSeek-V2/V3 frontier.
+
+Sparse / Sliding-Window Attention
+  Attend to only a selected subset of past token positions.
+  Cache size may stay the same, but rows READ per step shrinks to S << N.
+  Mistral-7B: W=4096, reads 25× fewer rows than full-context at N=100K.
+```
+
+**Which variant is which model?**
+
+| Observation | What it tells you |
+|---|---|
+| `n_q_heads == n_kv_heads` | MHA — full independent heads |
+| `n_kv_heads == 1` | MQA — single shared head |
+| `1 < n_kv_heads < n_q_heads` | GQA — grouped sharing |
+| Cache stores `latent_dim` instead of `Hkv × D` | MLA |
+| Model has `sliding_window` in config | Sparse/SWA |
+
+---
+
 ## Chapter Summary
 
 - **Attention** is a query-key-value lookup: every output token is a weighted sum of value vectors, with weights determined by query-key similarity.
@@ -862,4 +983,58 @@ MQA is largely obsolete in current models. GQA is the standard. MLA is unique to
 4. Under MQA, Q Head 3 attends to the same KV cache as Q Head 0, but produces a completely different softmax distribution (§4.6.2). Explain mechanically why this is possible.
 
 5. DeepSeek-V2 uses MLA with `latent_dim=512` and `d_model=5120`, `n_kv_heads=128`, `d_head=128`, 60 layers, BF16. (a) Compute the MHA KV cache size for 128K tokens. (b) Compute the MLA KV cache size. (c) What is the compression ratio?
+
+6. In the toy setup (`N=10`, `D=2`, `Hq=4`, BF16, 1 layer), compute the FP16/BF16 KV cache bytes for MHA, GQA (`Hkv=2`), and MQA (`Hkv=1`).
+
+7. Using the toy MLA setup, compute the latent cache bytes when `N=10`, `C=2`, `dtype_bytes=2`, 1 layer.
+
+8. Reconstruct the final token's MLA key and value vectors given `C_KV = [1.5, 0.0]`, `W_UK = [[0.5, 0.0], [0.5, 1.0]]`, `W_UV = [[1.0, 0.0], [0.0, 1.0]]`.
+
+9. In GQA with `Hq=4` query heads and `Hkv=2` K/V groups, which query heads share each K/V group? Does Head 3's context vector equal Head 0's context vector? Explain why.
+
+10. A sparse attention pattern reads rows `{0, 6, 7, 8, 9}` (5 out of 10 tokens). If `N=8192` and sparse attention reads `S=1024` rows, what is the row-read reduction factor vs. dense attention?
+
+---
+
+## Worked Solutions
+
+**Q6 — Toy KV cache bytes (BF16):**
+```
+MHA: 1 × 2 × 10 × 4 × 2 × 1 × 2 = 320 bytes
+GQA: 1 × 2 × 10 × 2 × 2 × 1 × 2 = 160 bytes
+MQA: 1 × 2 × 10 × 1 × 2 × 1 × 2 =  80 bytes
+```
+GQA is exactly half of MHA; MQA is one quarter.
+
+**Q7 — MLA latent cache bytes:**
+```
+MLA: 1 × 10 × 2 × 1 × 2 = 40 bytes
+```
+MLA uses `40 bytes` vs. MHA's `320 bytes` — an 8× reduction even in this tiny toy example, without touching the number of query heads.
+
+**Q8 — MLA K/V reconstruction:**
+```
+K = C_KV @ W_UK = [1.5, 0.0] @ [[0.5, 0.0], [0.5, 1.0]]
+  = [1.5×0.5 + 0.0×0.5,  1.5×0.0 + 0.0×1.0]
+  = [0.75, 0.0]
+
+V = C_KV @ W_UV = [1.5, 0.0] @ [[1.0, 0.0], [0.0, 1.0]]
+  = [1.5×1.0 + 0.0×0.0,  1.5×0.0 + 0.0×1.0]
+  = [1.5, 0.0]
+```
+Only 2 floats are stored per token (`C_KV`), but 4 floats of K+V are reconstructed at decode time. The compute cost is 2 small matrix multiplications; the memory savings is proportional to the compression ratio.
+
+**Q9 — GQA group assignment:**
+```
+Group 0  →  Query heads 0 and 1  (first half)
+Group 1  →  Query heads 2 and 3  (second half)
+```
+Head 3 does **not** produce the same context vector as Head 0 even though both read Group 1's shared K/V, because each head uses its own `W_Q`. Different query vectors produce different attention weights over the same keys, leading to different context vectors. This is identical to the MQA example in §4.6.2 where Head 3 attends heavily to "is" while Head 0 attends heavily to "next".
+
+**Q10 — Sparse attention row-read reduction:**
+```
+Toy:       5 rows read out of 10  →  2.0× reduction
+Real-model: 1024 rows read out of 8192  →  8.0× reduction
+```
+Sparse attention's benefit compounds with sequence length: at `N=128K` with `S=4096`, the reduction reaches `32×`. Unlike GQA/MQA, sparse attention does not reduce the **size** of the stored cache — it reduces the **bandwidth cost** of reading that cache at each decode step.
 
