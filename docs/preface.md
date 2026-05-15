@@ -65,7 +65,7 @@ covers the techniques that separate baseline deployments from optimized ones. Lo
 **Part V: The Model Zoo (Chapters 34–40)**
 examines production model families and the architectural decisions behind them: DeepSeek (MLA, MoE, FP8 at scale), Qwen (multilingual, long-context, model family engineering), Kimi (Moon-Cache hierarchical KV storage), and Nemotron (TRT-LLM, FP8, 2:4 sparsity). Chapter 38 synthesises the entire book into the complete $1.2M → $108K production architecture. Chapter 39 covers evaluation and regression testing. Chapter 40 documents the vLLM V1 architecture — the three-process ZMQ design, the new hash-based KV block deduplication, and the multi-step scheduler that makes V1 meaningfully faster than V0 at production scale.
 
-**Appendices A–K** provide reference material designed for repeated use: mathematical foundations (A), installation guides (B), vLLM EngineArgs reference (C), llama.cpp flag reference (D), production deployment templates (E), benchmarking scripts (F), C++ build patterns (G), a glossary of 85+ terms including all new concepts from the "b" chapters (H), a curated bibliography of 40+ papers (I), an introduction to CUDA C++ for inference engineers (J), and an operational decision tree for diagnosing high latency, low throughput, OOM errors, and other common production failure modes (K).
+**Appendices A–O** provide reference material designed for repeated use: mathematical foundations (A), installation guides (B), vLLM EngineArgs reference (C), llama.cpp flag reference (D), production deployment templates (E), benchmarking scripts (F), C++ build patterns (G), a glossary of 85+ terms including all new concepts from the "b" chapters (H), a curated bibliography of 40+ papers (I), an introduction to CUDA C++ for inference engineers (J), an operational decision tree for diagnosing high latency, low throughput, OOM errors, and other common production failure modes (K), the TurboQuant online vector quantization addendum (L), a comprehensive deployment guide for Android and Apple Silicon (M), edge inference on Raspberry Pi and NVIDIA Jetson (N), and a full CI/CD pipeline guide for LLM inference systems — covering model registries, quality evaluation gates, canary deployments, and SDET safety testing (O).
 
 ---
 
@@ -151,6 +151,9 @@ If you are searching for a specific answer rather than reading linearly, use thi
 | **What does every llama.cpp CLI flag do?** | Appendix D |
 | **I want copy-paste production configs — Dockerfiles, YAML, nginx** | Appendix E |
 | **What are tiled GEMM, prefix scan, convolution in CUDA C++?** | Appendix J |
+| **How do I run llama.cpp on Android or Apple Silicon?** | Appendix M |
+| **How do I run llama.cpp on a Raspberry Pi or NVIDIA Jetson?** | Appendix N |
+| **How do I build a CI/CD pipeline for LLM inference — canary deploys, model eval gates, load testing?** | Appendix O |
 
 ---
 
