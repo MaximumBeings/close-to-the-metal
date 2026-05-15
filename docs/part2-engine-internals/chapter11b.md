@@ -818,4 +818,4 @@ attention computation for the surviving sequence?
 
 ---
 
-*End of Chapter 11b*
+*End of Chapter 11.5*

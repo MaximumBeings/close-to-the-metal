@@ -1,6 +1,6 @@
-# Code — Chapter 7b: Continuous Batching
+# Code — Chapter 7.5: Continuous Batching
 
-Companion code for **Chapter 7b: Continuous Batching — The Iteration-Level Scheduling Loop**.
+Companion code for **Chapter 7.5: Continuous Batching — The Iteration-Level Scheduling Loop**.
 
 Demos simulate static vs. continuous batching utilization, the full iteration-level
 scheduling loop, token budget admission control, prefill/decode interleave step-time,
@@ -13,7 +13,7 @@ scheduler efficiency metrics — all in pure Python/C++ with no GPU required.
 
 ```python
 """
-continuous_batching_demo.py — Chapter 7b: Continuous Batching
+continuous_batching_demo.py — Chapter 7.5: Continuous Batching
 
 Demos (all run without GPU — pure-Python simulation):
   Demo 1: Static batching GPU utilization vs. continuous batching
@@ -489,7 +489,7 @@ if __name__ == "__main__":
     demo_max_num_seqs()
     demo_scheduler_metrics()
     print(f"\n{'='*70}")
-    print("All Chapter 7b demos passed.")
+    print("All Chapter 7.5 demos passed.")
     print(f"{'='*70}")
 ```
 
@@ -504,7 +504,7 @@ python continuous_batching_demo.py
 
 ```cpp
 /*
- * continuous_batching_demo.cpp — Chapter 7b: Continuous Batching
+ * continuous_batching_demo.cpp — Chapter 7.5: Continuous Batching
  *
  * Demos:
  *   Demo 1: Static batching utilization vs. continuous batching
@@ -935,7 +935,7 @@ int main() {
     demo_scheduler_metrics();
 
     std::cout << "\n" << std::string(70, '=') << "\n";
-    std::cout << "All Chapter 7b demos passed.\n";
+    std::cout << "All Chapter 7.5 demos passed.\n";
     std::cout << std::string(70, '=') << "\n";
     return 0;
 }

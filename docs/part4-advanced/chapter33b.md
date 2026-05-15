@@ -294,7 +294,7 @@ The companion code (`engine_comparison_demo.py` / `.cpp`) implements:
 ### Key Worked Numbers (Python output)
 
 ```
-=== Engine Comparison Demo — Chapter 33b ===
+=== Engine Comparison Demo — Chapter 33.5 ===
 
 [1] 5-Axis Scoring (70B, 4×H100, structured output workload):
     vLLM     BF16:  score=3.2  (hw=5, struct=2, deploy=4, tput=3, quant=4)

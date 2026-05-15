@@ -16,7 +16,7 @@ FLOPs divided by bytes accessed from memory for a given operation. The ratio det
 One of $n_{heads}$ parallel attention mechanisms in a multi-head attention layer. Each head learns to attend to different aspects of the input. Heads are computed in parallel and concatenated. → Chapter 5
 
 **Attention Sink**
-The phenomenon (StreamingLLM, 2023) where the first few tokens of a sequence accumulate disproportionately high attention weights regardless of content; these tokens must be kept in the KV cache even during eviction. Exploited by StreamingLLM to enable infinite-length generation by always retaining sink tokens plus a sliding window of recent tokens. → Chapter 11b
+The phenomenon (StreamingLLM, 2023) where the first few tokens of a sequence accumulate disproportionately high attention weights regardless of content; these tokens must be kept in the KV cache even during eviction. Exploited by StreamingLLM to enable infinite-length generation by always retaining sink tokens plus a sliding window of recent tokens. → Chapter 11.5
 
 **Automatic Prefix Caching (APC)**
 vLLM's default-on feature that deduplicates KV cache blocks with identical token sequences using a hash-based trie, eliminating redundant prefill computation. APC is enabled by default in vLLM V1; requests sharing a common prefix (e.g., a system prompt) reuse the cached KV blocks without re-running the prefill. → Chapter 11
@@ -105,7 +105,7 @@ In MoE models, the fraction of tokens routed to each expert. Ideally uniform (ba
 Attention algorithm that fuses the softmax and weighted average into a single GPU kernel, computing attention in tiles to avoid materializing the $O(L^2)$ attention score matrix in HBM. Reduces memory complexity from $O(L^2)$ to $O(L)$. → Chapter 5
 
 **Flash Decoding**
-A technique (Dao et al., 2023) that parallelizes the attention reduction over the key-value sequence dimension by splitting KV into partitions, computing partial log-sum-exp normalizers independently, and merging results. Particularly effective for single-query decode over long contexts because it exposes more parallelism than standard Flash Attention, which is limited by the query dimension. → Chapter 15b
+A technique (Dao et al., 2023) that parallelizes the attention reduction over the key-value sequence dimension by splitting KV into partitions, computing partial log-sum-exp normalizers independently, and merging results. Particularly effective for single-query decode over long contexts because it exposes more parallelism than standard Flash Attention, which is limited by the query dimension. → Chapter 15.5
 
 **FlashInfer**
 A high-performance attention kernel library that serves as vLLM's default attention backend (2025+), implementing Flash Decoding, paged attention, and CUDA graph-compatible interfaces. FlashInfer provides optimized kernels for both prefill and decode phases, with automatic dispatch based on batch shape and context length. → Chapter 5
@@ -149,7 +149,7 @@ Attention variant where multiple query heads share the same key/value heads. Red
 ## H
 
 **H2O (Heavy Hitter Oracle)**
-A KV cache eviction policy that retains tokens with the highest cumulative attention scores ("heavy hitters") plus a fixed set of recent tokens, evicting all others when the cache is full. Heavy hitters are identified by accumulating attention weight statistics during generation; tokens that have been attended to most across all past steps are deemed most important. → Chapter 11b
+A KV cache eviction policy that retains tokens with the highest cumulative attention scores ("heavy hitters") plus a fixed set of recent tokens, evicting all others when the cache is full. Heavy hitters are identified by accumulating attention weight statistics during generation; tokens that have been attended to most across all past steps are deemed most important. → Chapter 11.5
 
 **H100**
 NVIDIA Hopper architecture GPU with 80GB HBM3 memory, 3.35 TB/s bandwidth, 989 TFLOPS BF16, 1,979 TFLOPS FP8. The primary GPU for LLM serving as of 2024-2025. → Chapter 2
@@ -181,7 +181,7 @@ Time between successive output tokens after the first. Determined by decode spee
 Memory storing key and value tensors from past attention computations. Enables incremental decoding without recomputing all previous tokens. Memory grows linearly with sequence length × batch size × layers × KV heads. → Chapter 6
 
 **KV Cache Eviction**
-The process of removing KV blocks from the cache when it is full, to make room for new tokens in long-context generation. Policies include H2O (heavy hitter oracle), SnapKV (cluster-based compression), and StreamingLLM's attention-sink approach (keep sink tokens + sliding window). Eviction introduces approximation error; its impact on output quality depends on which tokens are dropped. → Chapter 11b
+The process of removing KV blocks from the cache when it is full, to make room for new tokens in long-context generation. Policies include H2O (heavy hitter oracle), SnapKV (cluster-based compression), and StreamingLLM's attention-sink approach (keep sink tokens + sliding window). Eviction introduces approximation error; its impact on output quality depends on which tokens are dropped. → Chapter 11.5
 
 **KV Compression**
 Techniques to reduce KV cache memory: GQA (fewer KV heads), quantization (FP8/INT8 KV), MLA (low-rank projection), offloading to DRAM/NVMe. → Chapters 6, 34, 36
@@ -297,7 +297,7 @@ Layer normalization variant using Root Mean Square normalization without mean su
 Cache that stores LLM responses indexed by semantic similarity (embedding similarity), not exact text match. Enables cache hits for semantically equivalent but differently worded questions. Hit rate: typically 60-80% for FAQ workloads. → Chapter 30
 
 **SnapKV**
-A KV cache compression method that clusters similar key vectors using a pooling window and retains only the cluster centroids, reducing KV cache size while preserving attention quality. SnapKV identifies "important" key positions by observing which positions receive high attention from the most recent query tokens, then retains those positions and discards the rest. → Chapter 11b
+A KV cache compression method that clusters similar key vectors using a pooling window and retains only the cluster centroids, reducing KV cache size while preserving attention quality. SnapKV identifies "important" key positions by observing which positions receive high attention from the most recent query tokens, then retains those positions and discards the rest. → Chapter 11.5
 
 **Shared Memory (CUDA)**
 On-chip SRAM on each GPU Streaming Multiprocessor. ~228KB per SM on H100. Much faster than HBM (bandwidth > 19 TB/s vs 3.35 TB/s for HBM). Flash Attention uses shared memory for its tiled computation. → Appendix J

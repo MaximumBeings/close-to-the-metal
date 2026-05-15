@@ -1,4 +1,4 @@
-# Code 03b — The Transformer Block
+# Code 3.5 — The Transformer Block
 
 ## Python — transformer_block_demo.py
 

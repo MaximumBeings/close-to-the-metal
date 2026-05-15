@@ -1,6 +1,6 @@
-# Code — Chapter 8b: CUDA Graphs
+# Code — Chapter 8.5: CUDA Graphs
 
-Companion code for **Chapter 8b: CUDA Graphs — Capture, Replay, and Production Latency**.
+Companion code for **Chapter 8.5: CUDA Graphs — Capture, Replay, and Production Latency**.
 
 All demos run without a physical GPU: they simulate the mechanics, costs, and
 latency trade-offs analytically so every reader can experiment.
@@ -11,7 +11,7 @@ latency trade-offs analytically so every reader can experiment.
 
 ```python
 """
-cuda_graphs_demo.py — Chapter 8b: CUDA Graphs
+cuda_graphs_demo.py — Chapter 8.5: CUDA Graphs
 
 Demos (all run without GPU — simulates the mechanics):
   Demo 1: CPU kernel-launch overhead model
@@ -372,7 +372,7 @@ def demo_graph_vs_eager():
 def main():
     bar = "=" * 70
     print(f"\n{bar}")
-    print("  Chapter 8b — CUDA Graphs (Python)")
+    print("  Chapter 8.5 — CUDA Graphs (Python)")
     print(f"{bar}")
 
     demo_cpu_launch_overhead()
@@ -403,7 +403,7 @@ python cuda_graphs_demo.py
 
 ```cpp
 /*
- * cuda_graphs_demo.cpp — Chapter 8b: CUDA Graphs
+ * cuda_graphs_demo.cpp — Chapter 8.5: CUDA Graphs
  *
  * Demos (no GPU required — models the mechanics):
  *   Demo 1: CPU kernel-launch overhead model
@@ -709,7 +709,7 @@ static void demo_full_profile() {
 
 int main() {
     printf("╔══════════════════════════════════════════════════════════════════════╗\n");
-    printf("║   Chapter 8b: CUDA Graphs (C++)                                      ║\n");
+    printf("║   Chapter 8.5: CUDA Graphs (C++)                                      ║\n");
     printf("╚══════════════════════════════════════════════════════════════════════╝\n");
 
     demo_cpu_launch_overhead();

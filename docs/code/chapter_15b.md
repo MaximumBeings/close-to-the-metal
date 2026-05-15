@@ -1,6 +1,6 @@
-# Code — Chapter 15b: Flash Decoding and Context Parallelism
+# Code — Chapter 15.5: Flash Decoding and Context Parallelism
 
-Companion code for **Chapter 15b: Flash Decoding, Context Parallelism, and Long-Context Serving**.
+Companion code for **Chapter 15.5: Flash Decoding, Context Parallelism, and Long-Context Serving**.
 
 Demos cover the sequence-length attention bottleneck, Flash Decoding's
 log-sum-exp partial merge (with numerical correctness verification),
@@ -12,7 +12,7 @@ context parallelism ring patterns, and latency projections up to 1M tokens.
 
 ```python
 """
-flash_decoding_demo.py — Chapter 15b: Flash Decoding and Context Parallelism
+flash_decoding_demo.py — Chapter 15.5: Flash Decoding and Context Parallelism
 No GPU required. All calculations from first principles.
 """
 from __future__ import annotations
@@ -53,7 +53,7 @@ def flash_decode_merge(partials):
     return out
 
 def demo_worked_example():
-    print(f"\n{'='*70}\nDEMO 1 — Worked Example 15b.2: Flash Decoding Merge\n{'='*70}")
+    print(f"\n{'='*70}\nDEMO 1 — Worked Example 15.5.2: Flash Decoding Merge\n{'='*70}")
     random.seed(42)
     d = 4; N = 16; P = 4
     q = [random.gauss(0,1) for _ in range(d)]
@@ -193,7 +193,7 @@ def demo_latency_projection():
 
 def main():
     print("\n" + "="*70)
-    print("  Chapter 15b — Flash Decoding and Context Parallelism (Python)")
+    print("  Chapter 15.5 — Flash Decoding and Context Parallelism (Python)")
     print("="*70)
     demo_worked_example()
     demo_speedup_model()
@@ -219,7 +219,7 @@ python flash_decoding_demo.py
 
 ```cpp
 /*
- * flash_decoding_demo.cpp — Chapter 15b: Flash Decoding and Context Parallelism
+ * flash_decoding_demo.cpp — Chapter 15.5: Flash Decoding and Context Parallelism
  * Compile: g++ -std=c++17 -O2 -o flash_decoding_demo flash_decoding_demo.cpp -lm
  */
 #include <algorithm>
@@ -483,7 +483,7 @@ static void demo_latency() {
 
 int main() {
     printf("╔══════════════════════════════════════════════════════════════════════╗\n");
-    printf("║   Chapter 15b: Flash Decoding and Context Parallelism (C++)          ║\n");
+    printf("║   Chapter 15.5: Flash Decoding and Context Parallelism (C++)          ║\n");
     printf("╚══════════════════════════════════════════════════════════════════════╝\n");
     demo_worked_example();
     demo_speedup_model();
@@ -492,7 +492,7 @@ int main() {
     demo_decision();
     demo_partition_memory();
     demo_latency();
-    printf("\n%s\nALL CHAPTER 15b DEMOS COMPLETED — ALL ASSERTIONS PASSED ✓\n%s\n\n",
+    printf("\n%s\nALL CHAPTER 15.5 DEMOS COMPLETED — ALL ASSERTIONS PASSED ✓\n%s\n\n",
            "══════════════════════════════════════════════════════════════════════",
            "══════════════════════════════════════════════════════════════════════");
     return 0;

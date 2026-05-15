@@ -1187,7 +1187,7 @@ Cost:
   - tokens outside the sparse pattern cannot directly influence this step
   - quality depends on the chosen pattern — wrong patterns hurt accuracy badly
   - does not reduce the amount of cache stored, only what is read per step
-  - implementation must handle masks and eviction carefully (see Ch 11b)
+  - implementation must handle masks and eviction carefully (see Ch 11.5)
 ```
 
 **Key distinction:** GQA/MQA/MLA reduce the *bytes stored* in the cache. Sparse attention reduces the *bytes read* per decode step. A production system can combine both: use GQA to shrink the cache footprint, then use sliding-window attention to cap the read bandwidth at each step.

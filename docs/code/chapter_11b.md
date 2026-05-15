@@ -1,6 +1,6 @@
-# Code — Chapter 11b: KV Cache Eviction
+# Code — Chapter 11.5: KV Cache Eviction
 
-Companion code for **Chapter 11b: KV Cache Eviction — Attention Sinks, H2O, and SnapKV**.
+Companion code for **Chapter 11.5: KV Cache Eviction — Attention Sinks, H2O, and SnapKV**.
 
 Demos implement attention-sink detection, H2O Heavy Hitter Oracle scoring,
 SnapKV clustering, token merging (CaM), and vLLM block-manager integration —
@@ -12,7 +12,7 @@ all in pure Python/C++ without requiring a running LLM.
 
 ```python
 """
-Chapter 11b — KV Cache Eviction and Compression
+Chapter 11.5 — KV Cache Eviction and Compression
 Companion code: kv_eviction_demo.py
 
 Demonstrates:
@@ -887,7 +887,7 @@ def demo7_llama_kv_shift():
 def main():
     print()
     print("╔══════════════════════════════════════════════════════════════════╗")
-    print("║  Chapter 11b — KV Cache Eviction and Compression                ║")
+    print("║  Chapter 11.5 — KV Cache Eviction and Compression                ║")
     print("║  Companion Code: kv_eviction_demo.py                            ║")
     print("╚══════════════════════════════════════════════════════════════════╝")
     print()
@@ -921,7 +921,7 @@ python kv_eviction_demo.py
 
 ```cpp
 /*
- * Chapter 11b — KV Cache Eviction and Compression
+ * Chapter 11.5 — KV Cache Eviction and Compression
  * Companion code: kv_eviction_demo.cpp
  *
  * Demonstrates:
@@ -1792,7 +1792,7 @@ static void demo7_llama_kv_shift() {
 int main() {
     std::cout << "\n";
     std::cout << "+" << std::string(68, '=') << "+\n";
-    std::cout << "|  Chapter 11b -- KV Cache Eviction and Compression               |\n";
+    std::cout << "|  Chapter 11.5 -- KV Cache Eviction and Compression               |\n";
     std::cout << "|  Companion Code: kv_eviction_demo.cpp                           |\n";
     std::cout << "+" << std::string(68, '=') << "+\n\n";
 

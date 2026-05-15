@@ -1,6 +1,6 @@
-# Chapter 33b — Code: Choosing Your Engine
+# Chapter 33.5 — Code: Choosing Your Engine
 
-Companion code for **Chapter 33b: Choosing Your Engine — SGLang, TRT-LLM, MLC-LLM, and Ollama**.
+Companion code for **Chapter 33.5: Choosing Your Engine — SGLang, TRT-LLM, MLC-LLM, and Ollama**.
 
 Both listings implement the same eight demos:
 
@@ -19,7 +19,7 @@ Both listings implement the same eight demos:
 
 ```python
 """
-engine_comparison_demo.py — Chapter 33b: Choosing Your Engine
+engine_comparison_demo.py — Chapter 33.5: Choosing Your Engine
 
 Implements:
   Demo 1: 5-axis scoring model for engine selection
@@ -233,7 +233,7 @@ def demo_radix_attention():
 
     r = radix_attention_savings(512, 128, 256, 100, 70.0)
     assert r["saving_pct"] > 70.0
-    print(f"\n  ✓ Worked Example 33b.1: 512-prefix, 100 users → {r['saving_pct']:.1f}% saving")
+    print(f"\n  ✓ Worked Example 33.5.1: 512-prefix, 100 users → {r['saving_pct']:.1f}% saving")
 
     print(f"\n  Formula: saving = (N-1) × prefix / (N × (prefix + user))")
     print(f"  At N→∞:  saving → prefix / (prefix + user)")
@@ -529,7 +529,7 @@ def demo_benchmark_matrix():
 def main():
     bar = "=" * 70
     print(f"\n{bar}")
-    print("  Chapter 33b — Choosing Your Engine (Python)")
+    print("  Chapter 33.5 — Choosing Your Engine (Python)")
     print(f"{bar}")
 
     demo_5axis_scoring()
@@ -556,7 +556,7 @@ if __name__ == "__main__":
 
 ```cpp
 /*
- * engine_comparison_demo.cpp — Chapter 33b: Choosing Your Engine
+ * engine_comparison_demo.cpp — Chapter 33.5: Choosing Your Engine
  *
  * Implements (mirrors engine_comparison_demo.py):
  *   Demo 1: 5-axis scoring model for engine selection
@@ -701,7 +701,7 @@ static void demo_radix_attention() {
     }
     auto r=radix_savings(512,128,100,70.0);
     assert(r.saving_pct>70.0);
-    printf("\n  ✓ Worked Example 33b.1: 512-prefix, 100 users → %.1f%% saving\n",r.saving_pct);
+    printf("\n  ✓ Worked Example 33.5.1: 512-prefix, 100 users → %.1f%% saving\n",r.saving_pct);
 
     printf("\n  Formula: saving = (N-1) × prefix / (N × (prefix + user))\n");
     for(auto[prefix,user]:std::vector<std::pair<int,int>>{{512,128},{256,512},{128,512}})
@@ -906,7 +906,7 @@ static void demo_benchmark_matrix(){
 
 int main(){
     printf("╔══════════════════════════════════════════════════════════════════════╗\n");
-    printf("║   Chapter 33b: Choosing Your Engine (C++)                            ║\n");
+    printf("║   Chapter 33.5: Choosing Your Engine (C++)                            ║\n");
     printf("╚══════════════════════════════════════════════════════════════════════╝\n");
 
     demo_5axis_scoring();
@@ -919,7 +919,7 @@ int main(){
     demo_benchmark_matrix();
 
     printf("\n%s\n","══════════════════════════════════════════════════════════════════════");
-    printf("ALL CHAPTER 33b DEMOS COMPLETED — ALL ASSERTIONS PASSED ✓\n");
+    printf("ALL CHAPTER 33.5 DEMOS COMPLETED — ALL ASSERTIONS PASSED ✓\n");
     printf("%s\n\n","══════════════════════════════════════════════════════════════════════");
     return 0;
 }

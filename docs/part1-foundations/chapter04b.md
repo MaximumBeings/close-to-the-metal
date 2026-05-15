@@ -903,7 +903,7 @@ Kernel optimisations:
   PagedAttention — KV cache memory management (Chapter 6)
   Prefix caching  — reuse shared prefix across users (Chapter 11)
   Quantisation    — INT8/FP8 weights and cache (Chapter 10)
-  Continuous batching — throughput (Chapter 7b)
+  Continuous batching — throughput (Chapter 7.5)
 ```
 
 **Hybrid architectures** (most layers Mamba or SSM, a few layers full attention) are emerging as the best of both worlds: Mamba layers for memory and throughput, full-attention layers for direct long-range retrieval. Representative models: Jamba (AI21), Zamba, and various research-grade Mamba-Attention hybrids.

@@ -195,7 +195,7 @@ seq_len < 32K:
     Pipeline KV communication behind compute.
 
 All long-context deployments:
-  → Consider KV eviction (Ch 11b) to cap working set size.
+  → Consider KV eviction (Ch 11.5) to cap working set size.
 ```
 
 ---

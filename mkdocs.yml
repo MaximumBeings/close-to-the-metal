@@ -122,23 +122,23 @@ nav:
     - "Code 01 — Two Engines": code/chapter_01.md
     - "Code 02 — Memory Landscapes": code/chapter_02.md
     - "Code 03 — Tokens and Batches": code/chapter_03.md
-    - "Code 03b — The Transformer Block": code/chapter_03b.md
+    - "Code 3.5 — The Transformer Block": code/chapter_03b.md
     - "Code 04 — Attention Mechanics": code/chapter_04.md
     - "Code 05 — Flash Attention": code/chapter_05.md
     - "Code 06 — PagedAttention": code/chapter_06.md
     - "Code 07 — The Scheduler": code/chapter_07.md
-    - "Code 07b — Continuous Batching": code/chapter_07b.md
+    - "Code 7.5 — Continuous Batching": code/chapter_07b.md
     - "Code 08 — Startup": code/chapter_08.md
-    - "Code 08b — CUDA Graphs": code/chapter_08b.md
+    - "Code 8.5 — CUDA Graphs": code/chapter_08b.md
     - "Code 09 — Forward Pass": code/chapter_09.md
     - "Code 10 — Quantization": code/chapter_10.md
     - "Code 11 — Prefill and Caching": code/chapter_11.md
-    - "Code 11b — KV Cache Eviction": code/chapter_11b.md
+    - "Code 11.5 — KV Cache Eviction": code/chapter_11b.md
     - "Code 12 — Sampling": code/chapter_12.md
     - "Code 13 — Streaming": code/chapter_13.md
     - "Code 14 — vLLM Knobs": code/chapter_14.md
     - "Code 15 — Multi-GPU": code/chapter_15.md
-    - "Code 15b — Flash Decoding": code/chapter_15b.md
+    - "Code 15.5 — Flash Decoding": code/chapter_15b.md
     - "Code 16 — Observability": code/chapter_16.md
     - "Code 17 — Benchmarking": code/chapter_17.md
     - "Code 18 — Disaggregated Serving": code/chapter_18.md
@@ -157,7 +157,7 @@ nav:
     - "Code 31 — Model Routing": code/chapter_31.md
     - "Code 32 — Debugging": code/chapter_32.md
     - "Code 33 — Engine Landscape": code/chapter_33.md
-    - "Code 33b — Engine Selection": code/chapter_33b.md
+    - "Code 33.5 — Engine Selection": code/chapter_33b.md
     - "Code 34 — DeepSeek": code/chapter_34.md
     - "Code 35 — Qwen": code/chapter_35.md
     - "Code 36 — Kimi": code/chapter_36.md
