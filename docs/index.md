@@ -173,6 +173,7 @@ hide:
         <a href="appendices/appendix-j.html" class="toc-entry"><span class="toc-num">J</span><span class="toc-etitle">CUDA C++ for Inference Engineers</span></a>
         <a href="appendices/appendix-k.html" class="toc-entry"><span class="toc-num">K</span><span class="toc-etitle">Operational Decision Tree and Troubleshooting Guide</span></a>
         <a href="appendices/appendix-l.html" class="toc-entry"><span class="toc-num">L</span><span class="toc-etitle">TurboQuant — Online Vector Quantization for KV Cache (Addendum)</span></a>
+        <a href="appendices/appendix-m.html" class="toc-entry"><span class="toc-num">M</span><span class="toc-etitle">Mobile and Edge Deployment — Android and Apple Silicon</span></a>
       </div>
     </div>
 

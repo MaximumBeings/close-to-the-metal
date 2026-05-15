@@ -180,3 +180,4 @@ nav:
     - "J — CUDA C++ Introduction": appendices/appendix-j.md
     - "K — Operational Decision Tree": appendices/appendix-k.md
     - "L — TurboQuant (Addendum)": appendices/appendix-l.md
+    - "M — Mobile and Edge Deployment: Android and Apple Silicon": appendices/appendix-m.md
