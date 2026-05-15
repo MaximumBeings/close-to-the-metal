@@ -71,6 +71,7 @@ hide:
         <a href="part1-foundations/chapter03.html" class="toc-entry"><span class="toc-num">3</span><span class="toc-etitle">Tokens, Sequences, and the Batch</span></a>
         <a href="part1-foundations/chapter03b.html" class="toc-entry"><span class="toc-num">3.5</span><span class="toc-etitle">The Transformer Block</span></a>
         <a href="part1-foundations/chapter04.html" class="toc-entry"><span class="toc-num">4</span><span class="toc-etitle">Attention Mechanics</span></a>
+        <a href="part1-foundations/chapter04b.html" class="toc-entry"><span class="toc-num">4.5</span><span class="toc-etitle">Attention Alternatives — Sliding Window, Linear Attention, SSMs, and Mamba</span></a>
         <a href="part1-foundations/chapter05.html" class="toc-entry"><span class="toc-num">5</span><span class="toc-etitle">Flash Attention — Tiling and Recomputation</span></a>
       </div>
     </div>
