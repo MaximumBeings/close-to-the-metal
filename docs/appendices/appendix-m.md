@@ -6,24 +6,25 @@
 
 ## Why This Appendix Exists
 
-Chapters 1–13 assume a data-center context: CUDA GPUs, HBM memory, Linux. But llama.cpp was explicitly designed to run anywhere a C++ compiler can reach. This appendix covers two of the most important non-data-center targets: **Android** (ARM and x86-64 mobile silicon) and **Apple Silicon** (the M-series unified-memory architecture). Both platforms present genuinely different constraints — battery, thermal throttling, unified memory pools, OS-level memory limits — that require a different mental model from server deployment.
+Chapters 1–13 assume a data-center context: CUDA GPUs, HBM memory, Linux servers, dedicated power supplies. But llama.cpp was explicitly designed to run anywhere a C++ compiler can reach — and that turns out to be almost everywhere. This appendix covers two of the most important non-data-center targets: **Android** (ARM and x86-64 mobile silicon) and **Apple Silicon** (the M-series unified-memory architecture).
 
-**What you will know by the end:**
+Both platforms present constraints that require a genuinely different mental model from server deployment. On a server, you worry about utilisation and throughput. On a phone, you worry about battery drain, thermal throttling, and OS-level memory limits that can silently kill your process. On an Apple Silicon laptop, you discover that the absence of a PCIe bus between CPU and GPU changes the economics of model quantization in ways that no data-center textbook prepares you for.
 
-- Three distinct paths to running llama.cpp on Android: Android Studio GUI binding, Termux CLI, and NDK cross-compilation.
-- How Android's SME2 (Arm) and AMX (x86-64) acceleration work and how llama.cpp auto-detects them.
-- Apple Silicon's unified memory architecture and why it changes the quantization calculus.
-- Metal GPU acceleration: build flags, layer offloading, and the difference between GPU-only and CPU+GPU split inference.
-- Quantization tier recommendations by device class for both platforms.
-- Memory budgeting, thermal management, and production-grade `llama-server` configuration for both.
+By the end of this appendix you will understand three distinct paths to running llama.cpp on Android, how Apple Silicon's unified memory architecture changes the quantization calculus, how to configure Metal GPU acceleration, and how to run a persistent `llama-server` on macOS as a background service that survives reboots.
 
 ---
 
 ## Part 1 — Android
 
-### M.1 Platform Overview
+### M.1 Three Paths to Inference on Android
 
-Android inference runs on three distinct execution environments:
+Android does not have a single way to run native C++ inference — it has three, each suited to a different use case. Understanding the distinction saves hours of confusion.
+
+**Path 1: Android Studio GUI binding.** llama.cpp ships a complete Android application example in `examples/llama.android`. This is a proper Android app written in Kotlin that calls the llama.cpp C++ library through the **Java Native Interface (JNI)** — a bridge that lets Java/Kotlin code call functions written in C or C++. When a user taps "Run" in the app, Kotlin code calls a JNI function, which dispatches into the compiled llama.cpp library, which runs inference on the device hardware and returns tokens back through the same bridge. This path produces an `.apk` file you can ship through the Play Store. Hardware acceleration (SME2 on Arm, AMX on x86-64) is detected and enabled automatically at runtime.
+
+**Path 2: Termux CLI.** Termux is a free Android app that gives you a full Linux-style terminal on your Android device without rooting it. Inside Termux you can install compilers, run `cmake`, and build llama.cpp from source directly on the device — then use `llama-cli` or `llama-server` exactly as you would on a Linux server. This path requires no Android development knowledge and is ideal for experimenting, running benchmarks, or building a personal device-side assistant. The main limitation is that Termux's compiler cannot target the GPU — you get CPU inference only.
+
+**Path 3: NDK cross-compilation.** The Android NDK (Native Development Kit) is a toolchain that runs on your development machine (Linux or macOS) and produces binaries for Android. You build `llama-server` on your laptop and deploy the resulting binary to the phone using `adb` (Android Debug Bridge). This gives you fine-grained control over compiler flags, ABI targeting, and optimisation levels — and it is the right approach for CI/CD pipelines that need to produce Android binaries automatically.
 
 ```
 Android inference paths:
@@ -45,751 +46,592 @@ Android inference paths:
   └──────────────────────────────────────────────────────┘
 ```
 
-Hardware acceleration tiers (auto-detected at runtime):
+### M.1.1 Hardware Acceleration on Android — SME2 and AMX Explained
+
+Android devices use two main CPU instruction set extensions for accelerating matrix operations — the core computation in every transformer layer.
+
+**SME2 (Scalable Matrix Extension 2)** is an Arm architecture extension introduced on high-end mobile SoCs (like recent Snapdragon chips). It adds dedicated matrix-multiply instructions that operate on large two-dimensional register tiles, dramatically accelerating the GEMM (General Matrix Multiply) operations that dominate LLM decode. llama.cpp detects SME2 at startup and selects the optimised kernel path automatically — you do not need to configure anything. The speedup over the scalar baseline can be 2–4× on chips that support it.
+
+**AMX (Advanced Matrix Extensions)** is Intel's equivalent extension for x86-64 processors. Android devices running on x86-64 silicon (uncommon but used in some ChromeOS devices) benefit from AMX in the same way. Again, llama.cpp auto-detects it.
 
 | CPU feature | Devices | Speedup vs baseline |
 |---|---|---|
-| NEON (baseline) | All ARM64 since Android 5 | 1× |
-| dotprod | Most devices since 2019 | ~1.5× |
-| i8mm | Flagship devices since 2021 | ~2× |
-| SVE2 | Cortex-X3/X4, some Snapdragon | ~2.5× |
-| SME2 | Cortex-X925 (2024+) | ~3–4× |
-| AMX | Intel Core Ultra (x86-64 Android/ChromeOS) | ~3× |
+| SME2 | High-end Snapdragon (2024+) | 2–4× |
+| NEON | All modern Arm Android devices | 1.5–2× |
+| AMX | x86-64 Android / ChromeOS | 2–3× |
+| Baseline (scalar) | Any | 1× |
 
-llama.cpp performs CPUID/HWCAP detection at startup and loads the appropriate kernel without user intervention.
+The practical consequence: if you are benchmarking on an older device and the numbers look disappointing, check whether the device supports SME2. A Snapdragon 8 Gen 3 device will be materially faster than an 8 Gen 1 device running the same model and quantization, even though both run Android.
 
 ---
 
-### M.2 Path 1 — Android Studio GUI Binding
+### M.2 Path 1: Android Studio GUI Application
 
-#### Prerequisites
+This path is for engineers who want to ship a polished Android app. The `examples/llama.android` directory in the llama.cpp repository is a complete, working Android Studio project — not a skeleton, but a real app that loads a GGUF model, runs inference, and displays output in a chat-style UI.
 
-```
-Android Studio (latest stable)
-Android NDK r27 or later (install via SDK Manager → SDK Tools)
-CMake 3.22+ (install via SDK Manager → SDK Tools)
-API level 28+ target (Android 9 minimum)
-```
-
-#### Import and Build
+#### M.2.1 Project Structure
 
 ```
-1. Open Android Studio
-2. File → Open → navigate to llama.cpp/examples/llama.android
-3. Wait for Gradle sync to complete
-4. Build → Make Project  (or press Ctrl+F9 / ⌘F9)
+examples/llama.android/
+├── app/
+│   ├── src/main/
+│   │   ├── cpp/
+│   │   │   └── CMakeLists.txt      # tells Gradle how to compile C++ code
+│   │   ├── java/com/example/llama/
+│   │   │   ├── MainActivity.kt     # UI logic (Kotlin)
+│   │   │   └── Llm.kt              # JNI wrapper class (Kotlin ↔ C++ bridge)
+│   │   └── AndroidManifest.xml
+│   └── build.gradle
+└── build.gradle
 ```
 
-The Gradle build invokes CMake internally and produces device-specific ABI splits (`arm64-v8a`, `x86_64`). The resulting APK is around 15–25 MB before model bundling.
+The JNI bridge in `Llm.kt` declares `external fun` functions — Kotlin's way of saying "this function is implemented in C++, not Kotlin." When the Kotlin code calls `generate(prompt)`, the Android runtime looks up the corresponding C++ function, transfers the arguments across the language boundary, and returns the result.
 
-#### Core API Surface
+#### M.2.2 Build Steps
 
-The binding exposes three primary objects:
+```bash
+# On your development machine (Linux or macOS)
 
-**1. Parse model metadata without loading weights:**
+# 1. Install Android Studio from https://developer.android.com/studio
+# 2. Open the project
+cd llama.cpp/examples/llama.android
+# Open this directory in Android Studio (File → Open)
 
+# 3. Android Studio will prompt you to install the NDK.
+#    Accept and let it install. This is the C++ toolchain.
+
+# 4. Connect your Android device with USB debugging enabled:
+#    Settings → Developer Options → USB Debugging
+
+# 5. In Android Studio, press Run (▶) or:
+./gradlew assembleDebug
+
+# 6. Install the APK to connected device
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
+
+#### M.2.3 Loading a Model into the App
+
+The app reads GGUF files from the device's storage. Copy a quantized model using `adb`:
+
+```bash
+# Push a model to the device's Downloads folder
+adb push Llama-3.2-3B-Instruct-Q4_K_M.gguf \
+    /sdcard/Download/Llama-3.2-3B-Instruct-Q4_K_M.gguf
+
+# Verify it landed correctly
+adb shell ls -lh /sdcard/Download/*.gguf
+```
+
+Inside the app, use the file picker to navigate to Downloads and select the `.gguf` file. The app will begin loading — watch the logcat output in Android Studio for progress messages:
+
+```bash
+# Monitor device logs during model load
+adb logcat -s llama.android:V
+```
+
+#### M.2.4 JNI Bridge — How Kotlin Talks to C++
+
+For newcomers, the JNI pattern is worth understanding explicitly because it appears in every Android native code project.
+
+In `Llm.kt`:
 ```kotlin
-// From a shared-storage Uri (user file picker)
-val metadata = GgufMetadataReader.read(contentResolver, uri)
-println("Architecture : ${metadata.architecture}")
-println("Context size : ${metadata.contextLength}")
-println("Parameter cnt: ${metadata.parameterCount}")
-println("Quantization : ${metadata.quantizationType}")
+// The 'external' keyword marks this as a C++ function
+external fun loadModel(path: String, nCtx: Int, nBatch: Int): Long
+external fun generate(modelHandle: Long, prompt: String, nLen: Int): String
+external fun freeModel(modelHandle: Long)
 
-// From a private app file
-val metadata = GgufMetadataReader.read(File(filesDir, "model.gguf"))
-```
-
-This lets you display model information in your UI before committing to a load, which is important for guiding users who may have downloaded incompatible quantization tiers for their device RAM.
-
-**2. Load a model and create an inference engine:**
-
-```kotlin
-// AiChat is a facade — manages lifecycle of the native context
-val engine: InferenceEngine = AiChat.create(
-    modelPath = File(filesDir, "model.gguf").absolutePath,
-    contextSize = 4096,         // tokens; keep ≤ available RAM / bytes-per-token
-    nThreads = 4,               // physical cores; avoid hyperthreads on mobile
-    nGpuLayers = 0              // set > 0 if your device has Vulkan + llama.cpp GPU support
-)
-```
-
-**3. Run inference and collect tokens as a Flow:**
-
-```kotlin
-val userPrompt = "Explain the transformer architecture in two sentences."
-
-engine.generate(userPrompt)
-    .collect { token ->
-        // token is a String fragment — typically one subword
-        textView.append(token)
-    }
-
-// Full example with lifecycle awareness
-lifecycleScope.launch {
-    engine.generate(userPrompt)
-        .flowOn(Dispatchers.IO)
-        .collect { fragment ->
-            withContext(Dispatchers.Main) { outputTextView.append(fragment) }
-        }
+companion object {
+    // This loads the compiled llama.cpp shared library at app startup
+    init { System.loadLibrary("llama-android") }
 }
 ```
 
-The `generate` call handles: chat template formatting (based on model metadata), prefill, KV cache management, and autoregressive decode. Cancelling the coroutine scope stops generation cleanly.
+In the C++ side (`llama_android.cpp`), the function names follow a specific convention — `Java_com_example_llama_Llm_loadModel` — that the JVM uses to find the corresponding native function. This convention is mechanical and the NDK tooling handles it automatically.
 
-#### Choosing a Context Size
-
-Mobile devices have hard per-process memory limits (typically 512 MB on low-end, 2–4 GB on flagship). Use this budget formula:
-
-```
-Available for KV cache ≈ device_RAM × 0.3 − model_weights_RAM
-
-KV cache bytes = 2 × N × n_kv_heads × d_head × n_layers × 2  (BF16)
-
-For a Q4_K_M 7B model on a 6 GB device:
-  model weights ≈ 4.1 GB
-  available for KV ≈ 6.0 × 0.3 − 4.1 ≈ negative → use Q2_K instead
-
-For a Q2_K 7B model (≈2.7 GB) on a 6 GB device:
-  available ≈ 6.0 × 0.3 − 2.7 ≈ -0.9 GB → still tight, use 2048 context max
-  
-For a Q4_K_M 3B model (≈1.8 GB) on a 6 GB device:
-  available ≈ 6.0 × 0.45 − 1.8 ≈ 0.9 GB → 4096 context is feasible
-```
-
-A safe starting point: `contextSize = 2048` for 7B models, `contextSize = 4096` for 3B and smaller.
-
-#### Production App Reference
-
-For a production-ready implementation with system prompts, model management, benchmarks, and an Arm feature visualiser showing which CPU extensions are active on the current device:
-
-```
-Arm AI Chat — Google Play:
-https://play.google.com/store/apps/details?id=com.arm.aichat
-```
-
-The app is open-reference for the full capability of the Android binding. The home screen shows which Arm features (NEON, dotprod, i8mm, SVE2, SME2) are present and active on the running device — useful for understanding the acceleration tier you are actually getting.
+The `Long` returned by `loadModel` is a **handle** — a 64-bit integer that represents a pointer to the loaded model in C++ memory. Kotlin holds this integer and passes it back to C++ on subsequent calls, allowing the C++ code to locate the model without Kotlin needing to know anything about C++ memory management.
 
 ---
 
-### M.3 Path 2 — Termux CLI (On-Device Native Build)
+### M.3 Path 2: Termux CLI
 
-Termux provides a full Linux-like environment on Android without root. It is the fastest path from "I want to try this" to a running model.
+Termux is the fastest way to get llama.cpp running on an Android device, particularly for development and experimentation. It requires no Android development knowledge and no host computer — everything happens on the device.
 
-#### Install Termux
-
-```
-Option A (recommended): F-Droid
-  https://f-droid.org/en/packages/com.termux/
-
-Option B: GitHub releases
-  https://github.com/termux/termux-app/releases
-
-Note: The Play Store version has reduced functionality due to Google
-policy restrictions on executing downloaded code.
-```
-
-#### Environment Setup
+**What Termux actually is:** Termux installs a minimal Debian-like Linux userspace inside a sandboxed directory on your Android device. It is not a virtual machine and does not require root. It uses Android's native process model but provides Linux binaries, a package manager (`pkg`), and a shell. From inside Termux, your Android device looks like a small ARM Linux server.
 
 ```bash
-# Update package index and upgrade installed packages
-apt update && apt upgrade -y
+# Install Termux from F-Droid (not from the Play Store — the Play Store
+# version is outdated and the compiler packages may be missing)
+# https://f-droid.org/packages/com.termux/
 
-# Install build tools
-apt install git cmake clang
+# Inside Termux — install build tools
+pkg update && pkg upgrade -y
+pkg install -y cmake git clang ninja python
 
-# Optional but recommended
-apt install python3 python3-pip  # for model download scripts
-```
-
-#### Build llama.cpp
-
-```bash
-git clone https://github.com/ggml-org/llama.cpp
+# Clone llama.cpp
+git clone https://github.com/ggerganov/llama.cpp
 cd llama.cpp
 
-# Configure — Termux's clang supports ARM extensions natively
+# Build with the Termux compiler (this takes 10–20 minutes on most phones)
 cmake -B build \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DGGML_NATIVE=ON          # detect and use all CPU features present on this device
-
-# Build (use all cores; expect 5–15 min on flagship)
+    -DCMAKE_BUILD_TYPE=Release \
+    -DGGML_NATIVE=ON \
+    -GNinja
 cmake --build build --config Release -j$(nproc)
 ```
 
-`GGML_NATIVE=ON` tells the compiler to use `-march=native`, which enables every extension the CPU reports: dotprod, i8mm, SVE2, and SME2 if present. This is safe because the binary only runs on this device — you are not cross-compiling for a different target.
-
-#### Download a Model
+`-DGGML_NATIVE=ON` tells the compiler to generate instructions optimised for the exact CPU running the build — on a Snapdragon 8 Gen 3, this enables SME2 instructions if the compiler supports them.
 
 ```bash
-# Create a models directory in home (fastest storage path on most devices)
-mkdir -p ~/models
-
-# Download from Hugging Face (example: Llama-3.2-3B Q4_K_M)
-curl -L \
-  "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf" \
-  -o ~/models/llama3.2-3b-q4km.gguf
-
-# Alternative: use huggingface-cli if you have Python installed
-pip install huggingface_hub
-huggingface-cli download bartowski/Llama-3.2-3B-Instruct-GGUF \
-  Llama-3.2-3B-Instruct-Q4_K_M.gguf \
-  --local-dir ~/models/
-```
-
-#### Run Inference
-
-```bash
-cd ~/llama.cpp
-
-# Interactive chat
+# Run the chat interface
 ./build/bin/llama-cli \
-  -m ~/models/llama3.2-3b-q4km.gguf \
-  -c 4096 \
-  --chat-template llama3 \
-  -n 512 \
-  --temp 0.7
+    --model ~/storage/downloads/Llama-3.2-3B-Instruct-Q4_K_M.gguf \
+    --ctx-size 2048 \
+    --n-predict 256 \
+    -i -ins
 
-# Single-shot prompt (good for scripting)
-./build/bin/llama-cli \
-  -m ~/models/llama3.2-3b-q4km.gguf \
-  -c 2048 \
-  -p "What is the capital of France?" \
-  -n 128 \
-  --no-display-prompt
-
-# Run as local HTTP server (accessible from localhost on device)
+# Or start a local HTTP server (accessible from other apps on the same device)
 ./build/bin/llama-server \
-  -m ~/models/llama3.2-3b-q4km.gguf \
-  -c 4096 \
-  --port 8080 \
-  --host 127.0.0.1
+    --model ~/storage/downloads/Llama-3.2-3B-Instruct-Q4_K_M.gguf \
+    --ctx-size 2048 \
+    --host 127.0.0.1 \
+    --port 8080
 ```
 
-**Critical: always set `-c` (context size)**. Without it, llama.cpp uses the model's maximum context (often 128K), which will immediately OOM-kill Termux on most phones. Start at 2048 and increase only if you have confirmed available RAM.
-
-#### Performance Tips for Termux
+**Accessing device storage from Termux:** By default Termux cannot read `/sdcard`. Grant storage access with:
 
 ```bash
-# Check available RAM before loading
-free -h
-
-# Check which CPU extensions are active (shown at llama.cpp startup)
-./build/bin/llama-cli --version   # prints build flags
-
-# Use physical cores only — Android scheduler puts efficiency cores to sleep
-# Snapdragon 8 Gen 3: 1 Prime + 3 Performance + 4 Efficiency
-# Set threads to Prime + Performance count only:
--t 4   # for Snapdragon 8 Gen 3 (skip the 4 efficiency cores)
-
-# Acquire a CPU wake lock to prevent throttling during long runs
-# In a separate Termux session:
-termux-wake-lock
+termux-setup-storage
+# Then access your files at ~/storage/downloads/
 ```
 
 ---
 
-### M.4 Path 3 — NDK Cross-Compilation (Host to Device)
+### M.4 Path 3: NDK Cross-Compilation
 
-Cross-compilation builds on your development machine and deploys to a connected Android device via ADB. This is the standard path for CI/CD pipelines and embedded products.
+Cross-compilation means building on one machine (your development laptop) for a different target machine (an Android device). The result is a binary that runs on Android but was compiled on Linux or macOS. This is the right approach when you want to automate binary production in a CI pipeline, or when you need precise control over compilation flags that Termux's toolchain may not expose.
 
-#### Prerequisites on Host
-
-```
-Android SDK with NDK r27+ installed
-  Default path: ~/Library/Android/sdk/ndk/{version}/  (macOS)
-                ~/Android/Sdk/ndk/{version}/           (Linux)
-                %LOCALAPPDATA%\Android\sdk\ndk\{version}\  (Windows)
-
-ADB installed and device connected with USB debugging enabled
-```
-
-#### Configure
+**What the NDK is:** The Android NDK (Native Development Kit) is a set of tools and headers that let you compile C and C++ code for Android. It includes a version of clang targeting Android's ABI, Android-specific system headers, and prebuilt libraries. You install it on your host machine, point cmake at it, and compile as if you were cross-compiling for an embedded Linux target.
 
 ```bash
-export ANDROID_NDK=~/Library/Android/sdk/ndk/27.0.12077973  # adjust version
+# Install the NDK on your host (Linux or macOS)
+# Option A: through Android Studio
+#   SDK Manager → SDK Tools → NDK (Side by side) → Install
 
-cmake \
-  -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
-  -DANDROID_ABI=arm64-v8a \
-  -DANDROID_PLATFORM=android-28 \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_C_FLAGS="-march=armv8.7a" \
-  -DCMAKE_CXX_FLAGS="-march=armv8.7a" \
-  -DGGML_OPENMP=OFF \
-  -DGGML_LLAMAFILE=OFF \
-  -B build-android
+# Option B: command line (requires sdkmanager)
+sdkmanager "ndk;27.0.12077973"
+
+# Set the NDK path
+export NDK_PATH="$HOME/Library/Android/sdk/ndk/27.0.12077973"
+# On Linux: $HOME/Android/Sdk/ndk/27.0.12077973
+
+# Clone llama.cpp on your host machine
+git clone https://github.com/ggerganov/llama.cpp
+cd llama.cpp
+
+# Build for arm64-v8a (most modern Android phones)
+cmake -B build-android \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/build/cmake/android.toolchain.cmake \
+    -DANDROID_ABI=arm64-v8a \
+    -DANDROID_PLATFORM=android-28 \
+    -DGGML_NATIVE=OFF   # OFF because host CPU ≠ target CPU
+cmake --build build-android --config Release -j$(nproc)
+
+# Deploy to connected device via adb
+adb shell mkdir -p /data/local/tmp/llama
+adb push build-android/bin/llama-server /data/local/tmp/llama/
+adb push build-android/bin/llama-cli    /data/local/tmp/llama/
+
+# Push the model
+adb push Llama-3.2-3B-Instruct-Q4_K_M.gguf \
+    /data/local/tmp/llama/
+
+# Run on-device
+adb shell "chmod +x /data/local/tmp/llama/llama-server"
+adb shell "/data/local/tmp/llama/llama-server \
+    --model /data/local/tmp/llama/Llama-3.2-3B-Instruct-Q4_K_M.gguf \
+    --ctx-size 2048 --host 127.0.0.1 --port 8080 &"
+
+# Forward device port to your laptop so you can query the server
+adb forward tcp:8080 tcp:8080
+curl http://localhost:8080/health
 ```
 
-**Flag rationale:**
+**ABI selection:** Android devices run on different CPU architectures. The `ANDROID_ABI` flag must match the device:
 
-| Flag | Reason |
-|---|---|
-| `ANDROID_ABI=arm64-v8a` | 64-bit ARM; covers virtually all devices since 2015 |
-| `ANDROID_PLATFORM=android-28` | Android 9 minimum; required for full POSIX support |
-| `-march=armv8.7a` | Enables i8mm and bf16 instructions present on most 2022+ flagship SoCs |
-| `GGML_OPENMP=OFF` | NDK ships OpenMP but CMake integration is unreliable; use `-t` instead |
-| `GGML_LLAMAFILE=OFF` | llamafile's fat binary approach does not support Android ABI |
+| ABI | Architecture | Device coverage |
+|---|---|---|
+| `arm64-v8a` | 64-bit Arm | All modern Android phones (2015+) |
+| `x86_64` | 64-bit Intel/AMD | Emulators, ChromeOS, some tablets |
+| `armeabi-v7a` | 32-bit Arm | Very old devices (pre-2015) — avoid |
 
-For older or budget devices, drop to `-march=armv8.2a` for maximum compatibility. For cutting-edge devices with SME2 (Cortex-X925), use `-march=armv9.2a+sme2`, but note this narrows the device compatibility window significantly.
-
-#### Build and Deploy
-
-```bash
-# Build (replace 8 with your core count)
-cmake --build build-android --config Release -j8
-
-# Install to a staging directory
-cmake --install build-android \
-  --prefix ./android-install \
-  --config Release
-
-# Push to device
-adb shell "mkdir -p /data/local/tmp/llama"
-adb push android-install/ /data/local/tmp/llama/
-
-# Push your model
-adb push ~/models/llama3.2-3b-q4km.gguf /data/local/tmp/llama/
-```
-
-#### Run via ADB Shell
-
-```bash
-adb shell
-# Now inside the device shell:
-cd /data/local/tmp/llama
-
-# LD_LIBRARY_PATH is required — Android does not search relative lib/
-LD_LIBRARY_PATH=lib ./bin/llama-cli \
-  -m llama3.2-3b-q4km.gguf \
-  -c 2048 \
-  -p "Hello, I am running on Android." \
-  -n 128
-```
-
-#### ABI Targeting by Device Class
-
-```
-Production release builds should target multiple ABIs:
-
-  arm64-v8a   — all modern Android phones and tablets
-  x86_64      — Android emulators, ChromeOS, Intel-based Android devices
-
-For x86_64, replace the march flag:
-  -DCMAKE_C_FLAGS="-march=x86-64-v3"
-  -DCMAKE_CXX_FLAGS="-march=x86-64-v3"
-
-AMX (Advanced Matrix Extensions) on Intel x86-64 Android is auto-detected
-at runtime by llama.cpp's CPUID path — no extra flags needed.
-```
+For a CI pipeline targeting production phones, build `arm64-v8a` only.
 
 ---
 
-### M.5 Quantization Recommendations by Device Class
+### M.5 Quantization by Device Class
 
-```
-Device class   RAM    Recommended quant   Max context   Notes
-─────────────────────────────────────────────────────────────────────
-Budget phone   3–4 GB  Q2_K (3B model)    2048          7B will OOM
-Mid-range      6 GB    Q4_K_M (3B) or     2048–4096     Test before shipping
-                       Q2_K (7B)
-Flagship       8–12 GB Q4_K_M (7B)        4096–8192     i8mm acceleration
-               12 GB+  Q5_K_M (7B) or     8192          SVE2/SME2 if present
-                       Q4_K_M (13B)
-ChromeOS       16 GB+  Q4_K_M (13B)       8192+         x86-64, AMX
-```
+Quantization is the process of representing model weights at lower numerical precision to reduce memory usage and increase inference speed. A 7B model at full 16-bit (FP16) precision requires approximately 14 GB — far more than any Android device has. Quantized to 4 bits (Q4_K_M), the same model shrinks to about 4.4 GB. The quality difference is small enough that for most applications the quantized version is indistinguishable to users.
 
-**Quantization format guide:**
+On Android, the choice of quantization is primarily constrained by available RAM. The OS reserves memory for itself and other running apps, so the usable headroom is always less than the device's advertised RAM.
 
-| Format | Bits/weight (approx) | 7B model size | Quality loss |
+| Device RAM | Practical headroom | Recommended quant | Max model size |
 |---|---|---|---|
-| Q2_K | 2.6 | ~2.7 GB | Noticeable on reasoning tasks |
-| Q3_K_M | 3.3 | ~3.4 GB | Moderate |
-| Q4_K_M | 4.8 | ~4.1 GB | Minimal for most tasks |
-| Q5_K_M | 5.6 | ~4.8 GB | Near-lossless |
-| Q8_0 | 8.0 | ~7.2 GB | Essentially lossless |
+| 4 GB | ~2.5 GB | Q4_K_M | 1.5B params |
+| 6 GB | ~4 GB | Q4_K_M | 3B params |
+| 8 GB | ~5.5 GB | Q4_K_M | 3–7B params |
+| 12 GB | ~9 GB | Q4_K_M or Q5_K_M | 7B params |
+| 16 GB+ | ~13 GB | Q5_K_M or Q6_K | 7B–13B params |
 
-For Android, Q4_K_M is the sweet spot for devices with ≥ 8 GB RAM. Q2_K or Q3_K_M for 6 GB devices, where you must leave 2–3 GB free for the OS and other apps.
+**Quantization format glossary for newcomers:**
+
+`Q4_K_M` — 4-bit weights with "k-quant" mixed precision (some sensitive layers stored at higher precision) and medium quality. The de facto standard for constrained devices; best balance of quality and size.
+
+`Q5_K_M` — 5-bit k-quant medium. Noticeably better quality than Q4_K_M at about 25% larger file size. Use when you have the RAM headroom.
+
+`Q2_K` — 2-bit k-quant. The most aggressive compression available. Quality degrades visibly. Use only when RAM is extremely tight and some quality loss is acceptable.
+
+`Q8_0` — 8-bit quantization. Close to full-precision quality. File size is roughly 1× the parameter count in bytes (a 7B model ≈ 7 GB). Use on 16 GB+ devices when quality is paramount.
 
 ---
 
-### M.6 Memory and Thermal Management
+### M.6 Android Memory and Thermal Management
 
-```python
-# Android OS memory pressure levels:
-# TRIM_MEMORY_RUNNING_CRITICAL → free non-essential memory now
-# TRIM_MEMORY_UI_HIDDEN        → app backgrounded, free aggressively
-# onLowMemory()                → system-wide OOM imminent
+**Android's memory management is aggressive.** The OS can terminate background processes, including your inference server, at any time when it needs memory for foreground apps. This is not a bug — it is a core part of Android's design. The implications for a persistent inference service are significant:
 
-# In your app's Activity/Service:
-override fun onTrimMemory(level: Int) {
-    if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
-        engine.release()    // free the native context immediately
-    }
-}
+- Running `llama-server` in a Termux session means it is subject to Android's low-memory killer. A phone call, a camera launch, or a memory-intensive game can cause Android to terminate the server process with no warning.
+- The only reliable way to keep a service alive on Android is to run it as a **foreground service** with a persistent notification, or to accept that it may be killed and implement reconnection logic in your client.
+- For development and personal use (Termux path), keep the screen on and consider disabling battery optimisation for Termux in Android Settings.
+
+**Thermal throttling on mobile** is more aggressive than on desktop hardware. Modern Snapdragon chips are designed for burst performance — they sustain high clock speeds for 10–30 seconds then throttle down to prevent overheating. This means:
+
+- The first few tokens after loading a model may arrive quickly (burst performance).
+- Sustained inference over many minutes will be slower than the initial burst suggests.
+- A benchmark that runs for 30 seconds will report higher throughput than one that runs for 5 minutes.
+
+To get a realistic throughput number, run inference continuously for at least 3 minutes and measure the average over the final minute.
+
+```bash
+# Sustained throughput benchmark — run for 3 minutes, discard first minute
+./build/bin/llama-bench \
+    --model ~/storage/downloads/Llama-3.2-3B-Instruct-Q4_K_M.gguf \
+    -p 512 -n 256 -r 5   # 5 repetitions for stable average
 ```
 
-Thermal throttling on Android is aggressive. A sustained inference session at full CPU speed will trigger thermal mitigation within 2–5 minutes on most devices, reducing clock speed by 30–50%. Mitigations:
+```bash
+# Monitor CPU frequency to detect throttling
+# (requires Termux with the termux-api package)
+while true; do
+    cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq
+    sleep 2
+done
+```
 
-```
-1. Reduce thread count: -t 2 instead of -t 4 runs cooler at ~70% speed
-2. Add inter-token delays in your app for conversational use cases
-   (users tolerate 50 tokens/sec just as well as 80 tokens/sec)
-3. Use flash attention: -fa flag reduces memory bandwidth and heat
-4. Monitor: check /sys/class/thermal/thermal_zone*/temp via adb
-```
+If the frequency drops significantly after 30–60 seconds of inference, throttling is happening. Active cooling (a phone cooler accessory) can extend the burst window on high-end devices.
 
 ---
 
 ## Part 2 — Apple Silicon
 
-### M.7 Platform Overview
+### M.7 Unified Memory — Why Apple Silicon Changes Everything
 
-Apple Silicon (M1 through M4) has a fundamentally different memory architecture from both Android and data-center GPUs:
+To understand Apple Silicon inference, you must first understand what **unified memory** means and why it is fundamentally different from the memory architecture of a discrete GPU system.
 
-```
-Apple Silicon unified memory architecture:
-  ┌───────────────────────────────────────────────────────┐
-  │                 Unified Memory Pool                    │
-  │  ┌─────────────┐  ┌─────────────┐  ┌──────────────┐ │
-  │  │ CPU (P+E)   │  │  GPU        │  │Neural Engine │ │
-  │  │ 4–16 cores  │  │  10–40 core │  │  16–38 TOPS  │ │
-  │  └─────────────┘  └─────────────┘  └──────────────┘ │
-  │                                                        │
-  │  RAM: 8–192 GB shared between ALL compute units       │
-  │  Bandwidth: 100–800 GB/s (M1 base → M4 Max/Ultra)    │
-  └───────────────────────────────────────────────────────┘
+In a conventional PC or server with a dedicated GPU, there are two separate memory pools: system RAM (attached to the CPU via the memory controller) and VRAM (attached to the GPU via a separate memory controller, connected to the rest of the system over PCIe). When the GPU needs data that lives in system RAM — such as model weights that were loaded by the CPU — those weights must be physically transferred over the PCIe bus. PCIe Gen 4 x16 has a bandwidth of about 32 GB/s. A large model load or a mid-inference KV cache write that crosses this boundary pays the PCIe tax.
 
-Key insight: there is no "VRAM limit" separate from system RAM.
-A 70B model at Q4_K_M (≈38 GB) runs entirely on GPU on an M2 Ultra
-with 64 GB, something impossible on a GPU with separate VRAM.
-```
+**Apple Silicon has no PCIe bus.** The CPU, GPU, Neural Engine, and memory controller are all on the same die, connected to a single shared LPDDR5X memory pool. When llama.cpp loads a model and allocates the KV cache, that memory is accessible to both the CPU compute cores and the GPU Metal shaders at full memory bandwidth — no copying, no transfer overhead. The bandwidth on an M3 Max is 400 GB/s, and every byte of it is available to whichever processor needs it at any given moment.
 
-Acceleration stacks available to llama.cpp:
+The practical consequence: on Apple Silicon, you can allocate your entire system RAM to a model. A MacBook Pro M3 Max with 96 GB of unified memory can comfortably run a 70B model at Q4_K_M (≈ 41 GB) and still have 55 GB for the OS, KV cache, and other applications. On a PC with a 24 GB GPU, the same model will not fit in VRAM and must be partially offloaded to CPU RAM — crossing the PCIe boundary on every forward pass.
 
-| Stack | Status | Activated by |
-|---|---|---|
-| CPU NEON/AMX | Always on | Default build |
-| Metal (GPU) | Production-ready | `-DGGML_METAL=ON` |
-| Core ML | Experimental | `-DGGML_COREML=ON` |
-| ANE (Neural Engine) | Via Core ML only | Indirect |
-
-**Metal is the primary acceleration path.** It offloads matrix multiplications to the GPU, which has higher memory bandwidth than the CPU (even though they share the same DRAM). For models that fit entirely in RAM, Metal provides 2–5× speedup over CPU-only inference depending on model size and quantization.
+This is why "how many GPU layers to offload" (`-ngl`) means something different on Apple Silicon than on a PC: on a PC, offloading layers to the GPU means moving weights into a physically separate VRAM pool, which is fast but finite. On Apple Silicon, offloading to the GPU (Metal) simply means asking the GPU cores to execute the matrix multiplications — the weights themselves do not move.
 
 ---
 
-### M.8 Installation
+### M.8 Installation on Apple Silicon
 
-#### Option A — Homebrew (Fastest Path)
-
-```bash
-brew install llama.cpp
-```
-
-The Homebrew formula builds with Metal enabled by default and is kept up to date by the maintainers. This is the right choice for most users who want to run models without building from source.
+**What Metal is:** Metal is Apple's GPU programming API, analogous to CUDA on NVIDIA hardware. Just as llama.cpp uses CUDA kernels to run matrix operations on NVIDIA GPUs, it uses Metal shaders to run those same operations on Apple's GPU cores. The Metal backend is maintained as part of the main llama.cpp codebase and is stable and performant.
 
 ```bash
-# Verify Metal is active
-llama-cli --version
-# Should show: ggml_metal_init: GPU name: Apple M[x]
-```
+# Install the Xcode Command Line Tools (provides the C++ compiler and Metal SDK)
+xcode-select --install
 
-#### Option B — Build from Source with CMake
+# Install Homebrew if not already installed
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-```bash
-# Prerequisites
-xcode-select --install          # installs clang and Metal SDK
-brew install cmake              # or use the Xcode-bundled cmake
+# Install cmake
+brew install cmake
 
-git clone https://github.com/ggml-org/llama.cpp
+# Clone llama.cpp
+git clone https://github.com/ggerganov/llama.cpp
 cd llama.cpp
 
-# Configure with Metal (GPU) acceleration
+# Build with Metal support
+# On Apple Silicon, cmake automatically detects and enables Metal.
+# No special flag is required — the Metal backend is the default on macOS Arm.
 cmake -B build \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DGGML_METAL=ON \
-  -DGGML_NATIVE=ON              # use all CPU extensions (AMX on Apple Silicon)
+    -DCMAKE_BUILD_TYPE=Release \
+    -DGGML_METAL=ON    # explicitly enable if you want to be certain
 
-cmake --build build --config Release -j$(sysctl -n hw.physicalcpu)
+cmake --build build --config Release -j$(sysctl -n hw.logicalcpu)
 ```
 
-**Flag reference:**
-
-| Flag | Effect |
-|---|---|
-| `GGML_METAL=ON` | Compile Metal shaders for GPU offload |
-| `GGML_NATIVE=ON` | `-march=native`; enables Apple AMX instructions |
-| `GGML_BLAS=ON` | Use Accelerate framework (BLAS); less important when Metal is on |
-| `GGML_COREML=ON` | Experimental Core ML path; compiles `.mlpackage` at first load |
-
-For a pure CPU build (useful for debugging or when GPU offload is undesirable):
+**Verify Metal is active:**
 
 ```bash
-cmake -B build-cpu \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DGGML_METAL=OFF \
-  -DGGML_NATIVE=ON
-```
+./build/bin/llama-cli --version
+# Should include: Metal
 
----
-
-### M.9 GPU Layer Offloading
-
-The key runtime flag is `-ngl` (`--n-gpu-layers`). It controls how many transformer layers run on Metal vs. CPU.
-
-```bash
-# Fully CPU inference (no GPU)
-./build/bin/llama-cli -m model.gguf -ngl 0
-
-# Fully GPU inference (all layers on Metal)
-./build/bin/llama-cli -m model.gguf -ngl 999   # 999 = offload everything
-
-# Split: first 28 layers GPU, rest CPU
-./build/bin/llama-cli -m model.gguf -ngl 28
-```
-
-**When to use split inference:**
-
-If the model is larger than your unified memory allows at the desired context size, splitting layers between GPU and CPU is often better than reducing context:
-
-```
-GPU layers:  fast execution, uses high-bandwidth path
-CPU layers:  slower, but the CPU AMX path is still competitive for large models
-
-Rule of thumb for split:
-  ngl = total_layers × (GPU_memory_budget / total_model_size)
-  
-  Example: 70B Q4_K_M (≈38 GB) on M1 Pro 16 GB:
-    total_layers = 80
-    You cannot fit the full model — use a smaller quant or larger machine.
-    
-  Example: 13B Q4_K_M (≈7.4 GB) on M1 base 8 GB:
-    weights ≈ 7.4 GB, KV cache at 4K context ≈ 1.0 GB → tight but feasible
-    ngl = 40 (all layers GPU) — it fits, no split needed
-```
-
----
-
-### M.10 Running Models
-
-#### Download a Model
-
-```bash
-# Using Homebrew llama.cpp
-llama-cli --hf-repo bartowski/Llama-3.2-3B-Instruct-GGUF \
-          --hf-file Llama-3.2-3B-Instruct-Q4_K_M.gguf \
-          -p "Hello" -n 10   # this triggers the download on first run
-
-# Or explicitly with huggingface-cli
-pip install huggingface_hub
-huggingface-cli download bartowski/Llama-3.2-3B-Instruct-GGUF \
-  Llama-3.2-3B-Instruct-Q4_K_M.gguf \
-  --local-dir ~/models/
-```
-
-#### Interactive Chat
-
-```bash
+# Run a quick test — watch for Metal allocation messages
 ./build/bin/llama-cli \
-  -m ~/models/llama3.2-3b-q4km.gguf \
-  -ngl 999 \
-  -c 8192 \
-  --chat-template llama3 \
-  --temp 0.7 \
-  -n -1               # generate until user stops
+    --model /path/to/Llama-3.2-3B-Instruct-Q4_K_M.gguf \
+    --n-gpu-layers 99 \
+    -p "The capital of France is" \
+    -n 20
+# Look for: "llm_load_tensors: ggml ctx size = ... Metal"
 ```
 
-#### Run the HTTP Server
+---
+
+### M.9 GPU Layer Offloading with `-ngl`
+
+The `-ngl` flag (short for `--n-gpu-layers`) controls how many transformer layers are executed by the GPU rather than the CPU. Understanding it requires knowing what a "layer" means in the context of a transformer model.
+
+A transformer model is a stack of identical blocks, each containing a self-attention sublayer and a feed-forward network sublayer. A 7B parameter Llama model has 32 such blocks. A 70B model has 80 blocks. The `--n-gpu-layers` flag tells llama.cpp to assign the last N of those blocks to the GPU — the rest run on the CPU.
+
+On Apple Silicon, because of unified memory, you will almost always want to set `-ngl` high enough to offload all layers. The GPU cores on an M-series chip are substantially faster at matrix multiply than the CPU cores, and offloading to the GPU does not consume a separate memory pool — it just changes which compute units do the work.
+
+```bash
+# Fully GPU-accelerated — recommended for all Apple Silicon
+llama-server \
+    --model /path/to/model.gguf \
+    --n-gpu-layers 999 \   # 999 = offload everything; excess is ignored
+    --ctx-size 8192 \
+    --host 0.0.0.0 \
+    --port 8080
+
+# Watch startup to confirm GPU allocation
+# You should see lines like:
+# llm_load_tensors: offloading 32 repeating layers to GPU
+# llm_load_tensors: offloaded 32/32 layers to GPU
+# ggml_metal_init: allocating
+```
+
+**When might you reduce `-ngl`?** Only if you are running the model alongside other Metal workloads (video rendering, CoreML inference) that need GPU memory, or if you are on a base M1 with 8 GB where you need to leave more unified memory for the OS. In that case, try `-ngl 24` (offloading the upper three-quarters of layers) as a starting point.
+
+---
+
+### M.10 Running a Model and Persistent Background Service
+
+**Single-shot inference:**
+
+```bash
+# Basic chat interface
+./build/bin/llama-cli \
+    --model /Users/you/models/Qwen2.5-7B-Instruct-Q4_K_M.gguf \
+    --n-gpu-layers 999 \
+    --ctx-size 4096 \
+    -i -ins   # interactive instruction-following mode
+```
+
+**HTTP server for API access:**
 
 ```bash
 ./build/bin/llama-server \
-  -m ~/models/llama3.2-3b-q4km.gguf \
-  -ngl 999 \
-  -c 8192 \
-  --port 8080 \
-  --host 127.0.0.1 \
-  --parallel 4 \        # concurrent requests (limited by context)
-  --cont-batching       # continuous batching (Chapter 7.5)
+    --model /Users/you/models/Qwen2.5-7B-Instruct-Q4_K_M.gguf \
+    --n-gpu-layers 999 \
+    --ctx-size 4096 \
+    --parallel 2 \
+    --cont-batching \
+    --host 0.0.0.0 \
+    --port 8080
 ```
 
-This exposes an OpenAI-compatible API at `http://localhost:8080/v1`. You can point any OpenAI SDK to it:
+### M.10.1 Running llama-server as a Persistent macOS Service
 
-```python
-from openai import OpenAI
-client = OpenAI(base_url="http://localhost:8080/v1", api_key="unused")
-
-response = client.chat.completions.create(
-    model="local",
-    messages=[{"role": "user", "content": "What is metal shading language?"}]
-)
-print(response.choices[0].message.content)
-```
-
-#### Run as a Background Service (launchd)
-
-For a persistent local inference server that survives reboots:
+**What launchd is:** On macOS, `launchd` is the system service manager — it is to macOS what `systemd` is to Linux. You describe a service in a `.plist` (property list) XML file, place it in `~/Library/LaunchAgents/`, and `launchd` starts it at login, restarts it if it crashes, and gives you `launchctl` commands to control it. This is how you turn `llama-server` from something you start manually in a terminal into a background service that is always available.
 
 ```xml
-<!-- ~/Library/LaunchAgents/com.llamacpp.server.plist -->
+<!-- ~/Library/LaunchAgents/com.local.llama-server.plist -->
+<!--
+  This file tells macOS launchd to start llama-server at login
+  and restart it automatically if it exits.
+  
+  Key fields:
+  - Label: a unique identifier for this service
+  - ProgramArguments: the command to run (first element is the binary,
+    subsequent elements are arguments — NOT a shell command string)
+  - RunAtLoad: true means start immediately when this plist is loaded
+  - KeepAlive: true means restart if the process exits for any reason
+  - StandardOutPath / StandardErrorPath: log files for debugging
+-->
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key>
-  <string>com.llamacpp.server</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/opt/homebrew/bin/llama-server</string>
-    <string>-m</string>
-    <string>/Users/you/models/llama3.2-3b-q4km.gguf</string>
-    <string>-ngl</string>
-    <string>999</string>
-    <string>-c</string>
-    <string>8192</string>
-    <string>--port</string>
-    <string>8080</string>
-    <string>--host</string>
-    <string>127.0.0.1</string>
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
-  <key>StandardOutPath</key>
-  <string>/tmp/llamacpp.log</string>
-  <key>StandardErrorPath</key>
-  <string>/tmp/llamacpp.err</string>
+    <key>Label</key>
+    <string>com.local.llama-server</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/you/llama.cpp/build/bin/llama-server</string>
+        <string>--model</string>
+        <string>/Users/you/models/Qwen2.5-7B-Instruct-Q4_K_M.gguf</string>
+        <string>--n-gpu-layers</string>
+        <string>999</string>
+        <string>--ctx-size</string>
+        <string>4096</string>
+        <string>--parallel</string>
+        <string>2</string>
+        <string>--cont-batching</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>8080</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/llama-server.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/llama-server.err</string>
+
+    <!-- Give the process enough file descriptors for parallel connections -->
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>65536</integer>
+    </dict>
 </dict>
 </plist>
 ```
 
 ```bash
-# Install and start
-launchctl load ~/Library/LaunchAgents/com.llamacpp.server.plist
-launchctl start com.llamacpp.server
+# Load and start the service
+launchctl load ~/Library/LaunchAgents/com.local.llama-server.plist
 
-# Stop
-launchctl stop com.llamacpp.server
-launchctl unload ~/Library/LaunchAgents/com.llamacpp.server.plist
+# Check that it's running
+launchctl list | grep llama
+curl http://127.0.0.1:8080/health
 
-# Check logs
-tail -f /tmp/llamacpp.log
+# View logs
+tail -f /tmp/llama-server.log
+
+# Stop and unload the service
+launchctl unload ~/Library/LaunchAgents/com.local.llama-server.plist
+
+# After editing the plist file, reload it with:
+launchctl unload ~/Library/LaunchAgents/com.local.llama-server.plist
+launchctl load   ~/Library/LaunchAgents/com.local.llama-server.plist
 ```
 
 ---
 
-### M.11 Quantization Recommendations by Chip Tier
+### M.11 Quantization by Apple Silicon Tier
 
-The unified memory architecture changes the quantization decision. On Apple Silicon, you are almost never memory-bandwidth constrained the way a discrete GPU is — you are constrained only by the total RAM available. This means you can often run a higher-quality quantization than you could on a GPU with separate VRAM.
+Apple Silicon chips vary enormously in unified memory capacity. The base M1 with 8 GB is a different world from the M4 Ultra with 192 GB. Here is the practical quantization guide:
 
-```
-Chip          Unified RAM   Recommended for 7B   Recommended for 70B
-──────────────────────────────────────────────────────────────────────
-M1 base       8 GB          Q4_K_M (tight)        Not feasible
-M1 base       16 GB         Q5_K_M or Q6_K        Not feasible
-M1 Pro        16 GB         Q6_K                  Not feasible
-M1 Pro        32 GB         Q8_0                  Q2_K (tight)
-M1 Max        32 GB         Q8_0                  Q3_K_M
-M1 Max        64 GB         Q8_0                  Q5_K_M
-M1 Ultra      64 GB         Q8_0                  Q5_K_M
-M1 Ultra      128 GB        Q8_0                  Q8_0 (full quality)
-M2 → M4       Same tiers    Same guidance          Same guidance
-M4 Max        64 GB         Q8_0                  Q6_K
-M4 Ultra      192 GB        Q8_0                  Q8_0 (+ 405B Q4_K_M)
-```
-
-Unlike discrete GPU inference where Q4_K_M is the practical maximum (VRAM limits), Apple Silicon lets you run Q8_0 — essentially lossless quantization — on all but the smallest memory configurations. This is the most compelling argument for running production workloads on Apple Silicon where absolute output quality matters.
-
----
-
-### M.12 Performance Benchmarking
-
-```bash
-# Built-in benchmark tool
-./build/bin/llama-bench \
-  -m ~/models/llama3.2-3b-q4km.gguf \
-  -ngl 999 \
-  -p 512 \              # prompt tokens (prefill benchmark)
-  -n 128 \              # generation tokens (decode benchmark)
-  -r 3                  # repetitions for stable measurement
-
-# Output format:
-# model    | size  | params | backend | ngl | test   | t/s
-# llama 3.2| 1.79G | 3.21B  | Metal   | 99  | pp 512 | 412.3 ± 2.1
-# llama 3.2| 1.79G | 3.21B  | Metal   | 99  | tg 128 |  58.7 ± 0.4
-
-# Reference numbers (approximate, vary by model and system load):
-# M1 base  16 GB: 7B Q4_K_M tg ≈ 25–35 tok/s
-# M2 Pro   16 GB: 7B Q4_K_M tg ≈ 45–55 tok/s
-# M3 Max   48 GB: 7B Q4_K_M tg ≈ 80–100 tok/s
-# M4 Max   64 GB: 7B Q4_K_M tg ≈ 120–150 tok/s
-# M4 Ultra 192GB: 70B Q8_0  tg ≈ 35–45 tok/s
-```
-
----
-
-### M.13 Multi-Model and Production Configuration
-
-For production deployments on macOS (e.g., a developer workstation serving a team):
-
-```bash
-# llama-server with multiple model slots
-./build/bin/llama-server \
-  -m ~/models/llama3.2-3b-q4km.gguf \
-  --alias fast-model \
-  -ngl 999 \
-  -c 32768 \
-  --port 8080 \
-  --parallel 8 \
-  --cont-batching \
-  --flash-attn \                  # Flash Attention (Chapter 5) — significant speedup
-  --mlock \                       # lock model weights in RAM, prevent paging
-  --log-disable                   # reduce log verbosity in production
-```
-
-**Key production flags:**
-
-| Flag | Effect |
-|---|---|
-| `--flash-attn` / `-fa` | Use Flash Attention kernel; cuts memory use and increases speed |
-| `--mlock` | `mlock()` the model weights; prevents macOS from paging them out under pressure |
-| `--parallel N` | Serve N concurrent requests via continuous batching |
-| `--cont-batching` | Enable continuous batching (Chapter 7.5) |
-| `--cache-type-k q8_0` | Quantize the KV cache keys to INT8; halves KV cache memory |
-| `--cache-type-v q8_0` | Quantize the KV cache values to INT8 |
-| `--threads-batch N` | Separate thread count for prefill (often set higher than decode threads) |
-
-Quantizing the KV cache is particularly valuable on Apple Silicon because it stretches the context window without additional RAM:
-
-```bash
-# 70B Q4_K_M at 32K context with INT8 KV cache on M1 Ultra 128 GB
-./build/bin/llama-server \
-  -m ~/models/llama3-70b-q4km.gguf \
-  -ngl 999 \
-  -c 32768 \
-  --cache-type-k q8_0 \
-  --cache-type-v q8_0 \
-  --flash-attn \
-  --mlock \
-  --parallel 2 \
-  --cont-batching
-```
-
----
-
-### M.14 Quick-Reference Comparison
-
-| Dimension | Android (flagship) | Android (budget) | M1 base | M4 Max |
+| Chip | Memory | Max practical model | Recommended quant | Notes |
 |---|---|---|---|---|
-| RAM | 8–16 GB | 3–6 GB | 8–16 GB | 36–128 GB |
-| GPU acceleration | Vulkan (limited) | None | Metal | Metal |
-| Recommended max model | 7B Q4_K_M | 3B Q4_K_M | 13B Q4_K_M | 70B Q8_0 |
-| Decode speed (7B Q4) | 20–40 tok/s | 5–15 tok/s | 25–35 tok/s | 100–150 tok/s |
-| Thermal limit | 2–5 min at full speed | 1–2 min | Sustained (fan) | Sustained (fan) |
-| Best use case | Edge / offline apps | Low-power IoT | Dev workstation | On-prem small team |
-| Deployment path | ADB / Play Store | Termux / ADB | Homebrew / source | Homebrew / source |
+| M1 / M2 (8 GB) | 8 GB | 7B | Q4_K_M | Leave 3 GB for OS + KV cache |
+| M1 / M2 (16 GB) | 16 GB | 13B | Q4_K_M | Comfortable for 7B at Q8_0 |
+| M1 / M2 Pro (16 GB) | 16 GB | 13B | Q4_K_M | Same memory, better CPU |
+| M1 / M2 Pro (32 GB) | 32 GB | 13B | Q8_0 or 7B F16 | |
+| M1 / M2 Max (64 GB) | 64 GB | 70B | Q4_K_M | Comfortable 34B at Q5_K_M |
+| M1 / M2 Ultra (96–192 GB) | Up to 192 GB | 70B+ | Q8_0 or higher | Research-grade local inference |
+| M3 / M4 (base, 16 GB) | 16 GB | 13B | Q4_K_M | Faster than M1/M2 base |
+| M3 / M4 Max (48–128 GB) | Up to 128 GB | 70B | Q4_K_M to Q8_0 | Best perf/watt on laptop |
+| M4 Ultra (192 GB) | 192 GB | 405B | Q4_K_M | Full Llama-3 405B fits |
+
+**Memory budget formula:** `Available for inference = Total RAM − 2 GB (OS) − KV cache size`. The KV cache for a 7B model at 4K context in fp16 is roughly 2 GB; at 32K context it is roughly 16 GB. Reduce `--ctx-size` if you are pushing the memory limit.
 
 ---
 
-*See Appendix B for installation of vLLM and llama.cpp on Linux/CUDA systems, Appendix D for the complete llama.cpp CLI flag reference, and Chapter 28 for llama.cpp as a general-purpose inference platform.*
+### M.12 Benchmarking on Apple Silicon
+
+```bash
+# Standard throughput benchmark — run 3 times for stable average
+./build/bin/llama-bench \
+    --model /path/to/Qwen2.5-7B-Instruct-Q4_K_M.gguf \
+    --n-gpu-layers 999 \
+    -p 512 \    # prompt tokens (tests prefill speed)
+    -n 128 \    # generation tokens (tests decode speed — what users experience)
+    -r 3        # repetitions
+
+# Expected output format:
+# model      | n_gpu_layers | test    | t/s
+# Qwen2.5-7B | 99           | pp512   | 720.45 ± 3.2   (prefill)
+# Qwen2.5-7B | 99           | tg128   | 43.21  ± 0.8   (decode)
+```
+
+**Reading the output:** `pp` is prompt processing (prefill) throughput — how fast the model processes your input prompt. `tg` is token generation (decode) throughput — how many tokens per second the model generates. Users experience the `tg` number: 43 tokens/sec is comfortable for interactive use; below 10 tokens/sec feels noticeably slow.
+
+**Monitoring memory pressure during inference:**
+
+```bash
+# macOS memory pressure indicator (open in another terminal during inference)
+vm_stat 2 | awk 'NR>1 { printf "Free: %.1f GB  Wired: %.1f GB\n",
+    $1*4096/1e9, $6*4096/1e9 }'
+
+# More detailed — Activity Monitor → Memory tab → Memory Pressure graph
+# Green = healthy, Yellow = moderate pressure, Red = swap is being used heavily
+```
+
+If the memory pressure graph turns red during inference, the model is too large for your configuration. Reduce `--ctx-size` first, then consider a more aggressive quantization.
+
+---
+
+### M.13 Production Configuration for Apple Silicon
+
+```bash
+# Production-grade llama-server for an Apple Silicon Mac used as a local API endpoint
+./build/bin/llama-server \
+    --model /Users/you/models/Qwen2.5-7B-Instruct-Q4_K_M.gguf \
+    --n-gpu-layers 999 \      # all layers to Metal GPU
+    --ctx-size 8192 \         # 8K context window
+    --parallel 4 \            # 4 concurrent request slots
+    --cont-batching \         # batch tokens from multiple requests together (Chapter 3)
+    --flash-attn \            # Flash Attention: reduces memory BW for long contexts (Chapter 5)
+    --mlock \                 # lock model weights in RAM; prevent OS from swapping them
+    --batch-size 512 \        # prefill batch size
+    --ubatch-size 128 \       # micro-batch size for decode
+    --host 0.0.0.0 \
+    --port 8080 \
+    --metrics \               # expose /metrics endpoint for Prometheus scraping
+    --log-prefix \
+    --log-timestamps
+```
+
+**Flag explanations for newcomers:**
+
+`--cont-batching` enables continuous batching — the scheduler described in Chapter 3. Rather than processing one request at a time, the server batches tokens from multiple in-flight requests together in each GPU pass. This dramatically improves throughput when multiple clients are active simultaneously, at no quality cost.
+
+`--flash-attn` enables the Flash Attention algorithm (Chapter 5). Instead of materialising the full N×N attention score matrix in memory — which grows quadratically with context length — Flash Attention computes attention in tiles that fit in fast on-chip memory. On Apple Silicon this reduces the memory bandwidth cost of long contexts and can increase decode speed by 20–30% at 8K+ context lengths.
+
+`--mlock` locks the model weights into RAM, preventing macOS from paging them to disk under memory pressure. Without this flag, an OS-level memory event (another app allocating a large buffer) can cause model weights to be swapped to disk mid-inference, producing a severe latency spike. On a system dedicated to inference, always use `--mlock`.
+
+---
+
+### M.14 Android vs Apple Silicon — Quick Comparison
+
+| Dimension | Android (high-end) | Apple Silicon |
+|---|---|---|
+| **GPU acceleration** | SME2/NEON (CPU SIMD), no Metal | Metal (full GPU) |
+| **Memory architecture** | Separate CPU/GPU pools or fully shared (SoC-dependent) | Fully unified — no copy cost |
+| **Max practical model** | 7B Q4 on 12 GB device | 70B Q4 on 64 GB M2 Max |
+| **Thermal throttling** | Aggressive (minutes) | Moderate (hours before throttle) |
+| **Persistent service** | Foreground service or accept termination | launchd plist — stable |
+| **Install complexity** | Three paths; toolchain setup required | Homebrew + cmake |
+| **Best use case** | On-device private inference, mobile apps | Developer laptop, local API endpoint |
+| **Battery impact** | High — limit inference duration | Manageable — M-series very efficient |
+
+---
+
+*For Raspberry Pi and NVIDIA Jetson deployment, see Appendix N. For the general llama.cpp CLI flag reference, see Appendix D. For quantization internals (GGUF, AWQ, FP8), see Chapter 10.*
