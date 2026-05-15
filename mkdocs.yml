@@ -182,3 +182,4 @@ nav:
     - "L — TurboQuant (Addendum)": appendices/appendix-l.md
     - "M — Mobile and Edge Deployment: Android and Apple Silicon": appendices/appendix-m.md
     - "N — Edge Inference on Linux SBCs: Raspberry Pi and NVIDIA Jetson": appendices/appendix-n.md
+    - "O — CI/CD Pipelines for LLM Inference Systems": appendices/appendix-o.md
