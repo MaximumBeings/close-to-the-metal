@@ -67,7 +67,7 @@ nav:
     - "Ch 3: Tokens, Sequences, and the Batch": part1-foundations/chapter03.md
     - "Ch 3.5: The Transformer Block": part1-foundations/chapter03b.md
     - "Ch 4: Attention Mechanics": part1-foundations/chapter04.md
-    - "Ch 4b: Attention Alternatives — Sliding Window, Linear Attention, SSMs, and Mamba": part1-foundations/chapter04b.md
+    - "Ch 4.5: Attention Alternatives — Sliding Window, Linear Attention, SSMs, and Mamba": part1-foundations/chapter04b.md
     - "Ch 5: Flash Attention": part1-foundations/chapter05.md
 
   - "Part II — Engine Internals":

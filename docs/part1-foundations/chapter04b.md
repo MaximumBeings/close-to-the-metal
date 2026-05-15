@@ -1,29 +1,35 @@
-# Chapter 4b — Attention Alternatives: Sliding Window, Linear Attention, State Space Models, and Mamba
-> *"The KV cache grows linearly with sequence length. Head compression (Chapter 4) makes the coefficient smaller. This chapter attacks the growth rate itself."*
+# Chapter 4.5 — Attention Alternatives: Sliding Window, Linear Attention, State Space Models, and Mamba
+
+> *"The KV cache grows linearly with sequence length. Head compression makes the coefficient smaller. This chapter attacks the growth rate itself."*
 
 ---
 
-> **Companion to:** Chapter 4 (Attention Mechanics) and Chapter 6 (PagedAttention).
+## Why This Chapter Exists
 
-> Uses the same seed=42 embedding table throughout for cross-document consistency.
+Chapter 4 showed you how attention variants — MQA, GQA, MLA — reduce the *coefficient* of KV cache growth. For a 70B model with GQA at 128K context, the cache drops from ~270 GB to ~34 GB. That is an 8× win. But look at the formula again:
 
----
+```
+cache_GQA = 2 × N × Hkv × D × L × bytes
+                    ↑
+                    N is still here
+```
 
-## Table of Contents
+A 100K-token session has 25× the cache of a 4K-token session, regardless of which head-sharing strategy you use. MQA, GQA, and MLA make the coefficient smaller; they do not change the growth rate. For long-context serving at 128K–1M tokens, that linear growth is the next wall.
 
-- [0. Glossary](#0-glossary)
-- [1. The Token-Length Problem](#1-the-token-length-problem)
-- [2. Sliding Window Attention](#2-sliding-window-attention)
-- [3. Linear Attention](#3-linear-attention)
-- [4. State Space Models (SSMs)](#4-state-space-models-ssms)
-- [5. Mamba — Selective SSMs](#5-mamba--selective-ssms)
-- [6. Memory Comparison Across All Four](#6-memory-comparison-across-all-four)
-- [7. Roofline Analysis](#7-roofline-analysis)
-- [8. The Modern Production Picture](#8-the-modern-production-picture)
-- [9. Code: Python Implementations](#9-code-python-implementations)
-- [10. Code: C++ mdspan Implementations](#10-code-c-mdspan-implementations)
-- [11. Exercises](#11-exercises)
-- [12. Exercise Solutions](#12-exercise-solutions)
+This chapter presents the four architectural families that attack the problem differently: **Sliding Window Attention** caps the cache at a fixed window size; **Linear Attention** replaces softmax with a kernel trick that compresses all past context into a constant-size state matrix; **State Space Models (SSMs)** use a learned recurrence to maintain a fixed-size hidden state; and **Mamba** makes that recurrence *selective* — the model decides per token what to remember and what to forget. Each approach trades some capability against a dramatic reduction in the memory footprint that grows with N.
+
+Every worked example in this chapter uses the same `numpy.random.seed(42)` embedding table as Chapter 4, so numbers are traceable with a pencil and cross-checkable against the previous chapter's output.
+
+**What you will know by the end:**
+
+- Why head compression alone cannot solve the long-context memory problem, and what growth rate means in practice.
+- Sliding window attention: the circular-buffer KV cache, attention sinks, and why Mistral chose W=4096.
+- Linear attention: the feature-map trick that converts O(N) softmax into an O(1) state update, with the full S-matrix recurrence traced by hand.
+- Fixed SSMs: the state-space model equations, discretization (A_bar, B_bar), and impulse response worked step-by-step.
+- Mamba and selective SSMs: how input-dependent gating (Δ_t, B_t, C_t) gives the model per-token control over memory, and why this matters for language.
+- Memory comparison across all four families: exact byte counts at toy scale and production scale.
+- Roofline analysis: where each approach sits on the compute/bandwidth plane and which regime favors which architecture.
+- Production deployment: how vLLM and llama.cpp expose these mechanisms, and when to reach for each.
 
 ---
 
