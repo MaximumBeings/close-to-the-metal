@@ -17,7 +17,7 @@ hide:
         <div class="book-rule"></div>
         <div class="book-engines">LLM Inference from First Principles</div>
         <div class="book-cover-footer">
-          <div class="book-authors">Oluwaseyi Awoga with Claude</div>
+          <div class="book-authors">Oluwaseyi Awoga, written with AI assistance</div>
           <div class="book-edition">46 Chapters · 12 Appendices · May 2026</div>
         </div>
       </div>
@@ -181,7 +181,7 @@ hide:
 <!-- ── FOOTER NOTE ───────────────────────────────────────────── -->
 <div class="book-footer">
   <em>"The first time you see a KV cache eviction cause a 40-second request, you will wish you had read Chapter 6 before it happened. This book is here so you read it first."</em>
-  <br><strong>— Oluwaseyi Awoga with Claude, May 2026</strong>
+  <br><strong>— Oluwaseyi Awoga, written with AI assistance, May 2026</strong>
 </div>
 
 </div>

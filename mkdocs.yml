@@ -1,6 +1,6 @@
 site_name: "Close to the Metal: LLM Inference from First Principles"
 site_description: "A Practitioner's Deep Guide to LLM Inference"
-site_author: "Oluwaseyi Awoga"
+site_author: "Oluwaseyi Awoga, written with AI assistance"
 docs_dir: docs
 site_dir: site
 use_directory_urls: false

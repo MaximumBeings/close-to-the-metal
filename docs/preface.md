@@ -154,5 +154,5 @@ If you are searching for a specific answer rather than reading linearly, use thi
 
 ---
 
-*— Oluwaseyi Awoga with Claude, May 2026*
+*— Oluwaseyi Awoga, written with AI assistance, May 2026*
 *May 2026*
