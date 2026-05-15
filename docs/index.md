@@ -18,7 +18,7 @@ hide:
         <div class="book-engines">LLM Inference from First Principles</div>
         <div class="book-cover-footer">
           <div class="book-authors">Oluwaseyi Awoga, written with AI assistance</div>
-          <div class="book-edition">47 Chapters · 12 Appendices · May 2026</div>
+          <div class="book-edition">47 Chapters · 14 Appendices · May 2026</div>
         </div>
       </div>
     </div>
@@ -29,7 +29,7 @@ hide:
     <p class="book-desc">A systems engineering textbook for engineers who serve LLMs in production. Core concepts are taught through two primary engines — <strong>vLLM</strong> and <strong>llama.cpp</strong> — with later chapters extending to <strong>SGLang</strong>, <strong>TensorRT-LLM</strong>, <strong>MLC-LLM</strong>, and <strong>Ollama</strong>. Every chapter includes worked arithmetic, companion code, and production-grade configurations.</p>
     <div class="book-metrics">
       <div class="book-metric"><span class="bm-n">47</span><span class="bm-l">chapters</span></div>
-      <div class="book-metric"><span class="bm-n">12</span><span class="bm-l">appendices</span></div>
+      <div class="book-metric"><span class="bm-n">14</span><span class="bm-l">appendices</span></div>
       <div class="book-metric"><span class="bm-n">46</span><span class="bm-l">code demos</span></div>
       <div class="book-metric"><span class="bm-n">11×</span><span class="bm-l">cost savings</span></div>
     </div>
@@ -159,7 +159,7 @@ hide:
     <div class="toc-part">
       <div class="toc-part-header toc-pa">
         <span class="toc-part-label">App.</span>
-        <span class="toc-part-title">Appendices A – K</span>
+        <span class="toc-part-title">Appendices A – N</span>
         <span class="toc-part-range">Reference</span>
       </div>
       <div class="toc-entries">
