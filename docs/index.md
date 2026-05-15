@@ -18,7 +18,7 @@ hide:
         <div class="book-engines">LLM Inference from First Principles</div>
         <div class="book-cover-footer">
           <div class="book-authors">Oluwaseyi Awoga, written with AI assistance</div>
-          <div class="book-edition">46 Chapters · 12 Appendices · May 2026</div>
+          <div class="book-edition">47 Chapters · 12 Appendices · May 2026</div>
         </div>
       </div>
     </div>
@@ -28,7 +28,7 @@ hide:
     <p class="book-quote">"The gap between 'I called the API' and 'I understand what just happened' is exactly the size of this book."</p>
     <p class="book-desc">A systems engineering textbook for engineers who serve LLMs in production. Core concepts are taught through two primary engines — <strong>vLLM</strong> and <strong>llama.cpp</strong> — with later chapters extending to <strong>SGLang</strong>, <strong>TensorRT-LLM</strong>, <strong>MLC-LLM</strong>, and <strong>Ollama</strong>. Every chapter includes worked arithmetic, companion code, and production-grade configurations.</p>
     <div class="book-metrics">
-      <div class="book-metric"><span class="bm-n">46</span><span class="bm-l">chapters</span></div>
+      <div class="book-metric"><span class="bm-n">47</span><span class="bm-l">chapters</span></div>
       <div class="book-metric"><span class="bm-n">12</span><span class="bm-l">appendices</span></div>
       <div class="book-metric"><span class="bm-n">46</span><span class="bm-l">code demos</span></div>
       <div class="book-metric"><span class="bm-n">11×</span><span class="bm-l">cost savings</span></div>
@@ -63,7 +63,7 @@ hide:
       <div class="toc-part-header toc-pi">
         <span class="toc-part-label">Part I</span>
         <span class="toc-part-title">Foundations</span>
-        <span class="toc-part-range">Ch 1–5</span>
+        <span class="toc-part-range">Ch 1–5.5</span>
       </div>
       <div class="toc-entries">
         <a href="part1-foundations/chapter01.html" class="toc-entry"><span class="toc-num">1</span><span class="toc-etitle">Two Engines, One Problem</span></a>
@@ -80,7 +80,7 @@ hide:
       <div class="toc-part-header toc-pii">
         <span class="toc-part-label">Part II</span>
         <span class="toc-part-title">Engine Internals</span>
-        <span class="toc-part-range">Ch 6–13</span>
+        <span class="toc-part-range">Ch 6–13.5</span>
       </div>
       <div class="toc-entries">
         <a href="part2-engine-internals/chapter06.html" class="toc-entry"><span class="toc-num">6</span><span class="toc-etitle">PagedAttention and the Block Manager</span></a>
@@ -101,7 +101,7 @@ hide:
       <div class="toc-part-header toc-piii">
         <span class="toc-part-label">Part III</span>
         <span class="toc-part-title">Production Configuration</span>
-        <span class="toc-part-range">Ch 14–21</span>
+        <span class="toc-part-range">Ch 14–21.5</span>
       </div>
       <div class="toc-entries">
         <a href="part3-production/chapter14.html" class="toc-entry"><span class="toc-num">14</span><span class="toc-etitle">The Eight vLLM Knobs + llama.cpp Equivalents</span></a>
@@ -120,7 +120,7 @@ hide:
       <div class="toc-part-header toc-piv">
         <span class="toc-part-label">Part IV</span>
         <span class="toc-part-title">Advanced Techniques</span>
-        <span class="toc-part-range">Ch 22–33</span>
+        <span class="toc-part-range">Ch 22–33.5</span>
       </div>
       <div class="toc-entries">
         <a href="part4-advanced/chapter22.html" class="toc-entry"><span class="toc-num">22</span><span class="toc-etitle">LoRA Serving and Adapter Hot-Swapping</span></a>
