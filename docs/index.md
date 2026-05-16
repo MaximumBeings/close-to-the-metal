@@ -18,7 +18,7 @@ hide:
         <div class="book-engines">LLM Inference from First Principles</div>
         <div class="book-cover-footer">
           <div class="book-authors">Oluwaseyi Awoga, written with AI assistance</div>
-          <div class="book-edition">51 Chapters · 24 Appendices · May 2026</div>
+          <div class="book-edition">51 Chapters · 26 Appendices · May 2026</div>
         </div>
       </div>
     </div>
@@ -29,7 +29,7 @@ hide:
     <p class="book-desc">A systems engineering textbook for engineers who serve LLMs in production. Core concepts are taught through two primary engines — <strong>vLLM</strong> and <strong>llama.cpp</strong> — with later chapters extending to <strong>SGLang</strong>, <strong>TensorRT-LLM</strong>, <strong>MLC-LLM</strong>, and <strong>Ollama</strong>. Every chapter includes worked arithmetic, companion code, and production-grade configurations.</p>
     <div class="book-metrics">
       <div class="book-metric"><span class="bm-n">51</span><span class="bm-l">chapters</span></div>
-      <div class="book-metric"><span class="bm-n">24</span><span class="bm-l">appendices</span></div>
+      <div class="book-metric"><span class="bm-n">26</span><span class="bm-l">appendices</span></div>
       <div class="book-metric"><span class="bm-n">46</span><span class="bm-l">code demos</span></div>
       <div class="book-metric"><span class="bm-n">11×</span><span class="bm-l">cost savings</span></div>
     </div>
@@ -163,32 +163,36 @@ hide:
     <div class="toc-part">
       <div class="toc-part-header toc-pa">
         <span class="toc-part-label">App.</span>
-        <span class="toc-part-title">Appendices A – V</span>
+        <span class="toc-part-title">Appendices A – X</span>
         <span class="toc-part-range">Reference</span>
       </div>
       <div class="toc-entries">
         <a href="appendices/appendix-a.html" class="toc-entry"><span class="toc-num">A</span><span class="toc-etitle">Mathematical Foundations</span></a>
+        <a href="appendices/appendix-a2.html" class="toc-entry"><span class="toc-num">A.2</span><span class="toc-etitle">Tensor Contractions — 2D/3D/5D/ND with CUDA, Triton, CUTLASS, Mojo</span></a>
+        <a href="appendices/appendix-a3.html" class="toc-entry"><span class="toc-num">A.3</span><span class="toc-etitle">The Chain Rule — From Scalars to Transformer Backpropagation</span></a>
         <a href="appendices/appendix-b.html" class="toc-entry"><span class="toc-num">B</span><span class="toc-etitle">Installation Guide — vLLM and llama.cpp</span></a>
-        <a href="appendices/appendix-c.html" class="toc-entry"><span class="toc-num">C</span><span class="toc-etitle">vLLM EngineArgs Complete Reference</span></a>
-        <a href="appendices/appendix-d.html" class="toc-entry"><span class="toc-num">D</span><span class="toc-etitle">llama.cpp CLI Flag Reference</span></a>
-        <a href="appendices/appendix-e.html" class="toc-entry"><span class="toc-num">E</span><span class="toc-etitle">Production Templates — Docker, YAML, nginx</span></a>
-        <a href="appendices/appendix-h.html" class="toc-entry"><span class="toc-num">H</span><span class="toc-etitle">Glossary — 70+ Terms Defined</span></a>
-        <a href="appendices/appendix-i.html" class="toc-entry"><span class="toc-num">I</span><span class="toc-etitle">References — 40+ Key Papers</span></a>
-        <a href="appendices/appendix-j.html" class="toc-entry"><span class="toc-num">J</span><span class="toc-etitle">CUDA C++ for Inference Engineers</span></a>
-        <a href="appendices/appendix-k.html" class="toc-entry"><span class="toc-num">K</span><span class="toc-etitle">Operational Decision Tree and Troubleshooting Guide</span></a>
-        <a href="appendices/appendix-l.html" class="toc-entry"><span class="toc-num">L</span><span class="toc-etitle">TurboQuant — Online Vector Quantization for KV Cache (Addendum)</span></a>
-        <a href="appendices/appendix-m.html" class="toc-entry"><span class="toc-num">M</span><span class="toc-etitle">Mobile and Edge Deployment — Android and Apple Silicon</span></a>
-        <a href="appendices/appendix-n.html" class="toc-entry"><span class="toc-num">N</span><span class="toc-etitle">Edge Inference on Linux SBCs — Raspberry Pi and NVIDIA Jetson</span></a>
-        <a href="appendices/appendix-o.html" class="toc-entry"><span class="toc-num">O</span><span class="toc-etitle">CI/CD Pipelines for LLM Inference Systems</span></a>
-        <a href="appendices/appendix-p.html" class="toc-entry"><span class="toc-num">P</span><span class="toc-etitle">Introduction to Triton — Python-Embedded GPU Kernel Programming</span></a>
-        <a href="appendices/appendix-q.html" class="toc-entry"><span class="toc-num">Q</span><span class="toc-etitle">CUTLASS and Tensor Cores — The Compiled Performance Layer</span></a>
-        <a href="appendices/appendix-r.html" class="toc-entry"><span class="toc-num">R</span><span class="toc-etitle">Introduction to Mojo — Systems Performance in Python Syntax</span></a>
-        <a href="appendices/appendix-s.html" class="toc-entry"><span class="toc-num">S</span><span class="toc-etitle">std::mdspan for CPU Inference — Multidimensional Views in C++23</span></a>
+        <a href="appendices/appendix-c.html" class="toc-entry"><span class="toc-num">C</span><span class="toc-etitle">PyTorch for LLM Inference — Tensors, Devices, Compile, Quantization</span></a>
+        <a href="appendices/appendix-d.html" class="toc-entry"><span class="toc-num">D</span><span class="toc-etitle">vLLM EngineArgs Complete Reference</span></a>
+        <a href="appendices/appendix-e.html" class="toc-entry"><span class="toc-num">E</span><span class="toc-etitle">llama.cpp CLI Flag Reference</span></a>
+        <a href="appendices/appendix-f.html" class="toc-entry"><span class="toc-num">F</span><span class="toc-etitle">Production Templates — Docker, YAML, nginx</span></a>
+        <a href="appendices/appendix-g.html" class="toc-entry"><span class="toc-num">G</span><span class="toc-etitle">Benchmarking Reference — Metrics and Methodology</span></a>
+        <a href="appendices/appendix-h.html" class="toc-entry"><span class="toc-num">H</span><span class="toc-etitle">Operational Decision Tree and Troubleshooting Guide</span></a>
+        <a href="appendices/appendix-i.html" class="toc-entry"><span class="toc-num">I</span><span class="toc-etitle">C++ Build Patterns for Inference Systems</span></a>
+        <a href="appendices/appendix-j.html" class="toc-entry"><span class="toc-num">J</span><span class="toc-etitle">libtorch — The C++ API for Production Inference</span></a>
+        <a href="appendices/appendix-k.html" class="toc-entry"><span class="toc-num">K</span><span class="toc-etitle">std::mdspan for CPU Inference — Multidimensional Views in C++23</span></a>
+        <a href="appendices/appendix-l.html" class="toc-entry"><span class="toc-num">L</span><span class="toc-etitle">CUDA C++ Introduction for Inference Engineers</span></a>
+        <a href="appendices/appendix-m.html" class="toc-entry"><span class="toc-num">M</span><span class="toc-etitle">Introduction to Triton — Python-Embedded GPU Kernel Programming</span></a>
+        <a href="appendices/appendix-n.html" class="toc-entry"><span class="toc-num">N</span><span class="toc-etitle">CUTLASS and Tensor Cores — The Compiled Performance Layer</span></a>
+        <a href="appendices/appendix-o.html" class="toc-entry"><span class="toc-num">O</span><span class="toc-etitle">Introduction to Mojo — Systems Performance in Python Syntax</span></a>
+        <a href="appendices/appendix-p.html" class="toc-entry"><span class="toc-num">P</span><span class="toc-etitle">ROCm and AMD GPU Inference</span></a>
+        <a href="appendices/appendix-q.html" class="toc-entry"><span class="toc-num">Q</span><span class="toc-etitle">Mobile and Edge Deployment — Android and Apple Silicon</span></a>
+        <a href="appendices/appendix-r.html" class="toc-entry"><span class="toc-num">R</span><span class="toc-etitle">Edge Inference on Linux SBCs — Raspberry Pi and NVIDIA Jetson</span></a>
+        <a href="appendices/appendix-s.html" class="toc-entry"><span class="toc-num">S</span><span class="toc-etitle">CI/CD Pipelines for LLM Inference Systems</span></a>
         <a href="appendices/appendix-t.html" class="toc-entry"><span class="toc-num">T</span><span class="toc-etitle">Embedding and Reranker Model Serving</span></a>
-        <a href="appendices/appendix-u.html" class="toc-entry"><span class="toc-num">U</span><span class="toc-etitle">ROCm and AMD GPU Inference</span></a>
-        <a href="appendices/appendix-v.html" class="toc-entry"><span class="toc-num">V</span><span class="toc-etitle">Quantization Calibration Workflow — AWQ, GPTQ, FP8, and GGUF</span></a>
-        <a href="appendices/appendix-w.html" class="toc-entry"><span class="toc-num">W</span><span class="toc-etitle">PyTorch for LLM Inference — Tensors, Devices, Compile, Quantization</span></a>
-        <a href="appendices/appendix-x.html" class="toc-entry"><span class="toc-num">X</span><span class="toc-etitle">libtorch — The C++ API for Production Inference</span></a>
+        <a href="appendices/appendix-u.html" class="toc-entry"><span class="toc-num">U</span><span class="toc-etitle">Quantization Calibration Workflow — AWQ, GPTQ, FP8, and GGUF</span></a>
+        <a href="appendices/appendix-v.html" class="toc-entry"><span class="toc-num">V</span><span class="toc-etitle">TurboQuant — Online Vector Quantization for KV Cache (Addendum)</span></a>
+        <a href="appendices/appendix-w.html" class="toc-entry"><span class="toc-num">W</span><span class="toc-etitle">Glossary — 70+ Terms Defined</span></a>
+        <a href="appendices/appendix-x.html" class="toc-entry"><span class="toc-num">X</span><span class="toc-etitle">References — 40+ Key Papers</span></a>
       </div>
     </div>
 
