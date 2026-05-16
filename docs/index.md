@@ -18,7 +18,7 @@ hide:
         <div class="book-engines">LLM Inference from First Principles</div>
         <div class="book-cover-footer">
           <div class="book-authors">Oluwaseyi Awoga, written with AI assistance</div>
-          <div class="book-edition">51 Chapters · 22 Appendices · May 2026</div>
+          <div class="book-edition">51 Chapters · 24 Appendices · May 2026</div>
         </div>
       </div>
     </div>
@@ -29,7 +29,7 @@ hide:
     <p class="book-desc">A systems engineering textbook for engineers who serve LLMs in production. Core concepts are taught through two primary engines — <strong>vLLM</strong> and <strong>llama.cpp</strong> — with later chapters extending to <strong>SGLang</strong>, <strong>TensorRT-LLM</strong>, <strong>MLC-LLM</strong>, and <strong>Ollama</strong>. Every chapter includes worked arithmetic, companion code, and production-grade configurations.</p>
     <div class="book-metrics">
       <div class="book-metric"><span class="bm-n">51</span><span class="bm-l">chapters</span></div>
-      <div class="book-metric"><span class="bm-n">22</span><span class="bm-l">appendices</span></div>
+      <div class="book-metric"><span class="bm-n">24</span><span class="bm-l">appendices</span></div>
       <div class="book-metric"><span class="bm-n">46</span><span class="bm-l">code demos</span></div>
       <div class="book-metric"><span class="bm-n">11×</span><span class="bm-l">cost savings</span></div>
     </div>
@@ -187,6 +187,8 @@ hide:
         <a href="appendices/appendix-t.html" class="toc-entry"><span class="toc-num">T</span><span class="toc-etitle">Embedding and Reranker Model Serving</span></a>
         <a href="appendices/appendix-u.html" class="toc-entry"><span class="toc-num">U</span><span class="toc-etitle">ROCm and AMD GPU Inference</span></a>
         <a href="appendices/appendix-v.html" class="toc-entry"><span class="toc-num">V</span><span class="toc-etitle">Quantization Calibration Workflow — AWQ, GPTQ, FP8, and GGUF</span></a>
+        <a href="appendices/appendix-w.html" class="toc-entry"><span class="toc-num">W</span><span class="toc-etitle">PyTorch for LLM Inference — Tensors, Devices, Compile, Quantization</span></a>
+        <a href="appendices/appendix-x.html" class="toc-entry"><span class="toc-num">X</span><span class="toc-etitle">libtorch — The C++ API for Production Inference</span></a>
       </div>
     </div>
 

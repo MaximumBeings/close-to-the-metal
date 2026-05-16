@@ -105,30 +105,21 @@ This is not a hypothetical. Every technique described is in production somewhere
 
 ---
 
-**Appendices A–V** provide reference material designed for repeated use.
+**Appendices A–X** (24 appendices, grouped by theme) provide reference material designed for repeated use.
 
-- **A** — Mathematical foundations (softmax, attention, RoPE, RMSNorm)
-- **B** — Installation guides for vLLM and llama.cpp
-- **C** — vLLM EngineArgs complete reference
-- **D** — llama.cpp CLI flag reference
-- **E** — Production deployment templates (Dockerfiles, YAML, nginx configs)
-- **F** — Benchmarking scripts
-- **G** — C++ build patterns
-- **H** — Glossary of 85+ terms including all concepts from the "b" chapters
-- **I** — Curated bibliography of 40+ papers
-- **J** — Introduction to CUDA C++ for inference engineers
-- **K** — Operational decision tree for diagnosing high latency, low throughput, and OOM errors
-- **L** — TurboQuant online vector quantization addendum
-- **M** — Deployment guide for Android, Apple Silicon, and MLX (Apple's unified-memory ML framework)
-- **N** — Edge inference on Raspberry Pi and NVIDIA Jetson
-- **O** — CI/CD pipeline guide — model registries, quality evaluation gates, canary deployments, and SDET safety testing
-- **P** — Introduction to Triton — the `@triton.jit` programming model, tile-based GEMM, fused softmax, autotuning, and how FlashAttention-2 is built in Triton
-- **Q** — CUTLASS and Tensor Cores deep dive — MMA instruction anatomy, CuTe layout algebra, FP8 and 2:4 sparse GEMM, epilogue fusion, and how TRT-LLM uses CUTLASS internally
-- **R** — Introduction to Mojo — `fn`/`def`, SIMD types, `parallelize`, ownership semantics, and the MAX inference engine for portable high-performance CPU/GPU deployment
-- **S** — `std::mdspan` for CPU Inference — C++23 multidimensional views, layout policies (`layout_right`, `layout_left`, `layout_stride`, custom tiled layouts), accessor policies for FP8 dequantisation and aligned SIMD loads, `submdspan` zero-copy tensor slicing, tiled GEMM, multi-head attention with mdspan, KV cache slab management, and `std::linalg` BLAS dispatch
-- **T** — Embedding and Reranker Model Serving — encoder-only architecture, CLS/mean/last-token pooling, L2 normalisation, BGE-M3 hybrid retrieval (dense + sparse + multi-vector), vLLM `task=embed` and `task=score` modes, llama.cpp embedding and reranking servers, reranker latency budgets, full RAG stack architecture and GPU allocation guide
-- **U** — ROCm and AMD GPU Inference — MI300X architecture (192 GB HBM3, 5.3 TB/s bandwidth, unified CPU-GPU memory), CDNA3 vs RDNA3, ROCm 6.1 installation and Docker setup, vLLM on ROCm, llama.cpp HIP build and multi-GPU configuration, `rocm-smi` and `rocprof` profiling, CUDA → HIP porting with `hipify-clang`, Composable Kernel (AMD's CUTLASS), common issues and fixes, MI300X vs H100 decision guide
-- **V** — Quantization Calibration Workflow — AWQ calibration pipeline with custom domain data, GPTQ second-order calibration, FP8 static vs dynamic calibration with `llm-compressor`, GGUF `llama-quantize` and importance-matrix IQ quantization, perplexity measurement, `lm-evaluation-harness` task benchmarks, quality thresholds and rejection criteria, end-to-end worked example (Llama 3.1 70B → FP8)
+*Foundations* — **A** (Mathematical Foundations), **B** (Installation Guide), **W** (PyTorch for LLM Inference: dtypes, devices, `torch.compile`, quantization APIs, `torch.distributed`, custom ops, profiling, `torch.export`)
+
+*LLM Engine References* — **C** (vLLM EngineArgs), **D** (llama.cpp CLI), **E** (Production Templates), **F** (Benchmarking Reference), **K** (Operational Decision Tree)
+
+*Systems Programming — CPU* — **G** (C++ Build Patterns), **X** (libtorch: The C++ API — CMake build, `torch::Tensor`, `torch::jit::load`, IValue system, custom CUDA ops in C++, inference server example, Python→C++ cheatsheet), **S** (`std::mdspan` for CPU Inference — C++23 multidimensional views, custom layouts, FP8 accessor, tiled GEMM, KV cache management)
+
+*GPU Kernel Programming* — **J** (CUDA C++ Introduction), **P** (Introduction to Triton), **Q** (CUTLASS and Tensor Cores), **R** (Introduction to Mojo)
+
+*Hardware Platforms* — **U** (ROCm and AMD GPU — MI300X, HIP porting, Composable Kernel, cost comparison), **M** (Mobile and Edge: Android, Apple Silicon, MLX), **N** (Edge Inference: Raspberry Pi and NVIDIA Jetson)
+
+*Production and Serving* — **O** (CI/CD Pipelines), **T** (Embedding and Reranker Serving — BGE-M3, ColBERT, vLLM embed/score), **V** (Quantization Calibration — AWQ, GPTQ, FP8, GGUF), **L** (TurboQuant Addendum)
+
+*Reference* — **H** (Glossary, 85+ terms), **I** (References, 40+ papers)
 
 ---
 
@@ -225,6 +216,8 @@ If you are searching for a specific answer rather than reading linearly, use thi
 | **How do I serve BGE or E5 embedding models and rerankers for RAG?** | Appendix T |
 | **How do I run vLLM on an AMD MI300X instead of NVIDIA?** | Appendix U |
 | **How do I calibrate and quantize my own model to AWQ, GPTQ, FP8, or GGUF?** | Appendix V |
+| **How does PyTorch work under the hood — dtypes, strides, inference mode, torch.compile, custom ops?** | Appendix W |
+| **How do I build an inference server directly in C++ using libtorch without a Python runtime?** | Appendix X |
 
 ---
 
