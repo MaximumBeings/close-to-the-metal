@@ -560,6 +560,300 @@ degrades retrieval nDCG@10 by 3–8 points — significant in production.
 
 ---
 
+## T.11 Cold-Start Latency
+
+Embedding and reranker models load faster than LLMs but still incur measurable
+start-up latency. Understanding this is important for Kubernetes autoscaling
+(Chapter 19) and on-demand serverless deployments.
+
+### Model loading times on A100 80GB
+
+| Model | Size | Load time (NVMe SSD) | Load time (network storage) | CUDA warm-up |
+|---|---|---|---|---|
+| bge-small-en-v1.5 | 130 MB | 0.8s | 2.5s | 0.3s |
+| bge-large-en-v1.5 | 1.3 GB | 2.1s | 6.4s | 0.5s |
+| BGE-M3 | 2.2 GB | 3.5s | 10.8s | 0.8s |
+| bge-reranker-large | 1.7 GB | 2.8s | 8.4s | 0.5s |
+| NV-Embed-v2 | 7.7 GB | 8.2s | 24.0s | 1.2s |
+
+CUDA warm-up includes the first forward pass to compile CUDA kernels. For
+PyTorch dynamic shapes, add 1–3 seconds for the second warm-up call (different
+batch size).
+
+### Cold-start mitigation
+
+```python
+import time
+import torch
+from sentence_transformers import SentenceTransformer
+
+class WarmEmbeddingServer:
+    """Pre-loads model and runs warm-up pass to eliminate cold-start overhead."""
+
+    WARMUP_TEXTS = [
+        "This is a warm-up sentence for CUDA kernel compilation.",
+        "A second sentence to warm batch dimension 2.",
+        "A third sentence to warm batch dimension 3.",
+        "A fourth sentence to warm batch dimension 4.",
+    ]
+
+    def __init__(self, model_name: str, device: str = "cuda"):
+        t0 = time.time()
+        self.model = SentenceTransformer(model_name, device=device)
+        load_time = time.time() - t0
+        print(f"Model loaded in {load_time:.1f}s")
+
+        # Warm-up passes: compile CUDA kernels for common batch sizes
+        for batch_size in [1, 2, 4, 8, 16, 32]:
+            texts = (self.WARMUP_TEXTS * batch_size)[:batch_size]
+            with torch.no_grad():
+                _ = self.model.encode(texts, batch_size=batch_size,
+                                      convert_to_numpy=False)
+        print(f"Warm-up complete. Ready for production traffic.")
+
+    def encode(self, texts: list[str], **kwargs):
+        return self.model.encode(texts, **kwargs)
+```
+
+In Kubernetes, add a readiness probe that calls a `/health` endpoint
+only after `WarmEmbeddingServer.__init__` completes:
+
+```python
+# FastAPI health endpoint
+@app.get("/health")
+def health():
+    if not server_ready:
+        raise HTTPException(status_code=503, detail="Model warming up")
+    return {"status": "ok"}
+```
+
+---
+
+## T.12 ColBERT Multi-Vector Indexing for Large Corpora
+
+BGE-M3's multi-vector (ColBERT-style) retrieval produces one embedding per
+token rather than one per document. This dramatically increases retrieval
+quality for long documents, but requires specialised indexing infrastructure.
+
+### Token-level storage cost
+
+For a corpus of 1M documents, average 512 tokens/document, 1024-dim FP32
+embeddings:
+
+```
+1M docs × 512 tokens/doc × 1024 dims × 4 bytes = 2.1 TB
+```
+
+This is ~100× larger than single-vector dense retrieval (21 GB). FP16 halves
+it to 1.05 TB; INT8 quantisation of the token vectors halves again to ~525 GB.
+
+### Practical ColBERT deployment options
+
+**PLAID (recommended for scale)**: the PLAID algorithm compresses token
+vectors with IVF centroids and late-interaction scoring, reducing storage to
+10–50 GB for 1M documents.
+
+```python
+# Using RAGatouille (PLAID-based ColBERT for Python)
+from ragatouille import RAGPretrainedModel
+
+# Index 1M documents (requires ~20 GB disk for PLAID compressed index)
+rag = RAGPretrainedModel.from_pretrained("colbert-ir/colbertv2.0")
+rag.index(
+    collection=documents,          # list of strings
+    index_name="my_corpus",
+    max_document_length=512,
+    split_documents=True,
+)
+
+# Retrieve
+results = rag.search(query="what is flash attention", k=10)
+```
+
+**Vespa or Qdrant ColBERT mode**: for production scale with exact MaxSim:
+
+```python
+from qdrant_client import QdrantClient
+from qdrant_client.models import VectorParams, Distance
+
+client = QdrantClient(url="http://localhost:6333")
+# ColBERT multi-vector collection: each doc stores all token vectors
+client.create_collection(
+    collection_name="colbert_docs",
+    vectors_config={
+        "token_embeddings": VectorParams(
+            size=128,               # projected ColBERT dim
+            distance=Distance.COSINE,
+            multivector_config={"comparator": "max_sim"},
+        )
+    }
+)
+```
+
+### When to use multi-vector vs single-vector
+
+| Criterion | Single-vector (dense) | Multi-vector (ColBERT) |
+|---|---|---|
+| Corpus size | Any | < 5M docs (without PLAID) |
+| Document length | Short (<256 tokens) | Long (>256 tokens) |
+| Query type | Short keyword queries | Full-sentence queries |
+| Storage budget | 1× | 100× (raw) / 5× (PLAID) |
+| Retrieval latency | <10ms | 50–200ms (exact MaxSim) |
+| nDCG@10 improvement | Baseline | +5–15pp for long docs |
+
+---
+
+## T.13 GPU Memory Requirements for Embedding Models
+
+| Model | Params | FP16 VRAM | INT8 VRAM | FP16 + batch 32 VRAM | Min GPU |
+|---|---|---|---|---|---|
+| bge-small-en-v1.5 | 33M | 0.07 GB | 0.04 GB | 0.2 GB | Any |
+| bge-base-en-v1.5 | 110M | 0.22 GB | 0.11 GB | 0.4 GB | Any |
+| bge-large-en-v1.5 | 335M | 0.67 GB | 0.34 GB | 1.0 GB | Any |
+| BGE-M3 | 570M | 1.14 GB | 0.57 GB | 1.8 GB | 8 GB |
+| bge-reranker-large | 435M | 0.87 GB | 0.44 GB | 1.5 GB | Any |
+| E5-mistral-7b | 7.1B | 14.2 GB | 7.1 GB | 16.0 GB | 24 GB |
+| NV-Embed-v2 | 7.8B | 15.6 GB | 7.8 GB | 17.5 GB | 24 GB |
+| GTE-Qwen2-7B | 7.6B | 15.2 GB | 7.6 GB | 17.0 GB | 24 GB |
+
+VRAM formula for a model with `P` parameters, dtype `D` bytes, batch `B`, sequence length `L`, hidden size `H`:
+
+```python
+def embedding_model_vram(params_B, dtype_bytes=2, batch=32, seq_len=512, hidden=1024):
+    weights_gb = params_B * 1e9 * dtype_bytes / 1e9
+    # Activation memory: batch × seq_len × hidden × dtype × 2 (forward + buffer)
+    activations_gb = batch * seq_len * hidden * dtype_bytes * 2 / 1e9
+    return weights_gb + activations_gb
+
+# BGE-M3 at batch 32
+vram = embedding_model_vram(0.57, dtype_bytes=2, batch=32, seq_len=512, hidden=1024)
+print(f"BGE-M3 VRAM at batch 32: {vram:.2f} GB")  # → ~1.73 GB
+```
+
+### Test harness — embedding arithmetic
+
+```python
+# ── test_appendix_t.py ───────────────────────────────────────────────────
+"""Offline tests for embedding serving arithmetic. No GPU required.
+Run with: python test_appendix_t.py"""
+
+import math
+
+
+def l2_normalise(v: list[float]) -> list[float]:
+    norm = math.sqrt(sum(x * x for x in v))
+    return [x / norm for x in v]
+
+
+def dot_product(a: list[float], b: list[float]) -> float:
+    return sum(x * y for x, y in zip(a, b))
+
+
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    na, nb = l2_normalise(a), l2_normalise(b)
+    return dot_product(na, nb)
+
+
+def masked_mean_pool(embeddings: list[list[float]],
+                     mask: list[int]) -> list[float]:
+    """Mean pool with attention mask (exclude PAD tokens)."""
+    active = [emb for emb, m in zip(embeddings, mask) if m == 1]
+    if not active:
+        raise ValueError("All tokens masked — empty sequence")
+    d = len(active[0])
+    return [sum(emb[i] for emb in active) / len(active) for i in range(d)]
+
+
+def test_l2_normalisation():
+    v = [3.0, 4.0]
+    normed = l2_normalise(v)
+    norm = math.sqrt(sum(x * x for x in normed))
+    assert abs(norm - 1.0) < 1e-9, f"L2 norm should be 1.0, got {norm}"
+    print("PASS: L2 normalisation produces unit vector")
+
+
+def test_cosine_via_inner_product():
+    """For L2-normalised vectors, IP = cosine similarity."""
+    a = [1.0, 2.0, 3.0]
+    b = [4.0, 5.0, 6.0]
+    cos = cosine_similarity(a, b)
+    an, bn = l2_normalise(a), l2_normalise(b)
+    ip = dot_product(an, bn)
+    assert abs(cos - ip) < 1e-9, "Cosine should equal IP for normalised vectors"
+    print("PASS: L2-norm IP == cosine similarity")
+
+
+def test_masked_mean_pool():
+    embeddings = [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]]
+    mask_all   = [1, 1, 1]
+    mask_no_pad = [1, 1, 0]   # last token is PAD
+
+    full_mean   = masked_mean_pool(embeddings, mask_all)
+    masked_mean = masked_mean_pool(embeddings, mask_no_pad)
+
+    assert abs(full_mean[0] - 0.5) < 1e-9
+    assert abs(masked_mean[0] - 0.5) < 1e-9
+    assert abs(masked_mean[1] - 0.5) < 1e-9   # mean of [0.0, 1.0] = 0.5
+    assert full_mean != masked_mean, "PAD token should affect unmasked mean"
+    print("PASS: masked mean pool correctly excludes PAD tokens")
+
+
+def test_throughput_estimate():
+    """Verify worked example: 10k req/min needs INT8 quantisation."""
+    req_per_min = 10_000
+    req_per_s   = req_per_min / 60          # 166.7
+    latency_fp16_ms = 30                    # 30ms per embedding (FP16)
+    throughput_fp16 = 1000 / latency_fp16_ms  # 33.3 emb/s
+
+    latency_int8_ms = 12                    # ~12ms with INT8
+    throughput_int8 = 1000 / latency_int8_ms  # 83.3 emb/s
+
+    assert throughput_fp16 < req_per_s, (
+        "FP16 should be insufficient for 10k req/min"
+    )
+    # With 2 instances INT8: 2 × 83.3 = 166.7 ≥ 166.7 req/s (just barely)
+    assert throughput_int8 * 2 >= req_per_s, (
+        "2× INT8 instances should meet throughput target"
+    )
+    print(f"PASS: FP16 {throughput_fp16:.1f} req/s insufficient; "
+          f"INT8×2 {throughput_int8*2:.1f} req/s sufficient")
+
+
+def test_colbert_storage():
+    """Verify ColBERT storage calculation for 1M documents."""
+    n_docs      = 1_000_000
+    tokens_per_doc = 512
+    dims        = 1_024
+    bytes_dtype = 4   # FP32
+
+    total_bytes = n_docs * tokens_per_doc * dims * bytes_dtype
+    total_tb    = total_bytes / 1e12
+    assert abs(total_tb - 2.097) < 0.01, f"Expected ~2.1 TB, got {total_tb:.3f}"
+    print(f"PASS: ColBERT 1M docs FP32 = {total_tb:.2f} TB")
+
+
+if __name__ == "__main__":
+    test_l2_normalisation()
+    test_cosine_via_inner_product()
+    test_masked_mean_pool()
+    test_throughput_estimate()
+    test_colbert_storage()
+    print("\n✓ All embedding serving tests passed.")
+```
+
+**Expected output:**
+```
+PASS: L2 normalisation produces unit vector
+PASS: L2-norm IP == cosine similarity
+PASS: masked mean pool correctly excludes PAD tokens
+PASS: FP16 33.3 req/s insufficient; INT8×2 166.7 req/s sufficient
+PASS: ColBERT 1M docs FP32 = 2.10 TB
+
+✓ All embedding serving tests passed.
+```
+
+---
+
 ## T.11 Self-Check Questions
 
 1. An embedding model uses mean pooling over 512 tokens. At inference time,

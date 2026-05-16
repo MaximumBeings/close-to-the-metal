@@ -516,6 +516,306 @@ extractions into multiple simpler constrained calls.
 
 ---
 
+## 12.5.12 Tokenizer Misalignment: A Concrete Failure
+
+The tokenizer alignment problem is easy to state abstractly but surprisingly
+hard to debug in practice. This section shows a concrete failure and its fix.
+
+### The scenario
+
+Two models — `model-A` and `model-B` — both use a 128K vocabulary but were
+trained with different tokenizers. A user pre-computes a JSON transition table
+against `model-A`'s tokenizer, then swaps in `model-B` without regenerating
+the table.
+
+**What breaks**: the token ID for the string `"true"` differs between the two
+vocabularies. `model-A` encodes `true` as token 4321; `model-B` encodes it as
+token 9087. The transition table has an entry for token 4321 in the
+`IN_BOOL_VALUE` state; when `model-B` generates token 9087, the lookup returns
+`INVALID` and masks it — even though `true` is semantically valid.
+
+```python
+# Reproducing the misalignment
+def build_transition_table(tokenizer, fsm):
+    table = {}
+    for state in fsm.states:
+        for token_id in range(tokenizer.vocab_size):
+            token_str = tokenizer.decode([token_id])
+            table[(state, token_id)] = fsm.transition(state, token_str)
+    return table
+
+# Always key the cache on (schema_hash, vocab_hash), not on schema alone
+import hashlib
+
+def schema_tokenizer_key(schema: dict, tokenizer) -> str:
+    schema_hash = hashlib.sha256(str(schema).encode()).hexdigest()[:8]
+    vocab_bytes  = str(sorted(tokenizer.get_vocab().items())).encode()
+    vocab_hash   = hashlib.sha256(vocab_bytes).hexdigest()[:8]
+    return f"{schema_hash}_{vocab_hash}"
+
+_table_cache: dict = {}
+
+def get_transition_table(schema, tokenizer, fsm):
+    key = schema_tokenizer_key(schema, tokenizer)
+    if key not in _table_cache:
+        _table_cache[key] = build_transition_table(tokenizer, fsm)
+    return _table_cache[key]
+```
+
+If you change the model, the vocabulary hash changes, the cache key changes,
+and the table is rebuilt automatically. This is the fix `outlines` applies
+internally; if you build your own constraint machinery, replicate it.
+
+---
+
+## 12.5.13 Masking Order: Before or After Temperature?
+
+The logit mask must be applied **before** temperature scaling and softmax.
+This is the standard used by all major libraries but is occasionally
+implemented incorrectly in custom code:
+
+```python
+# WRONG — causes NaN at very low temperatures
+probs = torch.softmax(logits / temperature, dim=-1)   # temperature first
+probs[invalid_ids] = 0.0
+probs /= probs.sum()   # renormalise — may produce NaN if sum ≈ 0
+
+# CORRECT — set invalid to -inf before any temperature operation
+logits[invalid_ids] = float('-inf')      # exp(-inf) = 0 exactly — stable
+probs = torch.softmax(logits / temperature, dim=-1)   # then temperature
+```
+
+At temperature 0.0 (greedy decoding) with a constraint, use `argmax` over the
+masked logits directly rather than `softmax` to avoid 0/0:
+
+```python
+def constrained_greedy(logits, valid_ids):
+    import torch
+    mask = torch.full(logits.shape, float('-inf'))
+    mask[valid_ids] = logits[valid_ids]
+    return mask.argmax().item()
+```
+
+---
+
+## 12.5.14 Multi-Turn Constrained Decoding
+
+Constrained decoding usually applies to the entire model output, but in
+multi-turn systems you only want to constrain **assistant turns**, not user
+turns or system prompts.
+
+```python
+from outlines import models, generate
+
+def multi_turn_constrained(
+    model, tokenizer,
+    turns: list[dict],   # [{"role": "user"/"assistant", "content": "..."}]
+    schema: dict,
+):
+    """Generate the next assistant turn, constrained to schema."""
+    generator = generate.json(model, schema)
+    prompt = tokenizer.apply_chat_template(
+        turns, tokenize=False, add_generation_prompt=True
+    )
+    return generator(prompt, max_tokens=512)
+```
+
+**Critical**: you must **reset the FSM state** at the start of each new
+assistant turn. The FSM is stateful within a turn but stateless between turns:
+
+```
+Turn 1: FSM: START → ... → ACCEPT
+Turn 2: FSM must reset to START (not continue from ACCEPT!)
+```
+
+If the FSM is not reset, it begins turn 2 in `ACCEPT` state and immediately
+rejects all tokens — producing an empty or truncated output.
+
+---
+
+## 12.5.15 Regex Complexity and Safe Patterns
+
+| Pattern type | Approx. DFA states | Safe? | Notes |
+|---|---|---|---|
+| Fixed string `"shipped"` | ~8 | ✓ | One linear path |
+| Alternation `"a\|b\|c"` | ~10 | ✓ | Linear in choices |
+| Bounded repeat `[A-Z]{2,4}` | ~6 | ✓ | Finite |
+| Email `[\w.]+@[\w.]+\.[a-z]{2,4}` | ~50 | ✓ | Common field |
+| UUID `[0-9a-f]{8}-[0-9a-f]{4}-...` | ~40 | ✓ | Fixed-length |
+| Unbounded `.+` | ~3 | ⚠ | Very low constraint value |
+| Catastrophic `(a+)+b` | Exponential | ✗ | NFA→DFA blowup — avoid |
+| Lookahead `(?=...)` | Unsupported | ✗ | FSMs cannot express lookahead |
+
+Check regex safety with `interegular` before deploying:
+
+```python
+import interegular   # pip install interegular
+
+def check_regex_safety(pattern: str, max_states: int = 10_000) -> dict:
+    try:
+        fsm = interegular.parse_pattern(pattern).to_fsm()
+        n = len(fsm.states)
+        return {"safe": n < max_states, "states": n,
+                "warning": "" if n < max_states else f"{n} states — may be slow"}
+    except Exception as e:
+        return {"safe": False, "states": -1, "warning": str(e)}
+
+print(check_regex_safety(r"\d{4}-\d{2}-\d{2}"))  # → {'safe': True, ...}
+print(check_regex_safety(r"(a+)+b"))               # → {'safe': False, ...}
+```
+
+---
+
+## 12.5.16 Quantization and Constraint Interaction
+
+Quantized models (INT4, INT8, FP8) produce logit distributions that differ
+slightly from FP16. For constrained decoding, two effects matter:
+
+**Logit magnitude shifts**: quantization adds ~±0.5 noise to logits. The
+ranking of valid tokens is usually preserved, but the probability of
+marginally-valid tokens can shift by 1–5%. With only 1–2 valid tokens per
+step, this is irrelevant; with 10+ valid tokens, the selected token can change.
+
+**Regression test after quantization**: verify that constrained outputs remain
+schema-valid after quantization with a sampling run:
+
+```python
+import json, jsonschema
+
+def verify_constrained_outputs(outputs: list[str], schema: dict) -> dict:
+    passed = sum(1 for o in outputs if _is_valid(o, schema))
+    return {"total": len(outputs), "passed": passed,
+            "pass_rate": passed / len(outputs)}
+
+def _is_valid(output: str, schema: dict) -> bool:
+    try:
+        jsonschema.validate(json.loads(output), schema)
+        return True
+    except Exception:
+        return False
+
+# Acceptance criterion: pass_rate >= 0.99 after INT8 quantization
+# (100% for FP16; 1% budget for rare logit-rounding failures)
+```
+
+### Test harness — structured generation correctness
+
+```python
+# ── test_structured_gen.py ───────────────────────────────────────────────
+"""Offline tests for FSM masking and transition table correctness.
+No GPU required. Run with: python test_structured_gen.py"""
+
+import math
+
+# Minimal character-level FSM for JSON booleans
+STATES = {
+    "START":  {"t": "T1",     "f": "F1"},
+    "T1":     {"r": "T2"},
+    "T2":     {"u": "T3"},
+    "T3":     {"e": "ACCEPT"},
+    "F1":     {"a": "F2"},
+    "F2":     {"l": "F3"},
+    "F3":     {"s": "F4"},
+    "F4":     {"e": "ACCEPT"},
+    "ACCEPT": {},
+}
+
+def fsm_step(state, char):
+    return STATES.get(state, {}).get(char, "INVALID")
+
+def mask_logits(logits_dict, state):
+    valid = set(STATES.get(state, {}).keys())
+    return {k: (v if k in valid else float('-inf')) for k, v in logits_dict.items()}
+
+def softmax(logits_dict):
+    vals = list(logits_dict.values())
+    finite = [v for v in vals if v != float('-inf')]
+    if not finite:
+        raise ValueError("All logits are -inf — no valid token!")
+    m = max(finite)
+    exps = {k: (math.exp(v - m) if v != float('-inf') else 0.0)
+            for k, v in logits_dict.items()}
+    total = sum(exps.values())
+    return {k: v / total for k, v in exps.items()}
+
+
+def test_masking():
+    masked = mask_logits({"t": 2.0, "f": 1.5, "n": 3.0}, "START")
+    assert masked["t"] == 2.0
+    assert masked["f"] == 1.5
+    assert masked["n"] == float('-inf')
+    print("PASS: invalid tokens masked to -inf")
+
+def test_fsm_true():
+    s = "START"
+    for ch in "true":
+        s = fsm_step(s, ch)
+    assert s == "ACCEPT"
+    print("PASS: FSM accepts 'true'")
+
+def test_fsm_rejects_wrong_case():
+    s = "START"
+    s = fsm_step(s, "t")
+    s = fsm_step(s, "R")   # uppercase
+    assert s == "INVALID"
+    print("PASS: FSM rejects 'tRue'")
+
+def test_softmax_stability():
+    logits = {"t": 1.0, "f": float('-inf'), "n": float('-inf')}
+    probs = softmax(logits)
+    assert abs(probs["t"] - 1.0) < 1e-9
+    assert not any(math.isnan(v) for v in probs.values())
+    print("PASS: softmax(-inf) is numerically stable")
+
+def test_multi_turn_reset():
+    # Turn 1 ends in ACCEPT
+    s = "START"
+    for ch in "true":
+        s = fsm_step(s, ch)
+    assert s == "ACCEPT"
+    # Turn 2 MUST reset
+    s = "START"
+    for ch in "false":
+        s = fsm_step(s, ch)
+    assert s == "ACCEPT"
+    print("PASS: multi-turn FSM correctly resets between turns")
+
+def test_masking_order():
+    """Verify that applying mask before temperature avoids NaN."""
+    logits = {"t": 1.0, "f": float('-inf')}
+    temperature = 0.01   # very low
+    # Mask already applied above; apply temperature
+    scaled = {k: (v / temperature if v != float('-inf') else float('-inf'))
+              for k, v in logits.items()}
+    probs = softmax(scaled)
+    assert not any(math.isnan(v) for v in probs.values()), "NaN at low temperature!"
+    print("PASS: masking before temperature avoids NaN")
+
+
+if __name__ == "__main__":
+    test_masking()
+    test_fsm_true()
+    test_fsm_rejects_wrong_case()
+    test_softmax_stability()
+    test_multi_turn_reset()
+    test_masking_order()
+    print("\n✓ All structured generation tests passed.")
+```
+
+**Expected output:**
+```
+PASS: invalid tokens masked to -inf
+PASS: FSM accepts 'true'
+PASS: FSM rejects 'tRue'
+PASS: softmax(-inf) is numerically stable
+PASS: multi-turn FSM correctly resets between turns
+PASS: masking before temperature avoids NaN
+
+✓ All structured generation tests passed.
+```
+
+---
+
 ## Chapter Summary
 
 Structured generation resolves the reliability gap between what language models

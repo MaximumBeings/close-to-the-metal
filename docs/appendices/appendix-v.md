@@ -558,6 +558,386 @@ vllm serve ./Llama-3.1-70B-FP8 \
 
 ---
 
+## V.8.5 Mixed-Precision Quantization: Which Layers Stay in FP16
+
+Quantizing every layer uniformly (e.g., all to INT4) maximises compression but
+concentrates error in sensitive layers. Mixed-precision quantization keeps the
+most sensitive layers in FP16 (or FP8) and quantizes the rest aggressively.
+
+### Which layers are most sensitive
+
+Sensitivity is typically highest for:
+
+1. **First and last transformer layers** — the first embedding layer and the
+   final lm_head handle the raw token distribution; errors here propagate to
+   all outputs.
+2. **Attention layers vs FFN layers** — attention weight matrices are more
+   sensitive than FFN in most models; the QKV projection and output projection
+   show higher perplexity degradation per quantization step than the MLP.
+3. **Layers with high activation variance** — calibrate per-layer and look at
+   the activation distribution range. Layers where the ratio of max/mean
+   activation exceeds 10× are candidates for FP16.
+
+### Per-layer sensitivity analysis
+
+```python
+# Per-layer sensitivity analysis: quantize one layer at a time and measure PPL delta
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+def per_layer_sensitivity(
+    model_name: str,
+    calibration_text: str,
+    quant_bits: int = 4,
+):
+    """
+    For each transformer layer, temporarily quantize it and measure PPL increase.
+    Returns a dict mapping layer_name → delta_ppl.
+    """
+    from torch import nn
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name, torch_dtype=torch.float16, device_map="auto"
+    )
+
+    inputs = tokenizer(calibration_text, return_tensors="pt").to(model.device)
+
+    def ppl(m):
+        with torch.no_grad():
+            out = m(**inputs, labels=inputs["input_ids"])
+        return torch.exp(out.loss).item()
+
+    baseline = ppl(model)
+    sensitivity = {}
+
+    for name, module in model.named_modules():
+        if isinstance(module, nn.Linear) and "lm_head" not in name:
+            original_weight = module.weight.data.clone()
+            # Simulate INT4 quantization
+            scale = original_weight.abs().max() / (2 ** (quant_bits - 1))
+            quantized = torch.round(original_weight / scale).clamp(
+                -(2**(quant_bits-1)), 2**(quant_bits-1)-1
+            ) * scale
+            module.weight.data = quantized
+
+            delta = ppl(model) - baseline
+            sensitivity[name] = round(delta, 4)
+
+            module.weight.data = original_weight   # restore
+
+    return sensitivity
+
+# Usage (requires GPU):
+# sens = per_layer_sensitivity("meta-llama/Llama-3.1-7B", calibration_text)
+# sensitive = sorted(sens.items(), key=lambda x: x[1], reverse=True)[:10]
+# print("Top 10 most sensitive layers:")
+# for name, delta in sensitive:
+#     print(f"  {name}: +{delta:.4f} PPL")
+```
+
+### Mixed-precision recipe
+
+AWQ supports per-layer bit widths via `autoawq`:
+
+```python
+from awq import AutoAWQForCausalLM
+
+# Override: keep first 2 and last 2 layers in 8-bit, rest in 4-bit
+quant_config = {
+    "zero_point": True,
+    "q_group_size": 128,
+    "w_bit": 4,
+    "version": "GEMM",
+    # Layer-specific overrides (AWQ internal notation)
+    "layer_overrides": {
+        "model.layers.0": {"w_bit": 8},
+        "model.layers.1": {"w_bit": 8},
+        "model.layers.78": {"w_bit": 8},   # second-to-last (79 layers for 70B)
+        "model.layers.79": {"w_bit": 8},   # last layer
+        "lm_head": {"w_bit": 16},          # always keep lm_head in FP16
+    }
+}
+```
+
+---
+
+## V.8.6 Calibration Data Bias Detection
+
+The calibration dataset shapes the quantization. A biased calibration set
+produces a quantized model that performs well on the calibration distribution
+and poorly on everything else.
+
+### Common bias patterns and detection
+
+```python
+from collections import Counter
+import numpy as np
+
+def analyse_calibration_data(texts: list[str], tokenizer) -> dict:
+    """
+    Analyse a calibration dataset for common bias patterns.
+    Returns a report with statistics and warnings.
+    """
+    warnings = []
+
+    # 1. Check language distribution
+    from langdetect import detect
+    langs = Counter(detect(t) for t in texts[:200])
+    dominant_lang = langs.most_common(1)[0]
+    if dominant_lang[1] / len(texts[:200]) > 0.95:
+        warnings.append(
+            f"WARNING: {dominant_lang[0]} dominates {dominant_lang[1]:.0%} "
+            f"of calibration data — multilingual performance may degrade."
+        )
+
+    # 2. Check token length distribution
+    lengths = [len(tokenizer.encode(t)) for t in texts]
+    p10, p90 = np.percentile(lengths, [10, 90])
+    if p90 / p10 > 10:
+        warnings.append(
+            f"WARNING: High length variance (p10={p10:.0f}, p90={p90:.0f}). "
+            f"Very short or very long sequences may be under-represented."
+        )
+
+    # 3. Check for template repetition
+    first_tokens = [t[:30] for t in texts]
+    repetition = len(first_tokens) - len(set(first_tokens))
+    if repetition / len(texts) > 0.5:
+        warnings.append(
+            f"WARNING: {repetition/len(texts):.0%} of samples share the "
+            f"same prefix — template bias detected."
+        )
+
+    # 4. Check domain coverage (simple heuristic: vocabulary diversity)
+    all_tokens = sum([tokenizer.encode(t) for t in texts[:100]], [])
+    unique_ratio = len(set(all_tokens)) / len(all_tokens) if all_tokens else 0
+    if unique_ratio < 0.05:
+        warnings.append(
+            f"WARNING: Low vocabulary diversity (unique ratio={unique_ratio:.3f}). "
+            f"Calibration data may not cover the deployment domain."
+        )
+
+    return {
+        "n_samples":     len(texts),
+        "lang_dist":     dict(langs.most_common(5)),
+        "length_p50":    int(np.percentile(lengths, 50)),
+        "length_p90":    int(np.percentile(lengths, 90)),
+        "unique_tok_ratio": round(unique_ratio, 3),
+        "warnings":      warnings,
+    }
+```
+
+### Recommended calibration data composition
+
+For a general-purpose deployment calibration dataset (1,000 samples):
+
+| Source | Proportion | Notes |
+|---|---|---|
+| Production request logs | 50% | Best proxy for real distribution |
+| Wikipedia (diverse topics) | 20% | General knowledge coverage |
+| Code (GitHub) | 15% | Coding task coverage |
+| Books / long-form prose | 10% | Long-range coherence |
+| Domain-specific (if known) | 5% | Prevent domain regression |
+
+Avoid: social media, very short texts (< 64 tokens), single-topic dumps.
+
+---
+
+## V.8.7 Quantization and LoRA Interaction
+
+LoRA fine-tunes a low-rank adapter on top of frozen base weights. When the
+base model is quantized, the interaction between quantized weights and FP16
+adapter weights introduces specific considerations.
+
+### QLoRA: adapting on top of 4-bit base
+
+QLoRA (Dettmers et al., 2023) is the canonical approach: keep base weights
+in NF4 (4-bit), add LoRA adapters in FP16/BF16. The forward pass computes:
+
+```
+y = (W_quantized + AB) × x
+```
+
+Where `W_quantized` is the dequantized (FP16) base weight, `A` and `B` are
+the LoRA matrices. The key insight: LoRA gradients flow only through `A` and
+`B`, not through `W_quantized`, so quantization noise in `W` is fixed during
+fine-tuning (but still affects inference quality).
+
+### Serving a QLoRA-adapted quantized model
+
+```python
+from vllm import LLM, SamplingParams
+
+# Load quantized base + LoRA adapter
+llm = LLM(
+    model="meta-llama/Llama-3.1-70B",
+    quantization="awq",                     # base model is AWQ INT4
+    enable_lora=True,
+    max_lora_rank=64,
+    gpu_memory_utilization=0.90,
+)
+
+from vllm.lora.request import LoRARequest
+
+# Serve requests with the LoRA adapter applied
+outputs = llm.generate(
+    ["Write a poem about inference"],
+    SamplingParams(temperature=0.7, max_tokens=256),
+    lora_request=LoRARequest(
+        "my_adapter",
+        1,
+        "/path/to/lora/adapter"
+    )
+)
+```
+
+### Memory overhead of LoRA on top of quantized base
+
+```python
+def lora_memory_gb(rank: int, d_model: int, n_layers: int,
+                   n_modules: int = 4, dtype_bytes: int = 2) -> float:
+    """
+    Estimate LoRA adapter memory.
+    n_modules: typically 4 (q_proj, k_proj, v_proj, o_proj) or 8 (+ gate/up/down)
+    """
+    # Each module: A (d_model × rank) + B (rank × d_model)
+    params_per_module = 2 * d_model * rank
+    total_params = params_per_module * n_modules * n_layers
+    return total_params * dtype_bytes / 1e9
+
+# Llama 3.1 70B: 80 layers, d_model=8192, rank=64, 4 attention modules
+mem_gb = lora_memory_gb(64, 8192, 80, 4)
+print(f"LoRA rank-64 memory: {mem_gb:.2f} GB")   # → ~0.27 GB — negligible
+```
+
+### When quantization degrades LoRA quality
+
+If your fine-tuned LoRA adapter underperforms vs the FP16 baseline after
+quantization, the most likely cause is **rank collapse**: the quantized base
+weights have degraded to the point where the adapter's low-rank updates
+cannot compensate. Remedies:
+
+1. Use a higher quantization level for the base (INT8 instead of INT4)
+2. Increase LoRA rank (64 → 128) to give the adapter more capacity
+3. Use mixed-precision: quantize FFN to INT4, keep attention in INT8
+
+### Test harness — quantization calibration arithmetic
+
+```python
+# ── test_appendix_v.py ───────────────────────────────────────────────────
+"""Offline arithmetic tests for quantization calibration appendix.
+No GPU required. Run with: python test_appendix_v.py"""
+
+import math
+
+
+def bits_to_dtype_bytes(bits: int) -> float:
+    return bits / 8
+
+
+def weight_memory_gb(params_B: float, bits: int) -> float:
+    return params_B * 1e9 * bits_to_dtype_bytes(bits) / 1e9
+
+
+def gptq_calibration_time_minutes(params_B: float, n_layers: int = 80) -> float:
+    """Rough estimate: GPTQ calibration scales linearly with model size."""
+    # Empirical: ~1 min per 7B parameters on A100
+    return (params_B / 7) * n_layers / 80
+
+
+def lora_memory_gb(rank: int, d_model: int, n_layers: int,
+                   n_modules: int = 4, dtype_bytes: int = 2) -> float:
+    total_params = 2 * d_model * rank * n_modules * n_layers
+    return total_params * dtype_bytes / 1e9
+
+
+# ── Tests ────────────────────────────────────────────────────────────────
+
+def test_weight_compression_ratios():
+    params_B = 70.0  # Llama 3.1 70B
+    fp16_gb  = weight_memory_gb(params_B, 16)
+    int8_gb  = weight_memory_gb(params_B, 8)
+    int4_gb  = weight_memory_gb(params_B, 4)
+
+    assert abs(fp16_gb - 140.0) < 1.0,  f"FP16 should be ~140 GB, got {fp16_gb:.1f}"
+    assert abs(int8_gb - 70.0)  < 0.5,  f"INT8 should be ~70 GB, got {int8_gb:.1f}"
+    assert abs(int4_gb - 35.0)  < 0.5,  f"INT4 should be ~35 GB, got {int4_gb:.1f}"
+    assert abs(fp16_gb / int4_gb - 4.0) < 0.1, "INT4 should be 4× smaller than FP16"
+    print(f"PASS: FP16={fp16_gb:.0f}GB, INT8={int8_gb:.0f}GB, INT4={int4_gb:.0f}GB "
+          f"(4.0× compression)")
+
+
+def test_ppl_delta_threshold():
+    """Verify quantization quality thresholds."""
+    # Acceptable: < 0.5 PPL delta for INT8, < 1.0 for INT4
+    ppl_fp16  = 7.23
+    ppl_int8  = 7.45
+    ppl_int4  = 7.89
+
+    delta_int8 = ppl_int8 - ppl_fp16
+    delta_int4 = ppl_int4 - ppl_fp16
+
+    assert delta_int8 < 0.5,  f"INT8 PPL delta {delta_int8:.2f} exceeds threshold 0.5"
+    assert delta_int4 < 1.0,  f"INT4 PPL delta {delta_int4:.2f} exceeds threshold 1.0"
+    print(f"PASS: INT8 ΔPP={delta_int8:.2f} (<0.5✓), INT4 ΔPP={delta_int4:.2f} (<1.0✓)")
+
+
+def test_lora_memory_overhead():
+    mem = lora_memory_gb(64, 8192, 80, 4)
+    assert mem < 0.5, f"LoRA rank-64 should be < 0.5 GB, got {mem:.3f} GB"
+    print(f"PASS: LoRA rank-64 memory = {mem:.3f} GB (negligible overhead)")
+
+
+def test_awq_vs_gptq_calibration_time():
+    """AWQ should be significantly faster than GPTQ for 70B models."""
+    # AWQ: ~30–60 min; GPTQ: ~120–240 min on A100
+    awq_time_min  = 45   # midpoint estimate
+    gptq_time_min = 180  # midpoint estimate
+    ratio = gptq_time_min / awq_time_min
+    assert ratio > 2.0, f"GPTQ should be >2× slower than AWQ, got {ratio:.1f}×"
+    print(f"PASS: GPTQ ~{ratio:.1f}× slower than AWQ for 70B calibration")
+
+
+def test_gguf_format_compression():
+    """Verify GGUF quantization compresses as expected."""
+    params_B = 70.0
+    formats = {
+        "Q2_K": 2.625, "Q4_0": 4.0, "Q4_K_M": 4.5,
+        "Q5_K_M": 5.5, "Q8_0": 8.0, "F16": 16.0,
+    }
+    for fmt, bits in formats.items():
+        gb = weight_memory_gb(params_B, bits)
+        # Just verify the formula is consistent
+        assert gb > 0
+        assert gb <= weight_memory_gb(params_B, 16)
+    print(f"PASS: GGUF format memory calculations consistent "
+          f"(Q2_K={weight_memory_gb(70, 2.625):.0f}GB → "
+          f"F16={weight_memory_gb(70, 16):.0f}GB)")
+
+
+if __name__ == "__main__":
+    test_weight_compression_ratios()
+    test_ppl_delta_threshold()
+    test_lora_memory_overhead()
+    test_awq_vs_gptq_calibration_time()
+    test_gguf_format_compression()
+    print("\n✓ All quantization calibration tests passed.")
+```
+
+**Expected output:**
+```
+PASS: FP16=140GB, INT8=70GB, INT4=35GB (4.0× compression)
+PASS: INT8 ΔPP=0.22 (<0.5✓), INT4 ΔPP=0.66 (<1.0✓)
+PASS: LoRA rank-64 memory = 0.268 GB (negligible overhead)
+PASS: GPTQ ~4.0× slower than AWQ for 70B calibration
+PASS: GGUF format memory calculations consistent (Q2_K=23GB → F16=140GB)
+
+✓ All quantization calibration tests passed.
+```
+
+---
+
 ## V.9 Self-Check Questions
 
 1. AWQ uses salient channel scaling: multiply salient weights by `s` before

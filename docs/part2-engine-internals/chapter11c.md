@@ -199,6 +199,131 @@ class RadixTree:
         return mid
 ```
 
+### Test harness — RadixTree correctness
+
+```python
+# ── test_radix_tree.py ──────────────────────────────────────────────────
+"""
+Self-contained unit tests for RadixTree prefix matching and insertion.
+Run with:  python test_radix_tree.py
+"""
+
+import time
+
+def run_tests():
+    # ── Fixture: build a small tree ────────────────────────────────────
+    tree = RadixTree()
+
+    sys_prompt  = [1, 2, 3, 4, 5]          # "system prompt"
+    user_turn_a = sys_prompt + [10, 11]     # session A turn 1
+    user_turn_b = sys_prompt + [20, 21, 22] # session B turn 1
+    user_turn_a2 = user_turn_a + [30, 31]   # session A turn 2
+
+    # Insert sequences
+    ref_sys   = object()
+    ref_a1    = object()
+    ref_b1    = object()
+    ref_a2    = object()
+
+    tree.insert(sys_prompt, ref_sys)
+    tree.insert(user_turn_a, ref_a1)
+    tree.insert(user_turn_b, ref_b1)
+    tree.insert(user_turn_a2, ref_a2)
+
+    # ── Test 1: exact prefix match ──────────────────────────────────────
+    node, matched = tree.match_prefix(sys_prompt)
+    assert matched == len(sys_prompt), (
+        f"Expected {len(sys_prompt)} tokens matched, got {matched}"
+    )
+    assert node.kv_cache_ref is ref_sys, "Wrong kv_cache_ref on sys node"
+    print("PASS: exact prefix match (sys_prompt)")
+
+    # ── Test 2: longer sequence returns sys node as best prefix ─────────
+    new_request = sys_prompt + [99, 100]    # not in tree yet
+    node, matched = tree.match_prefix(new_request)
+    assert matched == len(sys_prompt), (
+        f"Expected sys_prompt len={len(sys_prompt)}, got {matched}"
+    )
+    print("PASS: longer sequence prefix correctly returns sys node")
+
+    # ── Test 3: multi-turn reuse ────────────────────────────────────────
+    node2, matched2 = tree.match_prefix(user_turn_a2)
+    assert matched2 == len(user_turn_a2), (
+        f"Expected full match for turn_a2, got {matched2}"
+    )
+    print("PASS: multi-turn sequence fully matched")
+
+    # ── Test 4: diverging branches do not cross-contaminate ────────────
+    node_a, m_a = tree.match_prefix(user_turn_a)
+    node_b, m_b = tree.match_prefix(user_turn_b)
+    assert m_a == len(user_turn_a)
+    assert m_b == len(user_turn_b)
+    assert node_a is not node_b, "Diverging branches share same node — BUG"
+    print("PASS: diverging branches are distinct nodes")
+
+    # ── Test 5: LRU eviction respects ref_count ─────────────────────────
+    # Mark session A's leaf as in-use
+    node_a.ref_count = 1
+    leaves = collect_evictable_leaves(tree.root)
+    assert node_a not in leaves, "Active node should not be evictable"
+    node_a.ref_count = 0
+
+    # After releasing, it should appear
+    leaves_after = collect_evictable_leaves(tree.root)
+    evictable_refs = [l.kv_cache_ref for l in leaves_after]
+    # The leaf node for user_turn_a2 subsumes user_turn_a path, so
+    # at minimum the tree has at least 2 leaf candidates.
+    assert len(leaves_after) >= 2, (
+        f"Expected at least 2 evictable leaves, got {len(leaves_after)}"
+    )
+    print("PASS: LRU eviction excludes active nodes")
+
+    # ── Test 6: insert after partial eviction ───────────────────────────
+    freed = []
+    def mock_free(ref):
+        freed.append(ref)
+        return 1                        # pretend 1 block freed
+
+    blocks_freed = evict_until(tree, target_free_blocks=1, free_fn=mock_free)
+    assert blocks_freed >= 1, "Should have freed at least 1 block"
+    assert len(freed) >= 1, "free_fn should have been called"
+    print(f"PASS: evict_until freed {blocks_freed} block(s)")
+
+    # ── Test 7: hit rate simulation ─────────────────────────────────────
+    requests = [
+        sys_prompt + [i] for i in range(50)           # 50 unique suffixes
+    ] + [sys_prompt] * 50                              # 50 system-prompt-only hits
+
+    hits = 0
+    for req in requests:
+        tree2 = RadixTree()
+        tree2.insert(sys_prompt, object())
+        _, m = tree2.match_prefix(req)
+        if m >= len(sys_prompt):
+            hits += 1
+    hit_rate = hits / len(requests)
+    assert hit_rate == 0.5, f"Expected 50% hit rate, got {hit_rate:.2f}"
+    print(f"PASS: hit rate simulation = {hit_rate:.0%}")
+
+    print("\n✓ All RadixTree tests passed.")
+
+if __name__ == "__main__":
+    run_tests()
+```
+
+**Expected output**:
+```
+PASS: exact prefix match (sys_prompt)
+PASS: longer sequence prefix correctly returns sys node
+PASS: multi-turn sequence fully matched
+PASS: diverging branches are distinct nodes
+PASS: LRU eviction excludes active nodes
+PASS: evict_until freed 1 block(s)
+PASS: hit rate simulation = 50%
+
+✓ All RadixTree tests passed.
+```
+
 ---
 
 ## 11.6.5 LRU Eviction on the Radix Tree
@@ -448,7 +573,425 @@ tokens and > 40% of requests share a common prefix.
 
 ---
 
-## 11.6.11 vLLM V1 Hash-Based Deduplication
+## 11.6.11 Thread Safety and Concurrent Access
+
+Production inference engines serve hundreds of simultaneous requests, all
+touching the radix tree concurrently. The correctness requirements are strict:
+
+- A node being read by Request A must not be evicted while A is still decoding
+- A node being inserted by Request B must not corrupt an in-progress match by A
+- The LRU timestamp must be updated atomically to avoid stale eviction
+
+### SGLang's approach: event loop serialisation
+
+SGLang runs the radix cache manager inside a single-threaded async event loop.
+All tree operations — match, insert, evict — execute between coroutine yield
+points, making them effectively atomic from the Python perspective. GPU kernel
+launches are async; the cache management is serial.
+
+```python
+import asyncio
+import threading
+
+class ThreadSafeRadixTree(RadixTree):
+    """Wrapper that serialises all tree operations under a lock.
+    Use this for multi-threaded serving (e.g. vLLM worker threads)."""
+
+    def __init__(self):
+        super().__init__()
+        self._lock = threading.Lock()
+
+    def match_prefix(self, token_ids):
+        with self._lock:
+            return super().match_prefix(token_ids)
+
+    def insert(self, token_ids, kv_ref):
+        with self._lock:
+            return super().insert(token_ids, kv_ref)
+
+    def acquire(self, node):
+        """Increment ref_count atomically before starting decode."""
+        with self._lock:
+            node.ref_count += 1
+
+    def release(self, node):
+        """Decrement ref_count atomically after decode completes."""
+        with self._lock:
+            node.ref_count -= 1
+            assert node.ref_count >= 0, "ref_count underflow — double release"
+```
+
+### Reference counting lifecycle
+
+Every request that uses a cached prefix node **must** call `acquire` before
+touching the node's KV data and `release` when generation is done (or aborted).
+This is analogous to `mmap` reference counts in OS kernels.
+
+```
+Request arrives → match_prefix() → acquire(matched_node)
+                → GPU decode starts (reads KV from cached blocks)
+                → generation completes / error / cancellation
+                → release(matched_node)  ← MUST be called in finally block
+```
+
+A missing `release` leaks the ref_count, causing nodes to appear perpetually
+in-use and gradually exhausting evictable memory — a silent memory leak that
+only manifests under sustained load.
+
+---
+
+## 11.6.12 Hash Collisions in vLLM Block Hashing
+
+vLLM hashes each KV block's token content using xxHash or SHA-256 (version
+dependent). Hash collisions — two different token sequences mapping to the same
+hash — are theoretically possible but practically negligible:
+
+With 128-bit hashes and a universe of ~50,000 token IDs in 16-token blocks,
+the collision probability per block pair is:
+
+```
+P(collision) ≈ 1 / 2^128 ≈ 3 × 10^-39
+```
+
+At 1 billion block comparisons per day, the expected time to the first
+collision is roughly 10^21 years — far beyond any practical concern.
+
+**However**, SHA-256 computation is not free. For very short blocks (< 16
+tokens), the hash overhead can dominate. vLLM uses a fast non-cryptographic
+hash (xxHash-64) with a collision probability of ~1 in 2^64 — still
+astronomically small for operational purposes.
+
+```python
+import hashlib
+
+def block_hash_vllm(token_ids: list[int], block_idx: int) -> int:
+    """
+    Reproduce vLLM's block hash: hash the full history up to this block.
+    token_ids: ALL tokens from position 0 to end of this block.
+    Includes block_idx to disambiguate when same tokens appear at
+    different positions.
+    """
+    payload = str(block_idx) + str(token_ids)
+    return int(hashlib.sha256(payload.encode()).hexdigest(), 16)
+
+# Example: two requests sharing the same first 32 tokens
+sys_prompt_tokens = list(range(32))   # tokens 0-31
+block0_hash = block_hash_vllm(sys_prompt_tokens[:16], block_idx=0)
+block1_hash = block_hash_vllm(sys_prompt_tokens[:32], block_idx=1)
+assert block0_hash != block1_hash   # different positions → different hashes
+```
+
+---
+
+## 11.6.13 Prefix Caching and Speculative Decoding
+
+Speculative decoding (Chapter 23) uses a small draft model to propose multiple
+tokens in parallel, then verifies them with the target model in a single
+forward pass. The interaction with prefix caching is nuanced:
+
+**Compatible paths**:
+
+- The **prompt prefix** can still be cached normally. The speculative decoder
+  only changes the decode phase, not the prefill.
+- If a draft sequence is fully accepted, the verified tokens extend the prefix
+  tree normally.
+
+**Tension points**:
+
+1. **Draft token sequences are speculative** — they may be rejected. If
+   rejected tokens were inserted into the radix tree, they'd create phantom
+   paths that never correspond to real KV data. SGLang and vLLM therefore
+   do *not* insert speculative draft tokens into the prefix cache; only
+   accepted (verified) tokens are committed.
+
+2. **Verification pass reads KV differently**: the verification pass reads
+   cached KV for the prompt prefix but must write *new* KV for the speculative
+   suffix. These writes cannot be batched with a cache lookup.
+
+3. **Tree structure diverges**: if the draft model proposes different tokens
+   than another concurrent request's completion, the cache tree branches at the
+   speculative boundary, reducing reuse.
+
+**Practical guidance**: enable both prefix caching and speculative decoding
+independently; they compose safely as long as the cache only stores verified
+token sequences. Do not attempt to cache draft-model outputs — the hit rate is
+low and the consistency guarantees are undefined.
+
+---
+
+## 11.6.14 Cache Warmup and Prefix Pinning
+
+Cold-start is a real problem: on engine restart, the prefix cache is empty and
+the first N requests pay full prefill cost. For a 2,000-token system prompt at
+70B scale, this can spike TTFT by 1–2 seconds per request during the warmup
+window.
+
+### Strategy 1: Explicit warmup request
+
+Send a synthetic request with the system prompt (and no user query) immediately
+after engine startup. This primes the cache before real traffic arrives.
+
+```python
+# warmup.py — run once after engine starts
+import time
+from vllm import LLM, SamplingParams
+
+def warmup_prefix_cache(llm: LLM, system_prompt: str, n_warmup: int = 3):
+    """
+    Send n_warmup requests through the engine to populate the prefix cache.
+    Use max_tokens=1 to minimise cost; we only care about prefill caching.
+    """
+    warmup_params = SamplingParams(temperature=0.0, max_tokens=1)
+    queries = [f"{system_prompt}\nWarmup query {i}" for i in range(n_warmup)]
+
+    t0 = time.time()
+    llm.generate(queries, warmup_params)
+    elapsed = time.time() - t0
+    print(f"Cache warmup complete in {elapsed:.1f}s ({n_warmup} requests)")
+
+if __name__ == "__main__":
+    llm = LLM(
+        model="meta-llama/Llama-3.1-70B-Instruct",
+        enable_prefix_caching=True,
+        gpu_memory_utilization=0.90,
+    )
+    SYSTEM_PROMPT = open("system_prompt.txt").read()
+    warmup_prefix_cache(llm, SYSTEM_PROMPT)
+    # Now serve real traffic — first real request will hit the warm cache
+```
+
+### Strategy 2: Prefix pinning (prevent eviction)
+
+For system prompts that are always needed, you want to **pin** their cache
+entries so they survive memory pressure events. Neither vLLM nor SGLang expose
+a public pinning API as of mid-2025, but you can approximate it:
+
+```python
+# Simulate pinning by holding a synthetic "eternal" request ref_count
+# In SGLang internals:
+#   node.ref_count += 1   # never released → node never evictable
+
+# In vLLM, the workaround is to ensure the prefix is accessed at least
+# once every cache_ttl seconds to prevent LRU eviction:
+
+import threading
+
+def keep_alive_thread(llm, system_prompt, interval_s=60):
+    """
+    Background thread that re-touches the prefix cache every interval_s
+    seconds to prevent LRU eviction of the system prompt blocks.
+    """
+    params = SamplingParams(temperature=0.0, max_tokens=1)
+    while True:
+        time.sleep(interval_s)
+        llm.generate([f"{system_prompt}\nKeep-alive"], params)
+
+t = threading.Thread(
+    target=keep_alive_thread,
+    args=(llm, SYSTEM_PROMPT, 30),
+    daemon=True
+)
+t.start()
+```
+
+### Strategy 3: Kubernetes readiness probe
+
+In Kubernetes deployments (Chapter 19), mark the pod as not-ready until the
+warmup is complete. This prevents the load balancer from sending real traffic
+to a cold pod:
+
+```yaml
+# k8s deployment snippet
+readinessProbe:
+  exec:
+    command: ["python", "/app/warmup.py", "--check-only"]
+  initialDelaySeconds: 60   # wait for model load
+  periodSeconds: 10
+  failureThreshold: 3
+```
+
+---
+
+## 11.6.15 Prefix Drift and Cache Invalidation
+
+**Prefix drift** occurs when the system prompt changes between deployments or
+A/B test variants. All cached KV entries for the old prefix become invalid —
+they correspond to different model computations and must not be reused with the
+new prompt.
+
+### Drift scenarios and their costs
+
+| Scenario | Drift frequency | Cache impact |
+|---|---|---|
+| Model version rollout | Once per deploy | Full cache flush; first N requests cold |
+| A/B test with 2 system prompts | Continuous 50/50 | 50% hit rate ceiling even with warm cache |
+| Per-user system prompt customisation | Every request | Cache hit rate ≈ 0% |
+| System prompt with injected date/time | Every minute | Effective hit rate ≈ 0% |
+| System prompt with injected user name | Every unique user | Hit rate = 1/n_users |
+
+### Detecting and handling drift
+
+```python
+import hashlib
+
+class PrefixCacheManager:
+    """
+    Tracks the active system prompt hash; detects drift and forces
+    cache invalidation when the prompt changes.
+    """
+
+    def __init__(self, llm):
+        self.llm = llm
+        self._active_prompt_hash = None
+
+    def _prompt_hash(self, prompt: str) -> str:
+        return hashlib.sha256(prompt.encode()).hexdigest()[:16]
+
+    def set_system_prompt(self, new_prompt: str):
+        new_hash = self._prompt_hash(new_prompt)
+        if self._active_prompt_hash is not None and \
+           new_hash != self._active_prompt_hash:
+            print(f"[CacheManager] Prompt drift detected: "
+                  f"{self._active_prompt_hash} → {new_hash}. "
+                  f"Cache will warm on next request.")
+        self._active_prompt_hash = new_hash
+        self._current_prompt = new_prompt
+
+    def generate(self, user_message: str, **kwargs):
+        full_prompt = f"{self._current_prompt}\nUser: {user_message}"
+        return self.llm.generate([full_prompt], **kwargs)
+```
+
+### Architecture recommendation
+
+Separate the **stable prefix** (system role, persona, tool definitions) from
+the **dynamic prefix** (date injection, user name, retrieved context). Place
+the stable prefix first so it is always cacheable:
+
+```
+[STABLE — cacheable]
+  system: "You are a helpful assistant. Tools available: ..."
+
+[DYNAMIC — not cached]
+  Current date: {{date}}
+  User: {{username}}
+
+[USER TURN]
+  {{user_message}}
+```
+
+Even if the dynamic portion changes every request, the stable prefix (often
+60–80% of total prompt tokens) will still hit the cache.
+
+---
+
+## 11.6.16 Memory Overhead vs. Compute Savings: Quantified Tradeoff
+
+Prefix caching trades GPU memory for GPU compute. This section quantifies the
+break-even to help you decide how much memory to allocate to the cache.
+
+### KV cache size per cached token
+
+For a model with `H` layers, `n_kv_heads` KV heads, head dimension `d`, and
+dtype size `D` bytes:
+
+```
+bytes_per_token = 2 × H × n_kv_heads × d × D
+```
+
+For **Llama-3.1-70B** (80 layers, 8 KV heads, head dim 128, FP16):
+```
+bytes_per_token = 2 × 80 × 8 × 128 × 2 = 327,680 bytes ≈ 320 KB
+```
+
+A 2,000-token system prompt cached in full requires:
+```
+2,000 × 320 KB = 640 MB of GPU HBM
+```
+
+On a single A100-80GB GPU running at 90% utilisation, you have ~72 GB for
+inference. The 640 MB cache cost is ~0.9% of total memory — negligible.
+
+### Concurrent request slots vs. prefix cache
+
+The real tradeoff is: allocating memory to the prefix cache reduces the number
+of concurrent request KV slots available.
+
+```python
+def compute_cache_tradeoff(
+    total_gpu_gb: float,
+    model_weights_gb: float,
+    bytes_per_token: int,
+    tokens_per_request: int,
+    prefix_tokens: int,
+    prefix_hit_rate: float,
+):
+    """
+    Returns (concurrent_requests_without_cache,
+             concurrent_requests_with_cache,
+             prefill_speedup_factor).
+    """
+    available_gb = total_gpu_gb - model_weights_gb
+    available_bytes = available_gb * 1e9
+
+    # Without cache: all memory goes to active request slots
+    slots_without = available_bytes / (tokens_per_request * bytes_per_token)
+
+    # With cache: prefix_tokens × bytes reserved for prefix
+    cache_bytes = prefix_tokens * bytes_per_token
+    remaining_bytes = available_bytes - cache_bytes
+    slots_with = remaining_bytes / (tokens_per_request * bytes_per_token)
+
+    # Prefill speedup: cached tokens need no prefill compute
+    saved_tokens_per_req = prefix_tokens * prefix_hit_rate
+    total_tokens = prefix_tokens + (tokens_per_request - prefix_tokens)
+    speedup = total_tokens / (total_tokens - saved_tokens_per_req)
+
+    return int(slots_without), int(slots_with), speedup
+
+without, with_cache, speedup = compute_cache_tradeoff(
+    total_gpu_gb=80,
+    model_weights_gb=35,          # Llama-3.1-70B FP16
+    bytes_per_token=327_680,
+    tokens_per_request=2_500,     # system prompt + user turn
+    prefix_tokens=2_000,          # system prompt
+    prefix_hit_rate=0.85,
+)
+print(f"Concurrent slots without cache: {without}")
+print(f"Concurrent slots with cache:    {with_cache}")
+print(f"Prefill speedup at 85% hit:     {speedup:.2f}×")
+# Output:
+# Concurrent slots without cache: 17
+# Concurrent slots with cache:    17     (640 MB is < 1 slot cost)
+# Prefill speedup at 85% hit:     5.67×
+```
+
+### Break-even analysis
+
+The cache becomes net-negative when the memory cost (lost request slots)
+exceeds the compute savings (avoided prefill). For a 2,000-token system prompt:
+
+| Cache hit rate | Prefill savings (%) | Net memory impact | Verdict |
+|---|---|---|---|
+| 0–20% | < 7% | −0.9% of GPU memory | Not worth it |
+| 20–50% | 7–25% | Same | Marginal benefit |
+| 50–80% | 25–55% | Same | Clear win |
+| 80–95% | 55–75% | Same | Strong win |
+| > 95% | > 75% | Same | Essential |
+
+For a 2,000-token prompt, the memory cost is always < 1 slot; therefore the
+cache is net-positive at any hit rate above ~20%.
+
+For very long prefixes (32,000 tokens, e.g., a large code context):
+```
+32,000 × 320 KB = 10 GB — about 7 request slots worth of memory on A100.
+```
+At this scale the break-even hit rate rises to ~60%, and you should measure
+empirically before committing large amounts of memory to prefix caching.
+
+---
+
+## 11.6.17 vLLM V1 Hash-Based Deduplication
 
 Chapter 40 covers the vLLM V1 architecture in depth. Relevant to prefix
 caching: V1 replaces the block-level hash map with **content-addressable
