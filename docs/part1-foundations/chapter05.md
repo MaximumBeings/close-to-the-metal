@@ -9,6 +9,7 @@
 Chapter 4 showed you *what* attention computes. This chapter shows you *how to compute it fast*. Standard attention materializes an N×N score matrix — 64 MB for a single head at N=4096 — and performs multiple round-trips through slow HBM memory. FlashAttention (Dao et al., 2022) eliminates those round-trips entirely using two ideas: **tiled block computation** and **online softmax**. Every number in this chapter is traced by hand through complete worked examples so you understand not just what the algorithm does, but why the rescaling works and why the result is numerically identical to standard attention.
 
 **What you will know by the end:**
+
 - Why standard attention is memory-bandwidth-bound, not compute-bound.
 - The GPU memory hierarchy and the cost of HBM vs. SRAM access.
 - Online softmax: a single-pass algorithm that computes exact softmax with running rescaling.

@@ -17,6 +17,7 @@ The mechanism that handles both directions is the **tokenizer**. It sits between
 This chapter is therefore two things at once: a deep-dive into tokenizer algorithms (especially BPE), and a first look at what it means to **batch** token sequences efficiently.
 
 **What you will know by the end:**
+
 - The BPE training algorithm, step-by-step, with a full hand-traced worked example.
 - How the encoder uses the learned merge rules to tokenize unseen text.
 - The difference between BPE, Byte-Level BPE, WordPiece, SentencePiece, and tiktoken — and which model uses which.

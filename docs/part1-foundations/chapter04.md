@@ -11,6 +11,7 @@ The KV cache — the central topic of this entire book — exists because of one
 This chapter builds attention from the ground up. We start with the intuition, derive the mathematics, and then trace a complete hand-computed walkthrough through **all ten tokens** of a worked example: four-token prefill ("The next day is") followed by six decode steps ("bright and sunny with clear skies"). Every number is exact — computed with `numpy.random.seed(42)`, traceable with a pencil. We then develop every major variant: MHA, MQA, GQA, MLA, and Sparse Attention, showing how each one trades quality for memory savings.
 
 **What you will know by the end:**
+
 - Why attention is the operation that queries memory.
 - The scaled dot-product attention formula and the necessity of the `1/√d` scale.
 - Multi-Head Attention: full element-by-element derivation for all 10 tokens, 4 heads.
