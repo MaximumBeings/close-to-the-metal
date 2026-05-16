@@ -183,3 +183,6 @@ nav:
     - "M — Mobile and Edge Deployment: Android and Apple Silicon": appendices/appendix-m.md
     - "N — Edge Inference on Linux SBCs: Raspberry Pi and NVIDIA Jetson": appendices/appendix-n.md
     - "O — CI/CD Pipelines for LLM Inference Systems": appendices/appendix-o.md
+    - "P — Introduction to Triton: Python-Embedded GPU Kernel Programming": appendices/appendix-p.md
+    - "Q — CUTLASS and Tensor Cores: The Compiled Performance Layer": appendices/appendix-q.md
+    - "R — Introduction to Mojo: Systems Performance in Python Syntax": appendices/appendix-r.md

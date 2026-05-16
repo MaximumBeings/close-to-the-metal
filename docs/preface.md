@@ -118,6 +118,9 @@ This is not a hypothetical. Every technique described is in production somewhere
 - **M** — Deployment guide for Android and Apple Silicon
 - **N** — Edge inference on Raspberry Pi and NVIDIA Jetson
 - **O** — CI/CD pipeline guide — model registries, quality evaluation gates, canary deployments, and SDET safety testing
+- **P** — Introduction to Triton — the `@triton.jit` programming model, tile-based GEMM, fused softmax, autotuning, and how FlashAttention-2 is built in Triton
+- **Q** — CUTLASS and Tensor Cores deep dive — MMA instruction anatomy, CuTe layout algebra, FP8 and 2:4 sparse GEMM, epilogue fusion, and how TRT-LLM uses CUTLASS internally
+- **R** — Introduction to Mojo — `fn`/`def`, SIMD types, `parallelize`, ownership semantics, and the MAX inference engine for portable high-performance CPU/GPU deployment
 
 ---
 

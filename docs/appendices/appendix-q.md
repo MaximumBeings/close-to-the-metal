@@ -1,0 +1,605 @@
+# Appendix Q: CUTLASS and Tensor Cores — The Compiled Performance Layer
+
+> *"CUTLASS is what cuBLAS is built from. Understanding it means understanding the ceiling — the physical limit of what the hardware can do."*
+
+---
+
+**What you will understand after this appendix:**
+
+- What Tensor Cores are, how they work at the hardware level, and why they exist
+- The CUTLASS abstraction hierarchy: from MMA instruction to full GEMM
+- CuTe: the layout algebra that makes CUTLASS 3.x composable
+- How to write and tune a CUTLASS FP16 and FP8 GEMM kernel
+- Epilogue fusion — how CUTLASS fuses bias, activation, and quantisation into the GEMM
+- How TensorRT-LLM and vLLM use CUTLASS internally
+- Performance analysis: roofline, occupancy, and the latency/throughput trade-off
+
+**What you need first:**
+
+- Appendix J (CUDA C++) — sections J.2 through J.6
+- Appendix P (Triton) — optional but helpful for context on the abstraction stack
+- C++ template familiarity (CUTLASS is heavily templated)
+
+---
+
+## Q.1 What CUTLASS Is
+
+CUTLASS (CUDA Templates for Linear Algebra Subroutines) is NVIDIA's open-source C++ template library for high-performance matrix operations. It is:
+
+- The reference implementation of GEMM on NVIDIA hardware
+- The foundation on which cuBLAS and TensorRT-LLM are built
+- An explicit decomposition of GEMM into the exact hardware primitives (MMA instructions, async copies, shared memory pipelines)
+
+CUTLASS is not a high-level library. It is a toolkit for building high-performance kernels. Using it requires understanding what it exposes:
+
+```
+CUTLASS abstraction stack (bottom → top):
+
+Hardware:      MMA instructions (Tensor Core ops) — wgmma.mma_async on H100
+               Async copy (cp.async, TMA — Tensor Memory Accelerator)
+               Shared memory + registers
+
+CUTLASS 3.x:   CuTe layout algebra — types for describing tensor layouts
+               MMA atom — single Tensor Core instruction wrapper
+               Tiled MMA — MMA atom tiled across a warp group
+               Collective MainLoop — K-loop with software pipelining
+               Collective Epilogue — post-GEMM fusion (bias, activation, quantisation)
+               Kernel — assembles MainLoop + Epilogue into a launchable CUDA kernel
+
+User code:     GemmUniversalAdapter — one call to run a full GEMM
+```
+
+---
+
+## Q.2 Tensor Cores — What the Hardware Actually Does
+
+### Q.2.1 The Warp Matrix Multiply Accumulate (WMMA) Instruction
+
+A Tensor Core executes one operation: **D = A × B + C**, where A, B, C, D are small matrices held in registers. The size of these matrices is fixed by the hardware generation:
+
+```
+Tensor Core MMA tile sizes by GPU generation:
+
+Volta (V100):   A: 16×16 FP16  ×  B: 16×16 FP16  +  C: 16×16 FP32
+Turing (T4):    A: 16×16 FP16  ×  B: 16×16 FP16  +  C: 16×16 FP32
+Ampere (A100):  A: 16×16 FP16  ×  B: 16×16 FP16  +  C: 16×16 FP32
+                A: 16×16 TF32  ×  B: 16×16 TF32  +  C: 16×16 FP32
+                A: 16×16 BF16  ×  B: 16×16 BF16  +  C: 16×16 FP32
+Hopper (H100):  A: 16×8×16 FP16 wgmma (warp group MMA, 128 threads)
+                A: 16×8×16 FP8 E4M3/E5M2 wgmma
+                A: 16×8×16 INT8 wgmma
+```
+
+On H100, the `wgmma.mma_async` instruction is issued by an entire **warp group** (4 warps = 128 threads) collectively. The A matrix is in shared memory; B and C are in registers. This is a fundamental change from A100, where both A and B could be in registers (via the `mma.sync` instruction).
+
+### Q.2.2 What Tensor Cores Do Physically
+
+Inside a Tensor Core, the computation is performed by a grid of multiply-accumulate units wired to process small fixed-size matrix fragments simultaneously:
+
+```
+WORKED EXAMPLE Q.1 — A100 Tensor Core Throughput
+──────────────────────────────────────────────────────────────────
+A100 SM configuration:
+  4 Tensor Core units per SM
+  Each Tensor Core: processes one 16×16×16 MMA per clock
+  One 16×16×16 MMA: 2 × 16 × 16 × 16 = 8,192 FP16 MACs
+  SM clock: ~1.41 GHz
+
+Per-SM Tensor Core throughput:
+  4 × 8,192 × 1.41 × 10⁹ = 46.3 TFLOPS per SM (FP16)
+
+A100 total (108 SMs):
+  108 × 46.3 = 4,998 TFLOPS ≈ 312 TFLOPS (with 2 ops per MAC)
+
+This matches NVIDIA's published 312 TFLOPS FP16 Tensor Core spec.
+──────────────────────────────────────────────────────────────────
+```
+
+### Q.2.3 H100 wgmma — The Architectural Shift
+
+H100 introduced `wgmma.mma_async` — an asynchronous warp-group MMA. Key differences from A100:
+
+```
+A100 mma.sync:
+  - Issued per-warp (32 threads)
+  - Both A and B fragments in registers
+  - Synchronous — blocks until complete
+  - Tile: 16×8×16 per warp
+
+H100 wgmma.mma_async:
+  - Issued per-warp-group (128 threads)
+  - A fragment: in shared memory (fed by TMA)
+  - B fragment: in registers
+  - Asynchronous — overlaps with TMA data fetch
+  - Tile: 64×N×16 per warp group (N ∈ {8,16,32,...,256})
+```
+
+The async nature means that while one warp group executes MMA on the current tile, the TMA (Tensor Memory Accelerator) is fetching the next tile from HBM into shared memory. This double-buffering is why H100 reaches ~90% of its theoretical Tensor Core throughput in practice, vs ~70% for A100.
+
+---
+
+## Q.3 CuTe — Layout Algebra
+
+CUTLASS 3.x is built on **CuTe** (CUDA Template Utilities), a C++ library for expressing tensor layouts. Understanding CuTe is the key to reading CUTLASS source code.
+
+### Q.3.1 Layouts as (Shape, Stride) Pairs
+
+Every tensor in CuTe is described by a **(Shape, Stride)** pair. The shape is the size in each dimension; the stride is the memory distance between adjacent elements:
+
+```cpp
+// CuTe layout examples:
+
+// 1D tensor: 8 elements, stride 1 (contiguous)
+auto layout_1d = make_layout(Int<8>{}, Int<1>{});
+
+// 2D row-major tensor: 4×8, row stride=8, col stride=1
+auto layout_row = make_layout(make_shape(4, 8), make_stride(8, 1));
+
+// 2D col-major tensor: 4×8, row stride=1, col stride=4
+auto layout_col = make_layout(make_shape(4, 8), make_stride(1, 4));
+
+// Tiled layout: a 4×8 tensor viewed as 2×4 tiles of size 2×2
+auto tile = make_layout(make_shape(make_shape(2,2), make_shape(2,4)),
+                        make_stride(make_stride(1,4), make_stride(2,8)));
+```
+
+CuTe layouts are hierarchical: the shape can contain nested shapes, enabling CUTLASS to describe how a thread block tile decomposes into warp tiles, which decompose into MMA tiles. The type system encodes this decomposition at compile time — the compiler sees the exact memory access pattern and can generate optimal loads.
+
+### Q.3.2 Tensor Indexing with CuTe
+
+```cpp
+#include <cute/tensor.hpp>
+using namespace cute;
+
+// Create a tensor backed by a float pointer with a 4×8 row-major layout
+float* data = ...; // device pointer
+auto tensor = make_tensor(make_gmem_ptr(data),
+                          make_layout(make_shape(4, 8),
+                                      make_stride(8, 1)));
+
+// Access element (2, 3) — computes offset = 2*8 + 3*1 = 19
+auto elem = tensor(2, 3);
+
+// Slice: get row 2 as a 1D tensor
+auto row2 = tensor(2, _);  // _ is a CuTe "all" selector
+
+// Tile the tensor into 2×4 subtensors
+auto tiled = zipped_divide(tensor, make_shape(Int<2>{}, Int<4>{}));
+// tiled(i,j) is the (i,j)-th 2×4 subtensor
+```
+
+This algebraic approach means that complex memory access patterns — like the staggered shared memory bank layout needed to avoid conflicts in a WMMA tile — are expressed as layout compositions rather than manually computed index arithmetic.
+
+---
+
+## Q.4 CUTLASS GEMM Hierarchy
+
+A CUTLASS GEMM is decomposed into four nested levels, each mapping to a hardware resource:
+
+```
+Level 1 — Thread Block Tile (GEMM-level):
+  Size: (BLOCK_M × BLOCK_N × BLOCK_K)
+  Mapping: one CUDA thread block
+  Memory: loads from global memory (HBM) into shared memory
+
+Level 2 — Warp Group Tile:
+  Size: (WARP_M × WARP_N × WARP_K)
+  Mapping: one warp group (4 warps, 128 threads on H100)
+  Memory: loads from shared memory into register file fragments
+
+Level 3 — MMA Tile (instruction-level):
+  Size: (MMA_M × MMA_N × MMA_K) — fixed by hardware
+  Mapping: one wgmma instruction (H100) or mma.sync instruction (A100)
+  Memory: operates entirely on registers
+
+Level 4 — K-loop (streaming):
+  Streams BLOCK_K slices of A and B from HBM through shared memory
+  Software-pipelined: fetch K+1 while computing K
+```
+
+### Q.4.1 CUTLASS 3.x Collective MainLoop
+
+The MainLoop handles the K-loop, including async data movement via TMA:
+
+```cpp
+// CUTLASS 3.x collective mainloop definition (simplified)
+using MainloopConfig = cutlass::gemm::collective::CollectiveMma<
+    // Dispatch tag selects the implementation
+    cutlass::gemm::MainloopSm90TmaGmmaWarpSpecializedCooperative,
+    // Tile shape: (BLOCK_M, BLOCK_N, BLOCK_K)
+    cute::Shape<cute::_128, cute::_256, cute::_64>,
+    // Data types for A, B, C, and accumulator
+    cutlass::half_t,          // A: FP16
+    cutlass::layout::RowMajor, // A layout
+    cutlass::half_t,          // B: FP16
+    cutlass::layout::ColumnMajor, // B layout
+    float,                    // Accumulator: FP32
+    // Stage count for software pipelining (3 = triple-buffering)
+    cute::Int<3>
+>;
+```
+
+The tag `MainloopSm90TmaGmmaWarpSpecializedCooperative` selects:
+- `Sm90` — H100 (SM 9.0)
+- `TmaGmma` — use TMA for loading A, wgmma for MMA
+- `WarpSpecialized` — producer warp (runs TMA) ≠ consumer warp (runs MMA)
+- `Cooperative` — warp groups cooperate on the same output tile
+
+This single type selection instantiates the entire pipeline — hundreds of lines of implementation become one template parameter.
+
+---
+
+## Q.5 Building a CUTLASS FP16 GEMM
+
+A complete minimal example:
+
+```cpp
+#include <cutlass/cutlass.h>
+#include <cutlass/gemm/device/gemm.h>
+
+// Define the GEMM operation
+using Gemm = cutlass::gemm::device::Gemm<
+    cutlass::half_t,                           // ElementA
+    cutlass::layout::RowMajor,                 // LayoutA
+    cutlass::half_t,                           // ElementB
+    cutlass::layout::ColumnMajor,              // LayoutB
+    cutlass::half_t,                           // ElementC (output)
+    cutlass::layout::RowMajor,                 // LayoutC
+    float,                                     // ElementAccumulator
+    cutlass::arch::OpClassTensorOp,            // Use Tensor Cores
+    cutlass::arch::Sm80,                       // Target A100
+    cutlass::gemm::GemmShape<128, 256, 32>,    // Thread block tile
+    cutlass::gemm::GemmShape<64,  64,  32>,    // Warp tile
+    cutlass::gemm::GemmShape<16,  8,   16>,    // MMA instruction tile
+    cutlass::epilogue::thread::LinearCombination<
+        cutlass::half_t, 8, float, float       // output scale + bias
+    >,
+    cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>,
+    3                                          // Pipeline stages
+>;
+
+int main() {
+    // Matrix dimensions: C = A × B, where A is M×K and B is K×N
+    int M = 4096, N = 4096, K = 4096;
+
+    // Allocate device memory
+    cutlass::half_t *d_A, *d_B, *d_C;
+    cudaMalloc(&d_A, M * K * sizeof(cutlass::half_t));
+    cudaMalloc(&d_B, K * N * sizeof(cutlass::half_t));
+    cudaMalloc(&d_C, M * N * sizeof(cutlass::half_t));
+
+    // Set up GEMM arguments
+    Gemm::Arguments args{
+        {M, N, K},             // problem size
+        {d_A, K},              // A pointer + leading dimension
+        {d_B, N},              // B pointer + leading dimension
+        {d_C, N},              // C pointer + leading dimension (output)
+        {d_C, N},              // D pointer (same as C for in-place)
+        {1.0f, 0.0f}           // alpha, beta for C = alpha * A*B + beta * C
+    };
+
+    Gemm gemm_op;
+    cutlass::Status status = gemm_op(args);
+    if (status != cutlass::Status::kSuccess) {
+        fprintf(stderr, "CUTLASS GEMM failed\n");
+    }
+
+    cudaFree(d_A); cudaFree(d_B); cudaFree(d_C);
+    return 0;
+}
+```
+
+Compile with:
+```bash
+nvcc -arch=sm_80 -O3 -std=c++17 \
+     -I/path/to/cutlass/include \
+     -I/path/to/cutlass/tools/util/include \
+     cutlass_gemm.cu -o cutlass_gemm
+```
+
+---
+
+## Q.6 FP8 GEMM on H100
+
+FP8 is where CUTLASS shows its largest advantage over alternatives. H100's FP8 Tensor Cores deliver 1,979 TFLOPS (E4M3) vs 989 TFLOPS for FP16. CUTLASS 3.x supports FP8 natively via the `Sm90` path:
+
+```cpp
+#include <cutlass/float8.h>
+#include <cutlass/gemm/device/gemm_universal_adapter.h>
+#include <cutlass/gemm/collective/collective_builder.hpp>
+#include <cutlass/epilogue/collective/collective_builder.hpp>
+
+// FP8 element types
+using ElementA = cutlass::float_e4m3_t;  // E4M3: 4 exponent bits, 3 mantissa bits
+using ElementB = cutlass::float_e4m3_t;
+using ElementC = cutlass::half_t;         // Output in FP16
+using ElementAccum = float;               // Accumulate in FP32
+
+// Build the collective mainloop using the builder API
+using CollectiveMainloop = typename cutlass::gemm::collective::CollectiveBuilder<
+    cutlass::arch::Sm90,
+    cutlass::arch::OpClassTensorOp,
+    ElementA, cutlass::layout::RowMajor, 16,  // A: FP8, row-major, 16-byte alignment
+    ElementB, cutlass::layout::ColumnMajor, 16, // B: FP8, col-major
+    ElementAccum,
+    cute::Shape<cute::_128, cute::_128, cute::_128>,  // Tile shape
+    cute::Shape<cute::_2, cute::_1, cute::_1>,        // Cluster shape
+    cutlass::gemm::collective::StageCountAutoCarveout<sizeof(
+        typename cutlass::epilogue::collective::DefaultEpilogue<...>::SharedStorage)>,
+    cutlass::gemm::collective::KernelScheduleAuto
+>::CollectiveOp;
+```
+
+### Q.6.1 FP8 Scaling and Calibration in CUTLASS
+
+FP8's dynamic range is narrow (E4M3: ±448). CUTLASS implements per-tensor scaling via the epilogue:
+
+```cpp
+// Per-tensor scale factors (computed during calibration)
+float scale_A = max_abs_A / 448.0f;   // maps A values into FP8 range
+float scale_B = max_abs_B / 448.0f;
+float scale_C = 1.0f / (scale_A * scale_B);  // descaling for output
+
+// The epilogue applies scale_C to the FP32 accumulator before writing FP16 output
+// This is the "descaling" step: FP8 × FP8 accumulates as FP32,
+// then is multiplied by scale_C to get the correct FP16 output magnitude
+```
+
+```
+WORKED EXAMPLE Q.2 — FP8 GEMM Throughput on H100
+──────────────────────────────────────────────────────────────────
+Configuration:
+  M=4096, N=4096, K=4096
+  FP8 E4M3 inputs, FP32 accumulator, FP16 output
+  Tile: BLOCK_M=128, BLOCK_N=128, BLOCK_K=128
+  H100 SXM5, TMA + wgmma.mma_async
+
+Theoretical peak:  1,979 TFLOPS (FP8 Tensor Core)
+CUTLASS 3.x result: 1,780 TFLOPS (90% of peak)
+cuBLAS FP8:         1,820 TFLOPS (92% of peak)
+vLLM FP8 (Triton):  1,650 TFLOPS (83% of peak)
+
+Comparison vs FP16:
+  FP16 on H100:       989 TFLOPS peak → CUTLASS: ~890 TFLOPS
+  FP8 on H100:      1,979 TFLOPS peak → CUTLASS: ~1,780 TFLOPS
+  Speedup:            2.0× (matches the theoretical 2:1 ratio)
+
+For a 70B model serving:
+  BF16: 140 GB memory, ~890 TFLOPS throughput
+  FP8:   70 GB memory, ~1,780 TFLOPS throughput
+  Combined benefit: 4× effective throughput per $ of hardware
+──────────────────────────────────────────────────────────────────
+```
+
+---
+
+## Q.7 Epilogue Fusion
+
+The epilogue runs after the K-loop completes, transforming the FP32 accumulator into the final output. CUTLASS epilogues are composable — multiple operations can be fused into a single pass over the accumulator:
+
+```
+Available epilogue operations (can be chained):
+
+LinearCombination:    D = alpha * C + beta * E   (scale + bias add)
+Relu:                 D = max(0, C)
+Gelu:                 D = C * 0.5 * (1 + erf(C/√2))
+BiasRelu:             D = max(0, C + bias)
+EltWiseMult:          D = C * E                  (element-wise multiply)
+QuantiseFP8:          D = quantise(C, scale)     (FP32 → FP8 + scale)
+```
+
+Example: a fused GEMM + bias + ReLU in one kernel:
+
+```cpp
+using EpilogueOp = cutlass::epilogue::thread::LinearCombinationRelu<
+    cutlass::half_t,    // output type
+    8,                  // alignment in elements
+    float,              // accumulator type
+    float               // scale type (alpha)
+>;
+
+// This single kernel:
+// 1. Runs the GEMM (K-loop with Tensor Cores)
+// 2. Adds a per-column bias (from a separate pointer)
+// 3. Applies ReLU
+// 4. Writes FP16 output
+// All in one pass — no intermediate HBM writes
+```
+
+**Why epilogue fusion matters for LLM inference:** Each transformer block has a GEMM (Q/K/V projection) followed by a bias add and sometimes a non-linearity. Without fusion, each operation is a separate kernel with separate HBM writes and reads. With CUTLASS epilogues, the sequence is one kernel with one HBM write. At 70B parameters, this eliminates 2–3 intermediate HBM writes per layer per token — roughly 200 GB/s of memory traffic saved across a full forward pass.
+
+---
+
+## Q.8 2:4 Structured Sparsity in CUTLASS
+
+As covered in Chapter 37, NVIDIA A100/H100 support 2:4 structured sparsity: in every group of 4 weight values, exactly 2 are zero. CUTLASS provides a complete implementation via the `SparseTensorOp` kernel:
+
+```cpp
+using GemmSparseFP16 = cutlass::gemm::device::SparseGemm<
+    cutlass::half_t,                           // Element A (compressed sparse)
+    cutlass::layout::RowMajor,
+    cutlass::half_t,                           // Element B (dense)
+    cutlass::layout::ColumnMajor,
+    cutlass::half_t,                           // Element C (output)
+    cutlass::layout::RowMajor,
+    float,                                     // Accumulator
+    cutlass::arch::OpClassSparseTensorOp,      // ← use sparse Tensor Cores
+    cutlass::arch::Sm80,
+    cutlass::gemm::GemmShape<128, 256, 64>,
+    cutlass::gemm::GemmShape<64,  64,  64>,
+    cutlass::gemm::GemmShape<16,  8,   32>     // 2:4 sparse MMA shape
+>;
+```
+
+The compressed storage format stores only non-zero values plus a 2-bit index per element (marking which of the 4 positions it occupies). This halves memory traffic for weight loads — the single largest contributor to decode latency.
+
+```
+2:4 sparse storage layout for a 4-element group:
+  Original:  [0.3,   0,  0.1,    0]    4 values × 2 bytes = 8 bytes
+  Compressed: [0.3, 0.1] + metadata [0b00, 0b10]  = 4 bytes + 1 byte = 5 bytes
+  (In practice: 4 bytes values + 1 byte per 4-element group of metadata)
+  Effective storage: 50% of dense
+```
+
+---
+
+## Q.9 Performance Tuning CUTLASS Kernels
+
+### Q.9.1 Profiler and Problem Explorer
+
+CUTLASS ships with a profiler that exhaustively benchmarks all kernel variants for a given problem:
+
+```bash
+# Build the CUTLASS profiler
+cd cutlass/build && cmake .. -DCUTLASS_NVCC_ARCHS="80;90" && make cutlass_profiler -j8
+
+# Profile all FP16 GEMM variants for a 4096×4096×4096 problem
+./tools/profiler/cutlass_profiler \
+    --operation=gemm \
+    --m=4096 --n=4096 --k=4096 \
+    --A=f16:row --B=f16:col --C=f16:row \
+    --accumulator-type=f32 \
+    --output=results.csv
+
+# The profiler tests tile shapes, pipeline stages, swizzle patterns
+# and outputs the top configurations by throughput
+```
+
+### Q.9.2 Key Tuning Parameters
+
+| Parameter | Effect | Typical sweep |
+|---|---|---|
+| `GemmShape<M, N, K>` (thread block) | Occupancy vs register pressure | {64,128,256} × {64,128,256} × {32,64} |
+| `GemmShape<m, n, k>` (warp) | How warps divide the block tile | {32,64} × {32,64} × {32} |
+| Pipeline stages | Latency hiding | 2, 3, 4 |
+| Swizzle pattern | L2 cache hit rate | 1, 2, 4 |
+
+**Occupancy calculation:**
+
+```
+H100 SM limits:
+  - 2048 threads per SM maximum
+  - 256 KB shared memory per SM
+  - 65536 registers per SM
+
+For BLOCK_M=128, BLOCK_N=256, BLOCK_K=64 with 256 threads/block:
+  Shared memory per block:
+    Stage A tile: 128 × 64 × 2 bytes (FP16) = 16 KB
+    Stage B tile:  64 × 256 × 2 bytes (FP16) = 32 KB
+    × 3 stages (triple buffer) = 144 KB
+  Blocks per SM: floor(256 KB / 144 KB) = 1 (limited by shmem)
+  Threads per SM: 1 × 256 = 256 (out of 2048 max)
+  Occupancy: 12.5%
+
+  → Switch to smaller tile (128×128×64):
+  Stage A: 128×64×2 = 16 KB, Stage B: 64×128×2 = 16 KB
+  × 3 = 96 KB → 2 blocks per SM, 512 threads, 25% occupancy
+```
+
+Higher occupancy is not always better — a single large block can sustain 90% efficiency if the arithmetic intensity is high enough. Profile both.
+
+---
+
+## Q.10 How TensorRT-LLM and vLLM Use CUTLASS
+
+### Q.10.1 TensorRT-LLM
+
+TRT-LLM uses CUTLASS as the backend for every GEMM operation. When you run `trtllm-build`, the build process:
+
+1. Profiles your GPU to identify the fastest CUTLASS tile configuration for each weight matrix shape
+2. Compiles the selected CUTLASS variant into a cubin (compiled GPU kernel binary)
+3. Bundles all cubins into the `.engine` file
+
+The 30–60 minute compile time for TRT-LLM is dominated by this CUTLASS autotuning step — it is equivalent to running the CUTLASS profiler across every unique matrix shape in the model.
+
+### Q.10.2 vLLM's Custom Kernels
+
+vLLM ships custom CUTLASS-based kernels in `csrc/quantisation/` for operations that cuBLAS does not support:
+
+- `marlin.cu` — AWQ/GPTQ INT4 × FP16 mixed-precision GEMM
+- `fp8_gemm.cu` — FP8 E4M3 × FP8 E4M3 GEMM for H100
+- `cutlass_extensions/` — CUTLASS epilogue extensions for fused quantisation
+
+Reading these files after this appendix: you will recognise the `CollectiveMma`, `CollectiveEpilogue`, and `GemmUniversalAdapter` patterns immediately.
+
+---
+
+## Q.11 CUTLASS vs Triton vs cuBLAS
+
+```
+Performance hierarchy (for standard GEMM shapes):
+  cuBLAS:         ~95% of theoretical peak  (NVIDIA's production library)
+  CUTLASS:        ~90% of theoretical peak  (same primitives, configurable)
+  Triton (tuned): ~80–85% of theoretical peak
+  PyTorch/cuDNN:  ~85–90% (routes through cuBLAS/CUTLASS internally)
+
+Flexibility hierarchy:
+  CUTLASS:        Full control (tile shape, pipeline, epilogue, sparsity)
+  Triton:         Tile-level control (no explicit shared memory)
+  cuBLAS:         No control
+  PyTorch:        No control
+
+Development cost:
+  cuBLAS/PyTorch: Minutes (one API call)
+  Triton:         Hours (50–100 lines of Python)
+  CUTLASS:        Days to weeks (hundreds of lines of C++ templates)
+
+When to use each:
+  cuBLAS:   Standard GEMM shapes, any supported dtype → always try first
+  Triton:   Custom fused kernels, novel attention variants, prototyping
+  CUTLASS:  Maximum throughput, FP8, 2:4 sparsity, custom epilogues,
+            when Triton's 80% is not enough
+```
+
+---
+
+## Q.12 Complete Build and Verification
+
+```bash
+# Clone and build CUTLASS
+git clone https://github.com/NVIDIA/cutlass.git
+cd cutlass && mkdir build && cd build
+cmake .. \
+    -DCUTLASS_NVCC_ARCHS="80;90" \     # A100 + H100
+    -DCUTLASS_ENABLE_TESTS=ON \
+    -DCUTLASS_ENABLE_BENCHMARKS=ON
+make -j$(nproc)
+
+# Run unit tests for FP16 GEMM
+./test/unit/gemm/device/gemm_f16n_f16n_f16t_tensor_op_f32_sm80
+
+# Verify correctness of your kernel:
+./tools/profiler/cutlass_profiler \
+    --operation=gemm \
+    --m=512 --n=512 --k=512 \
+    --A=f16:row --B=f16:col --C=f16:row \
+    --verification-enabled=true \
+    --tolerance=0.001
+# Expected output: "Verified: True, Max difference: 0.000488"
+```
+
+---
+
+## Q.13 Appendix Summary
+
+CUTLASS exposes the GPU performance ceiling. Every abstraction in this appendix — the MMA tile, the CuTe layout algebra, the collective mainloop, the epilogue fusion — maps to something real in the hardware.
+
+For LLM inference engineering, CUTLASS matters at three levels:
+
+- **Reading:** TRT-LLM's performance comes from CUTLASS. Understanding CUTLASS means understanding why TRT-LLM is 2–4× faster than vLLM's default path.
+- **Debugging:** When a quantised model produces wrong outputs, the bug is often in a CUTLASS epilogue scale factor. Reading the kernel source is the fastest path to the fix.
+- **Writing:** When you need a kernel that does not exist in any library — a new quantisation scheme, a custom attention variant with a non-standard output format — CUTLASS is the productive path to hardware-efficient code.
+
+---
+
+## Self-Check Questions
+
+1. An A100 SM has 4 Tensor Core units, each executing one 16×16×16 FP16 MMA per clock. The SM clock is 1.41 GHz. Verify the 312 TFLOPS A100 specification by computing per-SM throughput × 108 SMs. *(Section Q.2)*
+
+2. A CuTe layout `make_layout(make_shape(4, 8), make_stride(1, 4))` describes a column-major 4×8 tensor. Compute the memory offset for element (3, 5) and verify it matches column-major indexing. *(Section Q.3)*
+
+3. A CUTLASS FP16 GEMM uses `BLOCK_M=128, BLOCK_N=256, BLOCK_K=32` with 3-stage pipelining. Each stage requires two FP16 tiles (A and B) in shared memory. Compute the total shared memory per block and the maximum number of blocks per SM (H100 has 228 KB shared memory per SM). *(Section Q.9)*
+
+4. A 70B model has weight matrices of shape 8192×28672 (FFN up-projection). At FP8 with 2:4 sparsity, compute the memory savings vs BF16 dense for this single weight matrix. How many such matrices are in a 70B model (assuming 80 transformer layers), and what is the total memory saving? *(Section Q.8)*
+
+5. TensorRT-LLM compiles a 70B model for H100 FP8 on a machine with 8 H100 GPUs. The profiler tests 24 tile configurations × 3 pipeline depths × 4 swizzle patterns = 288 kernel variants. Each variant benchmarks for 5 seconds. Estimate the minimum compile time, and explain why the actual time (30–60 minutes) might be longer. *(Section Q.10)*
