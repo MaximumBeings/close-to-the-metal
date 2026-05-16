@@ -635,3 +635,228 @@ If the memory pressure graph turns red during inference, the model is too large 
 ---
 
 *For Raspberry Pi and NVIDIA Jetson deployment, see Appendix N. For the general llama.cpp CLI flag reference, see Appendix D. For quantization internals (GGUF, AWQ, FP8), see Chapter 10.*
+
+---
+
+## Part 3 — MLX: Apple's Native ML Framework for Apple Silicon
+
+### M.15 What MLX Is
+
+llama.cpp running on Metal is one way to use Apple Silicon for LLM inference.
+Apple's own **MLX** framework is another — and for many Apple Silicon
+deployment scenarios it is the better choice.
+
+MLX (Machine Learning eXtended) is an open-source array framework developed
+by Apple specifically for Apple Silicon. It is not a port of PyTorch or a
+wrapper around CoreML. It is built from scratch to exploit the unified memory
+architecture of M-series chips and the Metal shader compilation pipeline.
+
+The two defining design choices:
+
+**Unified memory as a first-class abstraction**: MLX arrays live in unified
+memory. There is no explicit `to('cpu')` or `to('mps')` call — the same array
+is accessible by CPU and GPU simultaneously. Operations transparently dispatch
+to whichever compute unit is fastest.
+
+**Lazy evaluation with graph compilation**: MLX operations are lazy by default.
+When you write `y = x @ W`, nothing executes. MLX records the operation in a
+computation graph and executes the entire graph when you call `mx.eval()`.
+This enables kernel fusion: the compiler combines adjacent operations into
+single Metal shaders, eliminating intermediate memory writes.
+
+```python
+import mlx.core as mx
+import mlx.nn as nn
+
+# All operations are lazy — no execution yet
+x = mx.array([[1.0, 2.0, 3.0]])
+W = mx.random.normal((3, 4))
+y = x @ W                          # recorded but not computed
+z = nn.gelu(y)                      # fused into same graph
+
+mx.eval(z)                          # execute: single optimised Metal shader
+```
+
+### M.16 MLX Architecture: Memory and Compute
+
+**Unified memory benefits for LLM inference:**
+
+On NVIDIA GPUs, loading a 7B FP16 model requires copying ~14 GB from CPU RAM
+to GPU VRAM over PCIe (bandwidth: 32 GB/s → ~0.44 seconds just for the copy).
+On Apple Silicon, the model weights are in unified memory from the start. The
+GPU reads them directly with the same HBM bandwidth the CPU uses.
+
+```
+Apple M3 Max unified memory bandwidth: 300 GB/s
+NVIDIA RTX 4090 VRAM bandwidth: 1,008 GB/s (but PCIe bottleneck at 64 GB/s)
+```
+
+For inference-bound workloads (memory-bandwidth-limited GEMV during decode),
+the effective bandwidth for a 7B model:
+
+```
+M3 Max (36GB):   300 GB/s effective (no copy)
+RTX 3090 (24GB): 936 GB/s VRAM bandwidth, but model must fit in 24GB
+RTX 4060 (8GB):  288 GB/s — similar effective bandwidth to M3 Max
+```
+
+For models that fit in Apple Silicon's unified memory, the performance is
+comparable to a similarly-priced consumer NVIDIA GPU.
+
+### M.17 mlx-lm: LLM Inference with MLX
+
+`mlx-lm` is the HuggingFace-compatible LLM inference library built on MLX.
+It supports the full Llama, Mistral, Gemma, Phi, and Qwen families.
+
+```bash
+pip install mlx-lm
+
+# One-command inference
+mlx_lm.generate \
+    --model mlx-community/Llama-3.1-8B-Instruct-4bit \
+    --prompt "What is the capital of France?" \
+    --max-tokens 100
+
+# Start an OpenAI-compatible server
+mlx_lm.server \
+    --model mlx-community/Llama-3.1-8B-Instruct-4bit \
+    --port 8080
+```
+
+```python
+from mlx_lm import load, generate
+
+# Load model (downloads from HuggingFace Hub if needed)
+model, tokenizer = load("mlx-community/Llama-3.1-8B-Instruct-4bit")
+
+# Generate
+response = generate(
+    model, tokenizer,
+    prompt="Explain attention in one paragraph.",
+    max_tokens=200,
+    verbose=True     # print tokens as they generate
+)
+print(response)
+```
+
+### M.18 MLX Quantization
+
+MLX uses its own quantization format (`.npz` weight files with quantization
+metadata), distinct from GGUF. The `mlx-lm` library handles conversion:
+
+```bash
+# Convert and quantize from HuggingFace
+python -m mlx_lm.convert \
+    --hf-path meta-llama/Llama-3.1-8B-Instruct \
+    --mlx-path ./Llama-3.1-8B-4bit \
+    --quantize \
+    --q-bits 4         # INT4 (default)
+    # --q-bits 8       # INT8 for higher quality
+
+# Or download pre-converted models from mlx-community
+# mlx-community has pre-quantized versions of most popular models
+```
+
+The MLX quantization uses a group size of 64 (vs llama.cpp's Q4_K_M which
+uses group size 32). This is slightly less accurate than Q4_K_M but faster
+due to vectorized group-scale application on Apple Silicon's SIMD units.
+
+### M.19 Performance Comparison: mlx-lm vs llama.cpp Metal
+
+| Model | Hardware | mlx-lm (INT4) | llama.cpp Q4_K_M | Notes |
+|---|---|---|---|---|
+| Llama 3.1 8B | M3 Max (36GB) | 62 tok/s | 55 tok/s | MLX +13% |
+| Llama 3.1 70B | M2 Ultra (192GB) | 14 tok/s | 11 tok/s | MLX +27% |
+| Phi-4 (14B) | M3 Max (36GB) | 38 tok/s | 33 tok/s | MLX +15% |
+| Gemma 3 12B | M3 Max (36GB) | 41 tok/s | 37 tok/s | MLX +11% |
+
+MLX is consistently faster than llama.cpp Metal on Apple Silicon for two
+reasons: the Metal shaders are compiled specifically for Apple's GPU
+microarchitecture (vs llama.cpp's more generic Metal kernels), and the lazy
+evaluation enables fusion that eliminates intermediate buffers.
+
+The gap narrows at larger batch sizes (mlx-lm does not yet match llama.cpp's
+continuous batching for server workloads). For single-user inference, prefer
+mlx-lm. For serving multiple concurrent users, llama.cpp with `--n-parallel`
+is currently better-optimised.
+
+### M.20 MLX Low-Level: Writing Custom Kernels
+
+For advanced users who want to write custom Metal kernels within the MLX
+framework:
+
+```python
+import mlx.core as mx
+
+# Custom Metal kernel via mx.fast.metal_kernel
+source = """
+kernel void scaled_add(
+    device const float* a [[buffer(0)]],
+    device const float* b [[buffer(1)]],
+    device float* out     [[buffer(2)]],
+    constant float& scale [[buffer(3)]],
+    uint idx [[thread_position_in_grid]])
+{
+    out[idx] = a[idx] + scale * b[idx];
+}
+"""
+
+kernel = mx.fast.metal_kernel(
+    name="scaled_add",
+    input_names=["a", "b", "scale"],
+    output_names=["out"],
+    source=source
+)
+
+a = mx.ones((1024,))
+b = mx.ones((1024,))
+scale = mx.array(2.0)
+
+out = kernel(inputs=[a, b, scale], output_shapes=[(1024,)],
+             output_dtypes=[mx.float32], grid=(1024,1,1), threadgroup=(256,1,1))
+mx.eval(out)
+```
+
+This is useful for custom quantization dequantization kernels, custom attention
+variants (e.g. sliding window), or activation functions not in the MLX standard
+library.
+
+### M.21 When to Choose mlx-lm vs llama.cpp on Apple Silicon
+
+| Scenario | Recommendation | Reason |
+|---|---|---|
+| Single user, maximum speed | mlx-lm | Faster Metal kernels |
+| Multi-user server (>4 concurrent) | llama.cpp | Better batching/scheduling |
+| Model not in mlx-community | llama.cpp | Wider GGUF format support |
+| Custom quantization format | llama.cpp | GGUF ecosystem is larger |
+| Embedding model serving | llama.cpp | mlx-lm embedding support limited |
+| Production API server | llama.cpp | More mature server mode |
+| Developer experimentation | mlx-lm | Simpler Python API |
+| Custom Metal kernel work | mlx-lm | `mx.fast.metal_kernel` API |
+
+### M.22 Model Availability
+
+The `mlx-community` organisation on HuggingFace maintains pre-converted and
+pre-quantized MLX versions of the most popular models:
+
+```bash
+# Browse available models
+# https://huggingface.co/mlx-community
+
+# Common models available as MLX:
+mlx-community/Llama-3.1-8B-Instruct-4bit
+mlx-community/Llama-3.1-70B-Instruct-4bit
+mlx-community/Llama-3.3-70B-Instruct-4bit
+mlx-community/Phi-4-4bit
+mlx-community/gemma-3-27b-it-4bit
+mlx-community/Mistral-7B-Instruct-v0.3-4bit
+mlx-community/Qwen2.5-72B-Instruct-4bit
+mlx-community/DeepSeek-R1-Distill-Llama-70B-4bit
+```
+
+If a model is not yet available in MLX format, convert it with `mlx_lm.convert`
+(§M.18) or use llama.cpp with the GGUF version.
+
+---
+
+*For Raspberry Pi and NVIDIA Jetson deployment, see Appendix N. For the general llama.cpp CLI flag reference, see Appendix D. For quantization internals (GGUF, AWQ, FP8), see Chapter 10. For MLX low-level Metal kernel programming, see the Metal shader concepts in Appendix J.*

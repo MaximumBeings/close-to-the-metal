@@ -59,13 +59,15 @@ This is not a hypothetical. Every technique described is in production somewhere
 
 ---
 
-**Part II: Engine Internals (Chapters 6–13, plus 7.5, 8.5, 11.5)** goes inside both engines.
+**Part II: Engine Internals (Chapters 6–13, plus 7.5, 8.5, 11.5, 11.6, 12.5)** goes inside both engines.
 
 - **Chapter 6** is the centerpiece of Part II: PagedAttention and the KV cache block manager, including a detailed block-eviction worked example under memory pressure.
 - **Chapter 7** follows the scheduler and request lifecycle. **Chapter 7.5** deepens this into continuous batching — the iteration-level loop, token budget admission control, and preemption accounting that determines real-world throughput.
 - **Chapter 8** covers startup and initialization. **Chapter 8.5** explains CUDA graphs — how collapsing 820 kernel launches into one submission eliminates the 25% CPU overhead that otherwise dominates decode latency at small batch sizes.
 - **Chapters 9–11** cover the forward pass, quantization, and prefill. **Chapter 11.5** adds KV cache eviction — attention sinks, the H2O Heavy Hitter Oracle, SnapKV, and token merging.
-- **Chapters 12–13** complete the path through sampling and token streaming.
+- **Chapter 11.6** is a deep dive into RadixAttention and prefix caching — the radix tree data structure, LRU eviction on the tree, vLLM block-level vs SGLang token-exact cache comparison, and worked economics showing 80% prefill compute reduction on a shared system prompt.
+- **Chapter 12** covers sampling — from logits to tokens. **Chapter 12.5** covers structured generation and constrained decoding — FSM-based token masking, JSON schema enforcement, EBNF grammars, the `outlines` and `lm-format-enforcer` libraries, vLLM guided decoding, llama.cpp grammar sampling, and function calling as constrained generation.
+- **Chapter 13** completes the path through token streaming.
 
 ---
 
@@ -89,7 +91,7 @@ This is not a hypothetical. Every technique described is in production somewhere
 
 ---
 
-**Part V: The Model Zoo (Chapters 34–40)** examines production model families and the architectural decisions behind them.
+**Part V: The Model Zoo (Chapters 34–42)** examines production model families and the architectural decisions behind them.
 
 - **Chapter 34** covers DeepSeek — MLA, MoE, and FP8 at scale.
 - **Chapter 35** covers Qwen — multilingual, long-context, and model family engineering.
@@ -98,10 +100,12 @@ This is not a hypothetical. Every technique described is in production somewhere
 - **Chapter 38** synthesises the entire book into the complete $1.2M → $108K production architecture.
 - **Chapter 39** covers evaluation and regression testing.
 - **Chapter 40** documents the vLLM V1 architecture — the three-process ZMQ design, hash-based KV block deduplication, and the multi-step scheduler that makes V1 meaningfully faster than V0 at production scale.
+- **Chapter 41** covers Meta Llama 3 — the architecture of the ecosystem's dominant open-weight family: GQA with 8 KV heads at all sizes, SwiGLU FFN, RoPE with θ = 500,000, the 128K-token tiktoken vocabulary, the Llama 3.1/3.2/3.3 release progression, Llama Guard safety classification, and complete vLLM and llama.cpp serving configurations including quantization sweet spots.
+- **Chapter 42** covers Phi-4 and Gemma 3 — the small-model frontier: Phi-4's data-quality hypothesis and MMLU scores exceeding Llama 3.1 70B at 14B parameters; Gemma 3's interleaved local/global attention for 128K context, tied input/output embeddings, 256K vocabulary, and multimodal SigLIP integration; edge deployment decision framework and quantization quality comparison.
 
 ---
 
-**Appendices A–O** provide reference material designed for repeated use.
+**Appendices A–V** provide reference material designed for repeated use.
 
 - **A** — Mathematical foundations (softmax, attention, RoPE, RMSNorm)
 - **B** — Installation guides for vLLM and llama.cpp
@@ -115,13 +119,16 @@ This is not a hypothetical. Every technique described is in production somewhere
 - **J** — Introduction to CUDA C++ for inference engineers
 - **K** — Operational decision tree for diagnosing high latency, low throughput, and OOM errors
 - **L** — TurboQuant online vector quantization addendum
-- **M** — Deployment guide for Android and Apple Silicon
+- **M** — Deployment guide for Android, Apple Silicon, and MLX (Apple's unified-memory ML framework)
 - **N** — Edge inference on Raspberry Pi and NVIDIA Jetson
 - **O** — CI/CD pipeline guide — model registries, quality evaluation gates, canary deployments, and SDET safety testing
 - **P** — Introduction to Triton — the `@triton.jit` programming model, tile-based GEMM, fused softmax, autotuning, and how FlashAttention-2 is built in Triton
 - **Q** — CUTLASS and Tensor Cores deep dive — MMA instruction anatomy, CuTe layout algebra, FP8 and 2:4 sparse GEMM, epilogue fusion, and how TRT-LLM uses CUTLASS internally
 - **R** — Introduction to Mojo — `fn`/`def`, SIMD types, `parallelize`, ownership semantics, and the MAX inference engine for portable high-performance CPU/GPU deployment
 - **S** — `std::mdspan` for CPU Inference — C++23 multidimensional views, layout policies (`layout_right`, `layout_left`, `layout_stride`, custom tiled layouts), accessor policies for FP8 dequantisation and aligned SIMD loads, `submdspan` zero-copy tensor slicing, tiled GEMM, multi-head attention with mdspan, KV cache slab management, and `std::linalg` BLAS dispatch
+- **T** — Embedding and Reranker Model Serving — encoder-only architecture, CLS/mean/last-token pooling, L2 normalisation, BGE-M3 hybrid retrieval (dense + sparse + multi-vector), vLLM `task=embed` and `task=score` modes, llama.cpp embedding and reranking servers, reranker latency budgets, full RAG stack architecture and GPU allocation guide
+- **U** — ROCm and AMD GPU Inference — MI300X architecture (192 GB HBM3, 5.3 TB/s bandwidth, unified CPU-GPU memory), CDNA3 vs RDNA3, ROCm 6.1 installation and Docker setup, vLLM on ROCm, llama.cpp HIP build and multi-GPU configuration, `rocm-smi` and `rocprof` profiling, CUDA → HIP porting with `hipify-clang`, Composable Kernel (AMD's CUTLASS), common issues and fixes, MI300X vs H100 decision guide
+- **V** — Quantization Calibration Workflow — AWQ calibration pipeline with custom domain data, GPTQ second-order calibration, FP8 static vs dynamic calibration with `llm-compressor`, GGUF `llama-quantize` and importance-matrix IQ quantization, perplexity measurement, `lm-evaluation-harness` task benchmarks, quality thresholds and rejection criteria, end-to-end worked example (Llama 3.1 70B → FP8)
 
 ---
 
@@ -199,7 +206,12 @@ If you are searching for a specific answer rather than reading linearly, use thi
 | **How do I cache repetitive prompts to cut inference cost by 50–80%?** | Ch 30 (Semantic Caching) |
 | **How do I route requests to the cheapest model that can answer them?** | Ch 31 (Model Routing and Cascading) |
 | **How do I debug a vLLM instance that is slow or returning garbage?** | Ch 32 (Debugging Inference Systems) |
+| **Why does my prefix cache hit rate stay below 40%?** | Ch 11.6 (RadixAttention and Prefix Caching) |
+| **How do I guarantee valid JSON output from my LLM?** | Ch 12.5 (Structured Generation) |
 | **How does DeepSeek's MLA + MoE architecture affect serving?** | Ch 34 (DeepSeek) |
+| **What are the inference implications of Llama 3's 8 KV heads at all sizes?** | Ch 41 (Meta Llama 3) |
+| **How does Phi-4 outperform Llama 3 70B at 14B parameters?** | Ch 42 (Phi-4 and Gemma 3) |
+| **How does Gemma 3's interleaved local/global attention enable 128K context cheaply?** | Ch 42 (Phi-4 and Gemma 3) |
 | **How do I evaluate whether my serving setup is correct and stays correct?** | Ch 39 (Evaluation and Regression Testing) |
 | **What are the mathematical foundations — softmax, attention, backprop?** | Appendix A |
 | **How do I install vLLM and llama.cpp from scratch?** | Appendix B |
@@ -207,9 +219,12 @@ If you are searching for a specific answer rather than reading linearly, use thi
 | **What does every llama.cpp CLI flag do?** | Appendix D |
 | **I want copy-paste production configs — Dockerfiles, YAML, nginx** | Appendix E |
 | **What are tiled GEMM, prefix scan, convolution in CUDA C++?** | Appendix J |
-| **How do I run llama.cpp on Android or Apple Silicon?** | Appendix M |
+| **How do I run llama.cpp on Android or Apple Silicon — and what about MLX?** | Appendix M |
 | **How do I run llama.cpp on a Raspberry Pi or NVIDIA Jetson?** | Appendix N |
 | **How do I build a CI/CD pipeline for LLM inference — canary deploys, model eval gates, load testing?** | Appendix O |
+| **How do I serve BGE or E5 embedding models and rerankers for RAG?** | Appendix T |
+| **How do I run vLLM on an AMD MI300X instead of NVIDIA?** | Appendix U |
+| **How do I calibrate and quantize my own model to AWQ, GPTQ, FP8, or GGUF?** | Appendix V |
 
 ---
 

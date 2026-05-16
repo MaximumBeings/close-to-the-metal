@@ -18,7 +18,7 @@ hide:
         <div class="book-engines">LLM Inference from First Principles</div>
         <div class="book-cover-footer">
           <div class="book-authors">Oluwaseyi Awoga, written with AI assistance</div>
-          <div class="book-edition">47 Chapters · 19 Appendices · May 2026</div>
+          <div class="book-edition">51 Chapters · 22 Appendices · May 2026</div>
         </div>
       </div>
     </div>
@@ -28,8 +28,8 @@ hide:
     <p class="book-quote">"The gap between 'I called the API' and 'I understand what just happened' is exactly the size of this book."</p>
     <p class="book-desc">A systems engineering textbook for engineers who serve LLMs in production. Core concepts are taught through two primary engines — <strong>vLLM</strong> and <strong>llama.cpp</strong> — with later chapters extending to <strong>SGLang</strong>, <strong>TensorRT-LLM</strong>, <strong>MLC-LLM</strong>, and <strong>Ollama</strong>. Every chapter includes worked arithmetic, companion code, and production-grade configurations.</p>
     <div class="book-metrics">
-      <div class="book-metric"><span class="bm-n">47</span><span class="bm-l">chapters</span></div>
-      <div class="book-metric"><span class="bm-n">19</span><span class="bm-l">appendices</span></div>
+      <div class="book-metric"><span class="bm-n">51</span><span class="bm-l">chapters</span></div>
+      <div class="book-metric"><span class="bm-n">22</span><span class="bm-l">appendices</span></div>
       <div class="book-metric"><span class="bm-n">46</span><span class="bm-l">code demos</span></div>
       <div class="book-metric"><span class="bm-n">11×</span><span class="bm-l">cost savings</span></div>
     </div>
@@ -92,7 +92,9 @@ hide:
         <a href="part2-engine-internals/chapter10.html" class="toc-entry"><span class="toc-num">10</span><span class="toc-etitle">Quantization Internals — GGUF, AWQ, FP8</span></a>
         <a href="part2-engine-internals/chapter11.html" class="toc-entry"><span class="toc-num">11</span><span class="toc-etitle">Prefill, Chunked Prefill, and Prompt Caching</span></a>
         <a href="part2-engine-internals/chapter11b.html" class="toc-entry"><span class="toc-num">11.5</span><span class="toc-etitle">KV Cache Eviction — Attention Sinks, H2O, and SnapKV</span></a>
+        <a href="part2-engine-internals/chapter11c.html" class="toc-entry"><span class="toc-num">11.6</span><span class="toc-etitle">RadixAttention and Prefix Caching Deep Dive</span></a>
         <a href="part2-engine-internals/chapter12.html" class="toc-entry"><span class="toc-num">12</span><span class="toc-etitle">Sampling — From Logits to Tokens</span></a>
+        <a href="part2-engine-internals/chapter12b.html" class="toc-entry"><span class="toc-num">12.5</span><span class="toc-etitle">Structured Generation and Constrained Decoding</span></a>
         <a href="part2-engine-internals/chapter13.html" class="toc-entry"><span class="toc-num">13</span><span class="toc-etitle">Token Streaming — The Last Mile</span></a>
       </div>
     </div>
@@ -143,7 +145,7 @@ hide:
       <div class="toc-part-header toc-pv">
         <span class="toc-part-label">Part V</span>
         <span class="toc-part-title">The Model Zoo</span>
-        <span class="toc-part-range">Ch 34–40</span>
+        <span class="toc-part-range">Ch 34–42</span>
       </div>
       <div class="toc-entries">
         <a href="part5-model-zoo/chapter34.html" class="toc-entry"><span class="toc-num">34</span><span class="toc-etitle">DeepSeek — MLA, MoE, and FP8 at Scale</span></a>
@@ -153,13 +155,15 @@ hide:
         <a href="part5-model-zoo/chapter38.html" class="toc-entry"><span class="toc-num">38</span><span class="toc-etitle">The Production Synthesis — $1.2M → $108K</span></a>
         <a href="part5-model-zoo/chapter39.html" class="toc-entry"><span class="toc-num">39</span><span class="toc-etitle">Evaluation and Regression Testing</span></a>
         <a href="part5-model-zoo/chapter40.html" class="toc-entry"><span class="toc-num">40</span><span class="toc-etitle">The vLLM V1 Architecture — Three-Process Design</span></a>
+        <a href="part5-model-zoo/chapter41.html" class="toc-entry"><span class="toc-num">41</span><span class="toc-etitle">Meta Llama 3 — Architecture, Ecosystem, and Inference</span></a>
+        <a href="part5-model-zoo/chapter42.html" class="toc-entry"><span class="toc-num">42</span><span class="toc-etitle">Phi-4 and Gemma 3 — Small Models, Large Impact</span></a>
       </div>
     </div>
 
     <div class="toc-part">
       <div class="toc-part-header toc-pa">
         <span class="toc-part-label">App.</span>
-        <span class="toc-part-title">Appendices A – S</span>
+        <span class="toc-part-title">Appendices A – V</span>
         <span class="toc-part-range">Reference</span>
       </div>
       <div class="toc-entries">
@@ -180,6 +184,9 @@ hide:
         <a href="appendices/appendix-q.html" class="toc-entry"><span class="toc-num">Q</span><span class="toc-etitle">CUTLASS and Tensor Cores — The Compiled Performance Layer</span></a>
         <a href="appendices/appendix-r.html" class="toc-entry"><span class="toc-num">R</span><span class="toc-etitle">Introduction to Mojo — Systems Performance in Python Syntax</span></a>
         <a href="appendices/appendix-s.html" class="toc-entry"><span class="toc-num">S</span><span class="toc-etitle">std::mdspan for CPU Inference — Multidimensional Views in C++23</span></a>
+        <a href="appendices/appendix-t.html" class="toc-entry"><span class="toc-num">T</span><span class="toc-etitle">Embedding and Reranker Model Serving</span></a>
+        <a href="appendices/appendix-u.html" class="toc-entry"><span class="toc-num">U</span><span class="toc-etitle">ROCm and AMD GPU Inference</span></a>
+        <a href="appendices/appendix-v.html" class="toc-entry"><span class="toc-num">V</span><span class="toc-etitle">Quantization Calibration Workflow — AWQ, GPTQ, FP8, and GGUF</span></a>
       </div>
     </div>
 

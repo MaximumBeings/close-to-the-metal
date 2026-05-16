@@ -80,7 +80,9 @@ nav:
     - "Ch 10: Quantization Internals": part2-engine-internals/chapter10.md
     - "Ch 11: Prefill, Chunked Prefill, and Prompt Caching": part2-engine-internals/chapter11.md
     - "Ch 11.5: KV Cache Eviction — Attention Sinks, H2O, and SnapKV": part2-engine-internals/chapter11b.md
+    - "Ch 11.6: RadixAttention and Prefix Caching Deep Dive": part2-engine-internals/chapter11c.md
     - "Ch 12: Sampling — From Logits to Tokens": part2-engine-internals/chapter12.md
+    - "Ch 12.5: Structured Generation and Constrained Decoding": part2-engine-internals/chapter12b.md
     - "Ch 13: Token Streaming — The Last Mile": part2-engine-internals/chapter13.md
 
   - "Part III — Production":
@@ -117,6 +119,8 @@ nav:
     - "Ch 38: The Production Synthesis": part5-model-zoo/chapter38.md
     - "Ch 39: Evaluation and Regression Testing": part5-model-zoo/chapter39.md
     - "Ch 40: The vLLM V1 Architecture": part5-model-zoo/chapter40.md
+    - "Ch 41: Meta Llama 3 — Architecture, Ecosystem, and Inference": part5-model-zoo/chapter41.md
+    - "Ch 42: Phi-4 and Gemma 3 — Small Models, Large Impact": part5-model-zoo/chapter42.md
 
   - "⌨ Companion Code":
     - "Code 01 — Two Engines": code/chapter_01.md
@@ -187,3 +191,6 @@ nav:
     - "Q — CUTLASS and Tensor Cores: The Compiled Performance Layer": appendices/appendix-q.md
     - "R — Introduction to Mojo: Systems Performance in Python Syntax": appendices/appendix-r.md
     - "S — std::mdspan for CPU Inference: Multidimensional Views in C++23": appendices/appendix-s.md
+    - "T — Embedding and Reranker Model Serving": appendices/appendix-t.md
+    - "U — ROCm and AMD GPU Inference": appendices/appendix-u.md
+    - "V — Quantization Calibration Workflow: AWQ, GPTQ, FP8, and GGUF": appendices/appendix-v.md
