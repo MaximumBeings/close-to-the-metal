@@ -6,9 +6,9 @@
 
 ## R.1 What Is an SBC and Why Does It Matter for LLM Inference?
 
-An **SBC (Single-Board Computer)** is an entire computer — CPU, RAM, storage controller, network interface, and sometimes a GPU — built onto a single circuit board roughly the size of a credit card. The Raspberry Pi is the most recognisable example. NVIDIA's Jetson line is the professional-grade alternative, adding a programmable GPU to the same compact form factor.
+An **SBC (Single-Board Computer)** is an entire computer — CPU, RAM, storage controller, network interface, and sometimes a GPU — built onto a single circuit board roughly the size of a credit card. The Raspberry Pi is the most recognizable example. NVIDIA's Jetson line is the professional-grade alternative, adding a programmable GPU to the same compact form factor.
 
-SBCs matter for LLM inference for three reasons. First, **cost**: a Raspberry Pi 5 costs around $80, compared to thousands of dollars for a cloud GPU instance running around the clock. For applications that need always-on private inference — home automation, local assistants, document processing — the economics strongly favour an on-premises SBC over rented cloud compute. Second, **privacy**: inference running on hardware you physically own means your prompts and responses never leave your network. Third, **edge deployment**: a Jetson Orin installed in a vehicle, a factory floor, or a medical device can run ML inference entirely offline, with no dependency on network connectivity or cloud availability.
+SBCs matter for LLM inference for three reasons. First, **cost**: a Raspberry Pi 5 board (8 GB RAM) costs $80 from the official Raspberry Pi store; a complete starter kit such as the CanaKit 8 GB Basic Kit (board, power supply, and case) runs around $190 on Amazon. Either figure is a fraction of what a cloud GPU instance costs running around the clock. For applications that need always-on private inference — home automation, local assistants, document processing — the economics strongly favor an on-premises SBC over rented cloud compute. Second, **privacy**: inference running on hardware you physically own means your prompts and responses never leave your network. Third, **edge deployment**: a Jetson Orin installed in a vehicle, a factory floor, or a medical device can run ML inference entirely offline, with no dependency on network connectivity or cloud availability.
 
 This appendix covers two families. The **Raspberry Pi** (versions 4 and 5) is the general-purpose SBC — inexpensive, widely available, runs standard Debian Linux, and performs CPU-only inference with an optional Vulkan GPU backend on the Pi 5. The **NVIDIA Jetson** family (Nano through AGX Orin) is the professional edge-AI platform — it runs a CUDA-capable GPU on the same module as the CPU, enabling full GPU-accelerated inference in a compact, low-power form factor.
 
@@ -83,7 +83,7 @@ sudo sysctl -p
 
 ### R.2.4 Building llama.cpp on Raspberry Pi
 
-**What OpenBLAS is:** BLAS (Basic Linear Algebra Subprograms) is a specification for a library of fundamental matrix operations — addition, multiplication, dot products. OpenBLAS is a high-performance open-source implementation of this specification, optimised for each CPU architecture it runs on. llama.cpp uses OpenBLAS for the batch matrix-multiply operations in the prefill phase (processing the input prompt). Without it, prefill is noticeably slower.
+**What OpenBLAS is:** BLAS (Basic Linear Algebra Subprograms) is a specification for a library of fundamental matrix operations — addition, multiplication, dot products. OpenBLAS is a high-performance open-source implementation of this specification, optimized for each CPU architecture it runs on. llama.cpp uses OpenBLAS for the batch matrix-multiply operations in the prefill phase (processing the input prompt). Without it, prefill is noticeably slower.
 
 ```bash
 cd ~
@@ -103,7 +103,7 @@ cmake --build build --config Release -j4
 # Build time: 8–12 minutes on Pi 5
 ```
 
-`-DGGML_NATIVE=ON` deserves explanation: normally, a compiler generates code that runs on the minimum supported CPU. `NATIVE` tells it to generate code optimised for the exact CPU it is running on right now — enabling NEON intrinsics, SVE if available, and any other extensions the hardware supports. **Never use `NATIVE` for cross-compiled builds** (building on one machine for another), because the resulting binary will crash on a CPU that does not support all the same extensions.
+`-DGGML_NATIVE=ON` deserves explanation: normally, a compiler generates code that runs on the minimum supported CPU. `NATIVE` tells it to generate code optimized for the exact CPU it is running on right now — enabling NEON intrinsics, SVE if available, and any other extensions the hardware supports. **Never use `NATIVE` for cross-compiled builds** (building on one machine for another), because the resulting binary will crash on a CPU that does not support all the same extensions.
 
 ```bash
 # Verify the build succeeded and check which backends are active
@@ -114,11 +114,11 @@ cmake --build build --config Release -j4
 
 ### R.2.5 Vulkan Backend on Pi 5
 
-**What Vulkan is and how it differs from CUDA:** CUDA is NVIDIA's proprietary GPU programming interface — it only works on NVIDIA GPUs. Vulkan is an open, cross-platform GPU API that works on a much broader range of GPUs, including AMD, Intel, ARM, and the VideoCore VII GPU in the Raspberry Pi 5. Vulkan is lower-level than CUDA — it is closer to directly programming the GPU hardware — and achieving peak performance requires more explicit management of GPU memory and synchronisation.
+**What Vulkan is and how it differs from CUDA:** CUDA is NVIDIA's proprietary GPU programming interface — it only works on NVIDIA GPUs. Vulkan is an open, cross-platform GPU API that works on a much broader range of GPUs, including AMD, Intel, ARM, and the VideoCore VII GPU in the Raspberry Pi 5. Vulkan is lower-level than CUDA — it is closer to directly programming the GPU hardware — and achieving peak performance requires more explicit management of GPU memory and synchronization.
 
 llama.cpp has a Vulkan backend that offloads matrix operations to any Vulkan-capable GPU. On the Pi 5's VideoCore VII, this does not deliver the dramatic speedups you see on a dedicated gaming GPU — the VideoCore VII is a modest GPU designed primarily for video decoding and display, not compute workloads. However, offloading a moderate number of layers (8–16 out of 32 for a 7B model) frees the CPU from those matrix multiplications, which can reduce thermal load and improve sustained throughput.
 
-Think of it as a workload distribution strategy rather than a raw acceleration strategy: the CPU and GPU are doing different work in parallel, keeping both utilised rather than bottlenecking everything on the CPU alone.
+Think of it as a workload distribution strategy rather than a raw acceleration strategy: the CPU and GPU are doing different work in parallel, keeping both utilized rather than bottlenecking everything on the CPU alone.
 
 ```bash
 # Install Vulkan development libraries
@@ -335,9 +335,9 @@ NVIDIA's Jetson family is not one product — it is a spectrum of compute module
 | Jetson AGX Orin 32GB | Ampere | 2048 | 32 GB LPDDR5 | 204 GB/s | 15–60 W | $399 kit |
 | Jetson AGX Orin 64GB | Ampere | 2048 | 64 GB LPDDR5 | 204 GB/s | 15–60 W | $499 kit |
 
-**A note on the original Jetson Nano:** The 2019 Jetson Nano uses Maxwell GPU architecture and CUDA 10.2. Maxwell is two GPU generations older than the Ampere used in the Orin series. Many modern llama.cpp CUDA optimisations — including Flash Attention — require CUDA capabilities not present in Maxwell. The original Nano can still run llama.cpp in CPU mode or with limited CUDA offloading, but its performance is comparable to a Raspberry Pi 5 at roughly 2.5× the cost. For new projects, do not buy the original Nano.
+**A note on the original Jetson Nano:** The 2019 Jetson Nano uses Maxwell GPU architecture and CUDA 10.2. Maxwell is two GPU generations older than the Ampere used in the Orin series. Many modern llama.cpp CUDA optimizations — including Flash Attention — require CUDA capabilities not present in Maxwell. The original Nano can still run llama.cpp in CPU mode or with limited CUDA offloading, but its performance is comparable to a Raspberry Pi 5 at roughly 2.5× the cost. For new projects, do not buy the original Nano.
 
-**The recommended entry point is the Jetson Orin Nano 8 GB.** It has 1024 Ampere CUDA cores, 8 GB of LPDDR5 at 68 GB/s bandwidth, and supports the full range of llama.cpp CUDA optimisations including Flash Attention. It delivers 15–22 tokens/sec for a Q4_K_M 7B model — 3–5× the throughput of a Pi 5, at 2.5× the cost.
+**The recommended entry point is the Jetson Orin Nano 8 GB.** It has 1024 Ampere CUDA cores, 8 GB of LPDDR5 at 68 GB/s bandwidth, and supports the full range of llama.cpp CUDA optimizations including Flash Attention. It delivers 15–22 tokens/sec for a Q4_K_M 7B model — 3–5× the throughput of a Pi 5, at 2.5× the cost.
 
 ### R.3.2 JetPack — The Software Foundation
 
@@ -692,7 +692,7 @@ curl http://localhost:8080/health
 
 For the AGX Orin — the most powerful Jetson module — NVIDIA's TensorRT-LLM can deliver 2–3× higher throughput than llama.cpp for sustained multi-user workloads.
 
-**What TensorRT-LLM does that llama.cpp does not:** llama.cpp optimises at the kernel level — each CUDA kernel is well-tuned for its specific operation. TensorRT-LLM optimises at the graph level — it analyses the entire model's computational graph, fuses adjacent operations into single kernels, and applies compiler-level optimisations across operation boundaries. It also applies INT4-AWQ quantization with calibration-aware compensation, which provides better quality than naively quantizing to INT4. The result is a compiled inference engine specific to your hardware and model, which cannot be shared across different GPU types but runs optimally on the specific GPU it was compiled for.
+**What TensorRT-LLM does that llama.cpp does not:** llama.cpp optimizes at the kernel level — each CUDA kernel is well-tuned for its specific operation. TensorRT-LLM optimizes at the graph level — it analyzes the entire model's computational graph, fuses adjacent operations into single kernels, and applies compiler-level optimizations across operation boundaries. It also applies INT4-AWQ quantization with calibration-aware compensation, which provides better quality than naively quantizing to INT4. The result is a compiled inference engine specific to your hardware and model, which cannot be shared across different GPU types but runs optimally on the specific GPU it was compiled for.
 
 The trade-off is complexity: TensorRT-LLM requires converting models from Hugging Face format, running a compilation step that takes 10–30 minutes, and managing a separate engine artifact. For a production AGX Orin deployment where throughput matters, it is worth the setup cost.
 
@@ -767,7 +767,7 @@ If mean GPU utilisation is below 70% during the benchmark, something is limiting
 | **Power draw** | 5–12 W | 7–15 W | 15–60 W |
 | **OS** | Raspberry Pi OS (Debian) | Ubuntu 22.04 (JetPack) | Ubuntu 22.04 (JetPack) |
 | **Install complexity** | Low | Medium (JetPack required) | Medium |
-| **Cost** | ~$80 + accessories | ~$199 dev kit | ~$499 dev kit |
+| **Cost** | ~$80 board; ~$190 kit | ~$199 dev kit | ~$499 dev kit |
 | **Concurrent users** | 1 practical | 2–4 | 8–16 |
 | **Best for** | Local/hobby/privacy | Edge AI products | Production edge |
 
@@ -777,7 +777,7 @@ If mean GPU utilisation is below 70% during the benchmark, something is limiting
 
 **Choose Raspberry Pi 5 when:**
 
-- Budget is the primary constraint and $80 is meaningful
+- Budget is the primary constraint — the bare board is $80 (official Pi store) and a complete starter kit (CanaKit 8 GB Basic) runs ~$190 on Amazon
 - The use case is single-user and interactive latency is not critical (home automation, overnight batch jobs)
 - You need broad Linux compatibility with minimal toolchain complexity
 - The model is 3B parameters or smaller, or you can tolerate 4–6 tokens/sec on a 7B model
@@ -787,7 +787,7 @@ If mean GPU utilisation is below 70% during the benchmark, something is limiting
 
 - You need real GPU-accelerated CUDA inference (15–22 tok/s for 7B)
 - The application serves 2–4 concurrent users
-- Flash Attention and cuBLAS optimisations matter for your workload
+- Flash Attention and cuBLAS optimizations matter for your workload
 - You are building a product where the dev kit is a prototype path to the production SOM
 - You can tolerate JetPack setup complexity (it is a one-time cost)
 
@@ -1044,7 +1044,7 @@ At `-ngl 20`, the workload is split:
 
 The optimal split depends on the model's layer structure and the Pi 5's
 VideoCore/CPU throughput balance. Values between 16 and 24 layers typically
-maximise throughput. Find the optimum by benchmarking:
+maximize throughput. Find the optimum by benchmarking:
 
 ```bash
 for ngl in 0 8 16 20 24 28 32; do
