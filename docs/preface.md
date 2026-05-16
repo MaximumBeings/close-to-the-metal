@@ -48,24 +48,76 @@ This is not a hypothetical. Every technique described is in production somewhere
 
 ---
 
-## How the Book Is organized
+## How the Book Is Organized
 
-**Part I: Foundations (Chapters 1–5)**
-establishes the hardware and algorithmic context that everything else depends on. Chapter 1 introduces both engines. Chapter 2 maps the GPU and CPU memory landscape — every performance bottleneck in LLM inference traces back to this map. Chapter 3 explains tokens, sequences, and batching in the depth that most introductions skip. Chapters 4 and 5 build from raw attention mechanics up through Flash Attention, with every matrix operation written out by hand.
+**Part I: Foundations (Chapters 1–5)** establishes the hardware and algorithmic context that everything else depends on.
 
-**Part II: Engine Internals (Chapters 6–13, plus 7.5, 8.5, 11.5)**
-goes inside both engines. Chapter 6 is the centerpiece of Part II: PagedAttention and the KV cache block manager, including a detailed block-eviction worked example under memory pressure. Chapter 7 follows the scheduler and request lifecycle; Chapter 7.5 deepens this into continuous batching — the iteration-level loop, token budget admission control, and preemption accounting that determines real-world throughput. Chapter 8 covers startup and initialization; Chapter 8.5 explains CUDA graphs — how collapsing 820 kernel launches into one submission eliminates the 25% CPU overhead that otherwise dominates decode latency at small batch sizes. Chapters 9–11 cover the forward pass, quantization, and prefill; Chapter 11.5 adds KV cache eviction — attention sinks, the H2O Heavy Hitter Oracle, SnapKV, and token merging. Chapters 12–13 complete the path through sampling and token streaming.
+- **Chapter 1** introduces both engines — vLLM and llama.cpp — and the LinkedIn scenario that runs through the entire book.
+- **Chapter 2** maps the GPU and CPU memory landscape — every performance bottleneck in LLM inference traces back to this map.
+- **Chapter 3** explains tokens, sequences, and batching in the depth that most introductions skip.
+- **Chapters 4 and 5** build from raw attention mechanics up through Flash Attention, with every matrix operation written out by hand.
 
-**Part III: Production Configuration (Chapters 14–21, plus 15.5)**
-is the practical operations manual. The eight vLLM configuration knobs (Chapter 14) and their llama.cpp equivalents are examined in depth. Multi-GPU tensor parallelism (Chapter 15) — now expanded with expert parallelism and pipeline bubble analysis; Chapter 15.5 extends this to Flash Decoding and context parallelism, which together unlock attention at 100K+ token contexts. Observability (Chapter 16), benchmarking methodology (Chapter 17), disaggregated prefill/decode (Chapter 18), Kubernetes and KubeRay auto-scaling (Chapter 19), cost engineering (Chapter 20), and API security (Chapter 21) complete the production toolkit. Appendix K provides an operational decision tree and troubleshooting guide for common production failure modes.
+---
 
-**Part IV: Advanced Techniques (Chapters 22–33.5)**
-covers the techniques that separate baseline deployments from optimized ones. LoRA adapter hot-swapping (Chapter 22) and speculative decoding (Chapter 23) are the two highest-leverage single-chapter optimizations — Chapter 23 now includes Medusa, EAGLE, EAGLE-2, and tree-based speculation with a numerical tree-attention mask worked example. Reasoning models (Chapter 24), RL serving policies (Chapter 25), the CS336 alignment field guide (Chapter 26), long-context inference at 128K+ tokens (Chapter 27), llama.cpp as a programming platform (Chapter 28), multimodal inference (Chapter 29), semantic caching (Chapter 30), model routing and cascading (Chapter 31), debugging inference systems (Chapter 32), the full engine landscape in 2026 (Chapter 33), and a practical engine-selection guide for SGLang, TRT-LLM, MLC-LLM, and Ollama (Chapter 33.5) round out the advanced material.
+**Part II: Engine Internals (Chapters 6–13, plus 7.5, 8.5, 11.5)** goes inside both engines.
 
-**Part V: The Model Zoo (Chapters 34–40)**
-examines production model families and the architectural decisions behind them: DeepSeek (MLA, MoE, FP8 at scale), Qwen (multilingual, long-context, model family engineering), Kimi (Moon-Cache hierarchical KV storage), and Nemotron (TRT-LLM, FP8, 2:4 sparsity). Chapter 38 synthesises the entire book into the complete $1.2M → $108K production architecture. Chapter 39 covers evaluation and regression testing. Chapter 40 documents the vLLM V1 architecture — the three-process ZMQ design, the new hash-based KV block deduplication, and the multi-step scheduler that makes V1 meaningfully faster than V0 at production scale.
+- **Chapter 6** is the centerpiece of Part II: PagedAttention and the KV cache block manager, including a detailed block-eviction worked example under memory pressure.
+- **Chapter 7** follows the scheduler and request lifecycle. **Chapter 7.5** deepens this into continuous batching — the iteration-level loop, token budget admission control, and preemption accounting that determines real-world throughput.
+- **Chapter 8** covers startup and initialization. **Chapter 8.5** explains CUDA graphs — how collapsing 820 kernel launches into one submission eliminates the 25% CPU overhead that otherwise dominates decode latency at small batch sizes.
+- **Chapters 9–11** cover the forward pass, quantization, and prefill. **Chapter 11.5** adds KV cache eviction — attention sinks, the H2O Heavy Hitter Oracle, SnapKV, and token merging.
+- **Chapters 12–13** complete the path through sampling and token streaming.
 
-**Appendices A–O** provide reference material designed for repeated use: mathematical foundations (A), installation guides (B), vLLM EngineArgs reference (C), llama.cpp flag reference (D), production deployment templates (E), benchmarking scripts (F), C++ build patterns (G), a glossary of 85+ terms including all new concepts from the "b" chapters (H), a curated bibliography of 40+ papers (I), an introduction to CUDA C++ for inference engineers (J), an operational decision tree for diagnosing high latency, low throughput, OOM errors, and other common production failure modes (K), the TurboQuant online vector quantization addendum (L), a comprehensive deployment guide for Android and Apple Silicon (M), edge inference on Raspberry Pi and NVIDIA Jetson (N), and a full CI/CD pipeline guide for LLM inference systems — covering model registries, quality evaluation gates, canary deployments, and SDET safety testing (O).
+---
+
+**Part III: Production Configuration (Chapters 14–21, plus 15.5)** is the practical operations manual.
+
+- **Chapter 14** examines the eight vLLM configuration knobs and their llama.cpp equivalents in depth.
+- **Chapter 15** covers multi-GPU tensor parallelism, now expanded with expert parallelism and pipeline bubble analysis. **Chapter 15.5** extends this to Flash Decoding and context parallelism, which together unlock attention at 100K+ token contexts.
+- **Chapter 16** covers observability. **Chapter 17** covers benchmarking methodology. **Chapter 18** covers disaggregated prefill/decode.
+- **Chapter 19** covers Kubernetes and KubeRay auto-scaling. **Chapter 20** covers cost engineering. **Chapter 21** covers API security.
+- **Appendix K** provides an operational decision tree and troubleshooting guide for common production failure modes.
+
+---
+
+**Part IV: Advanced Techniques (Chapters 22–33.5)** covers the techniques that separate baseline deployments from optimized ones.
+
+- **Chapter 22** covers LoRA adapter hot-swapping. **Chapter 23** covers speculative decoding — now including Medusa, EAGLE, EAGLE-2, and tree-based speculation with a numerical tree-attention mask worked example.
+- **Chapter 24** covers reasoning models. **Chapter 25** covers RL serving policies. **Chapter 26** is the CS336 alignment field guide.
+- **Chapter 27** covers long-context inference at 128K+ tokens. **Chapter 28** covers llama.cpp as a programming platform. **Chapter 29** covers multimodal inference.
+- **Chapter 30** covers semantic caching. **Chapter 31** covers model routing and cascading. **Chapter 32** covers debugging inference systems.
+- **Chapter 33** surveys the full engine landscape in 2026. **Chapter 33.5** provides a practical engine-selection guide for SGLang, TRT-LLM, MLC-LLM, and Ollama.
+
+---
+
+**Part V: The Model Zoo (Chapters 34–40)** examines production model families and the architectural decisions behind them.
+
+- **Chapter 34** covers DeepSeek — MLA, MoE, and FP8 at scale.
+- **Chapter 35** covers Qwen — multilingual, long-context, and model family engineering.
+- **Chapter 36** covers Kimi — Moon-Cache hierarchical KV storage.
+- **Chapter 37** covers Nemotron — TRT-LLM, FP8, and 2:4 sparsity.
+- **Chapter 38** synthesises the entire book into the complete $1.2M → $108K production architecture.
+- **Chapter 39** covers evaluation and regression testing.
+- **Chapter 40** documents the vLLM V1 architecture — the three-process ZMQ design, hash-based KV block deduplication, and the multi-step scheduler that makes V1 meaningfully faster than V0 at production scale.
+
+---
+
+**Appendices A–O** provide reference material designed for repeated use.
+
+- **A** — Mathematical foundations (softmax, attention, RoPE, RMSNorm)
+- **B** — Installation guides for vLLM and llama.cpp
+- **C** — vLLM EngineArgs complete reference
+- **D** — llama.cpp CLI flag reference
+- **E** — Production deployment templates (Dockerfiles, YAML, nginx configs)
+- **F** — Benchmarking scripts
+- **G** — C++ build patterns
+- **H** — Glossary of 85+ terms including all concepts from the "b" chapters
+- **I** — Curated bibliography of 40+ papers
+- **J** — Introduction to CUDA C++ for inference engineers
+- **K** — Operational decision tree for diagnosing high latency, low throughput, and OOM errors
+- **L** — TurboQuant online vector quantization addendum
+- **M** — Deployment guide for Android and Apple Silicon
+- **N** — Edge inference on Raspberry Pi and NVIDIA Jetson
+- **O** — CI/CD pipeline guide — model registries, quality evaluation gates, canary deployments, and SDET safety testing
 
 ---
 
