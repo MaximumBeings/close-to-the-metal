@@ -181,6 +181,7 @@ nav:
 
   - "Appendices":
     - "A — Mathematical Foundations": appendices/appendix-a.md
+    - "A.2 — Tensor Contractions: 2D/3D/5D/ND with CUDA, Triton, CUTLASS, Mojo": appendices/appendix-a2.md
     - "B — Installation Guide": appendices/appendix-b.md
     - "C — PyTorch for LLM Inference": appendices/appendix-c.md
     - "D — vLLM EngineArgs Reference": appendices/appendix-d.md
