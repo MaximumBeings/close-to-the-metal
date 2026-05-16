@@ -121,6 +121,7 @@ This is not a hypothetical. Every technique described is in production somewhere
 - **P** — Introduction to Triton — the `@triton.jit` programming model, tile-based GEMM, fused softmax, autotuning, and how FlashAttention-2 is built in Triton
 - **Q** — CUTLASS and Tensor Cores deep dive — MMA instruction anatomy, CuTe layout algebra, FP8 and 2:4 sparse GEMM, epilogue fusion, and how TRT-LLM uses CUTLASS internally
 - **R** — Introduction to Mojo — `fn`/`def`, SIMD types, `parallelize`, ownership semantics, and the MAX inference engine for portable high-performance CPU/GPU deployment
+- **S** — `std::mdspan` for CPU Inference — C++23 multidimensional views, layout policies (`layout_right`, `layout_left`, `layout_stride`, custom tiled layouts), accessor policies for FP8 dequantisation and aligned SIMD loads, `submdspan` zero-copy tensor slicing, tiled GEMM, multi-head attention with mdspan, KV cache slab management, and `std::linalg` BLAS dispatch
 
 ---
 

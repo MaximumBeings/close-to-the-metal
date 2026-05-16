@@ -18,7 +18,7 @@ hide:
         <div class="book-engines">LLM Inference from First Principles</div>
         <div class="book-cover-footer">
           <div class="book-authors">Oluwaseyi Awoga, written with AI assistance</div>
-          <div class="book-edition">47 Chapters · 15 Appendices · May 2026</div>
+          <div class="book-edition">47 Chapters · 19 Appendices · May 2026</div>
         </div>
       </div>
     </div>
@@ -29,7 +29,7 @@ hide:
     <p class="book-desc">A systems engineering textbook for engineers who serve LLMs in production. Core concepts are taught through two primary engines — <strong>vLLM</strong> and <strong>llama.cpp</strong> — with later chapters extending to <strong>SGLang</strong>, <strong>TensorRT-LLM</strong>, <strong>MLC-LLM</strong>, and <strong>Ollama</strong>. Every chapter includes worked arithmetic, companion code, and production-grade configurations.</p>
     <div class="book-metrics">
       <div class="book-metric"><span class="bm-n">47</span><span class="bm-l">chapters</span></div>
-      <div class="book-metric"><span class="bm-n">18</span><span class="bm-l">appendices</span></div>
+      <div class="book-metric"><span class="bm-n">19</span><span class="bm-l">appendices</span></div>
       <div class="book-metric"><span class="bm-n">46</span><span class="bm-l">code demos</span></div>
       <div class="book-metric"><span class="bm-n">11×</span><span class="bm-l">cost savings</span></div>
     </div>
@@ -159,7 +159,7 @@ hide:
     <div class="toc-part">
       <div class="toc-part-header toc-pa">
         <span class="toc-part-label">App.</span>
-        <span class="toc-part-title">Appendices A – R</span>
+        <span class="toc-part-title">Appendices A – S</span>
         <span class="toc-part-range">Reference</span>
       </div>
       <div class="toc-entries">
@@ -179,6 +179,7 @@ hide:
         <a href="appendices/appendix-p.html" class="toc-entry"><span class="toc-num">P</span><span class="toc-etitle">Introduction to Triton — Python-Embedded GPU Kernel Programming</span></a>
         <a href="appendices/appendix-q.html" class="toc-entry"><span class="toc-num">Q</span><span class="toc-etitle">CUTLASS and Tensor Cores — The Compiled Performance Layer</span></a>
         <a href="appendices/appendix-r.html" class="toc-entry"><span class="toc-num">R</span><span class="toc-etitle">Introduction to Mojo — Systems Performance in Python Syntax</span></a>
+        <a href="appendices/appendix-s.html" class="toc-entry"><span class="toc-num">S</span><span class="toc-etitle">std::mdspan for CPU Inference — Multidimensional Views in C++23</span></a>
       </div>
     </div>
 

@@ -186,3 +186,4 @@ nav:
     - "P — Introduction to Triton: Python-Embedded GPU Kernel Programming": appendices/appendix-p.md
     - "Q — CUTLASS and Tensor Cores: The Compiled Performance Layer": appendices/appendix-q.md
     - "R — Introduction to Mojo: Systems Performance in Python Syntax": appendices/appendix-r.md
+    - "S — std::mdspan for CPU Inference: Multidimensional Views in C++23": appendices/appendix-s.md
