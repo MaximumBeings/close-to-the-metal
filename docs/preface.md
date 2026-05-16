@@ -97,7 +97,7 @@ This is not a hypothetical. Every technique described is in production somewhere
 - **Chapter 35** covers Qwen — multilingual, long-context, and model family engineering.
 - **Chapter 36** covers Kimi — Moon-Cache hierarchical KV storage.
 - **Chapter 37** covers Nemotron — TRT-LLM, FP8, and 2:4 sparsity.
-- **Chapter 38** synthesises the entire book into the complete $1.2M → $108K production architecture.
+- **Chapter 38** synthesizes the entire book into the complete $1.2M → $108K production architecture.
 - **Chapter 39** covers evaluation and regression testing.
 - **Chapter 40** documents the vLLM V1 architecture — the three-process ZMQ design, hash-based KV block deduplication, and the multi-step scheduler that makes V1 meaningfully faster than V0 at production scale.
 - **Chapter 41** covers Meta Llama 3 — the architecture of the ecosystem's dominant open-weight family: GQA with 8 KV heads at all sizes, SwiGLU FFN, RoPE with θ = 500,000, the 128K-token tiktoken vocabulary, the Llama 3.1/3.2/3.3 release progression, Llama Guard safety classification, and complete vLLM and llama.cpp serving configurations including quantization sweet spots.
@@ -105,21 +105,21 @@ This is not a hypothetical. Every technique described is in production somewhere
 
 ---
 
-**Appendices A–X** (24 appendices, grouped by theme) provide reference material designed for repeated use.
+**Appendices A–X** (26 appendices, grouped by theme) provide reference material designed for repeated use.
 
-*Foundations* — **A** (Mathematical Foundations), **B** (Installation Guide), **W** (PyTorch for LLM Inference: dtypes, devices, `torch.compile`, quantization APIs, `torch.distributed`, custom ops, profiling, `torch.export`)
+*Foundations* — **A** (Mathematical Foundations), **A.2** (Tensor Contractions — 2D/3D/5D/ND with CUDA, Triton, CUTLASS, Mojo; arithmetic intensity; Einstein notation), **A.3** (The Chain Rule — scalar through transformer backpropagation; Jacobians; softmax/LayerNorm/attention backward; QAT STE; LoRA gradient flow; 15 manual worked examples), **B** (Installation Guide), **C** (PyTorch for LLM Inference: dtypes, devices, `torch.compile`, quantization APIs, `torch.distributed`, custom ops, profiling, `torch.export`)
 
-*LLM Engine References* — **C** (vLLM EngineArgs), **D** (llama.cpp CLI), **E** (Production Templates), **F** (Benchmarking Reference), **K** (Operational Decision Tree)
+*LLM Engine References* — **D** (vLLM EngineArgs), **E** (llama.cpp CLI), **F** (Production Templates), **G** (Benchmarking Reference), **H** (Operational Decision Tree)
 
-*Systems Programming — CPU* — **G** (C++ Build Patterns), **X** (libtorch: The C++ API — CMake build, `torch::Tensor`, `torch::jit::load`, IValue system, custom CUDA ops in C++, inference server example, Python→C++ cheatsheet), **S** (`std::mdspan` for CPU Inference — C++23 multidimensional views, custom layouts, FP8 accessor, tiled GEMM, KV cache management)
+*Systems Programming — CPU* — **I** (C++ Build Patterns), **J** (libtorch: The C++ API — CMake build, `torch::Tensor`, `torch::jit::load`, IValue system, custom CUDA ops in C++, inference server example, Python→C++ cheatsheet), **K** (`std::mdspan` for CPU Inference — C++23 multidimensional views, custom layouts, FP8 accessor, tiled GEMM, KV cache management)
 
-*GPU Kernel Programming* — **J** (CUDA C++ Introduction), **P** (Introduction to Triton), **Q** (CUTLASS and Tensor Cores), **R** (Introduction to Mojo)
+*GPU Kernel Programming* — **L** (CUDA C++ Introduction), **M** (Introduction to Triton), **N** (CUTLASS and Tensor Cores), **O** (Introduction to Mojo)
 
-*Hardware Platforms* — **U** (ROCm and AMD GPU — MI300X, HIP porting, Composable Kernel, cost comparison), **M** (Mobile and Edge: Android, Apple Silicon, MLX), **N** (Edge Inference: Raspberry Pi and NVIDIA Jetson)
+*Hardware Platforms* — **P** (ROCm and AMD GPU — MI300X, HIP porting, Composable Kernel, cost comparison), **Q** (Mobile and Edge: Android, Apple Silicon, MLX), **R** (Edge Inference: Raspberry Pi and NVIDIA Jetson)
 
-*Production and Serving* — **O** (CI/CD Pipelines), **T** (Embedding and Reranker Serving — BGE-M3, ColBERT, vLLM embed/score), **V** (Quantization Calibration — AWQ, GPTQ, FP8, GGUF), **L** (TurboQuant Addendum)
+*Production and Serving* — **S** (CI/CD Pipelines), **T** (Embedding and Reranker Serving — BGE-M3, ColBERT, vLLM embed/score), **U** (Quantization Calibration — AWQ, GPTQ, FP8, GGUF), **V** (TurboQuant Addendum)
 
-*Reference* — **H** (Glossary, 85+ terms), **I** (References, 40+ papers)
+*Reference* — **W** (Glossary, 85+ terms), **X** (References, 40+ papers)
 
 ---
 
@@ -143,7 +143,7 @@ The code is intentionally not production code. It is educational code: clear rat
 
 ## Acknowledgements
 
-This book was written during a period when LLM inference engineering was transforming from a specialized curiosity into a mainstream engineering discipline. The open-source communities around vLLM and llama.cpp made this book possible — every technique described here has been implemented, debugged, and documented by engineers who published their work. The papers in Appendix X represent years of insight that this book attempts to make accessible without losing the rigour.
+This book was written during a period when LLM inference engineering was transforming from a specialized curiosity into a mainstream engineering discipline. The open-source communities around vLLM and llama.cpp made this book possible — every technique described here has been implemented, debugged, and documented by engineers who published their work. The papers in Appendix X represent years of insight that this book attempts to make accessible without losing the rigor.
 
 The LinkedIn scenario in Chapter 1 is fictional, but the number — $1.2M per month for a real-time text service at scale — is grounded in conversations with engineers who have lived it. The $108K target is grounded in the same conversations. The gap between those two numbers is the reason this book exists.
 
@@ -205,6 +205,8 @@ If you are searching for a specific answer rather than reading linearly, use thi
 | **How does Gemma 3's interleaved local/global attention enable 128K context cheaply?** | Ch 42 (Phi-4 and Gemma 3) |
 | **How do I evaluate whether my serving setup is correct and stays correct?** | Ch 39 (Evaluation and Regression Testing) |
 | **What are the mathematical foundations — softmax, attention, backprop?** | Appendix A |
+| **How do tensor contractions work — GEMM, batched matmul, GQA, MoE, MLA?** | Appendix A.2 |
+| **How does backpropagation work step by step — Jacobians, softmax/LayerNorm/attention gradients, QAT, LoRA?** | Appendix A.3 |
 | **How do I install vLLM and llama.cpp from scratch?** | Appendix B |
 | **What do all the vLLM EngineArgs flags mean?** | Appendix D |
 | **What does every llama.cpp CLI flag do?** | Appendix E |
