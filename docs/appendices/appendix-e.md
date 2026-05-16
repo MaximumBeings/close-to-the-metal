@@ -1,617 +1,454 @@
-# Appendix E: Production Configuration Templates
+# Appendix E: llama.cpp Context and Model Parameters Reference
 
-> *"Copy-paste infrastructure is dangerous. Copy-paste-understand-then-modify infrastructure is how real systems get built."*
-
----
-
-This appendix provides complete, production-tested configuration templates for common deployment scenarios. Each template includes inline comments explaining why each value was chosen.
+> *"llama.cpp has a deceptively simple CLI. Under the surface, every parameter tunes a specific trade-off between speed, memory, and quality."*
 
 ---
 
-## E.1 Single-GPU vLLM Deployment
-
-### E.1.1 Single A100 80GB — Llama-3.1-8B-Instruct
-
-```bash
-#!/bin/bash
-# deploy_8b_a100.sh
-# 
-# Target: Interactive chat API, <500ms TTFT, ~50 concurrent users
-# Hardware: 1× A100 80GB SXM
-
-vllm serve meta-llama/Llama-3.1-8B-Instruct \
-    # --- Model ---
-    --dtype bfloat16 \               # A100 supports BF16 natively
-    --max-model-len 8192 \           # 8K context (saves 4× KV vs 32K)
-    \
-    # --- Memory ---
-    --gpu-memory-utilization 0.88 \  # leave 12% headroom for activations
-    --kv-cache-dtype fp8 \           # 2× KV capacity vs BF16
-    --swap-space 8 \                 # 8GB CPU swap for preemption
-    \
-    # --- Batching ---
-    --max-num-seqs 256 \             # up to 256 concurrent sequences
-    --enable-chunked-prefill \       # prevent long prefills from blocking decode
-    --max-num-batched-tokens 2048 \  # prefill chunk size (2K tokens/step)
-    --scheduler-delay-factor 0.0 \   # prioritize TTFT (interactive)
-    \
-    # --- Caching ---
-    --enable-prefix-caching \        # cache shared system prompt prefix
-    \
-    # --- Server ---
-    --host 0.0.0.0 \
-    --port 8000 \
-    --disable-log-requests \         # reduce log volume in production
-    --max-log-len 100               # truncate logged prompts for privacy
-```
-
-### E.1.2 Single RTX 4090 24GB — Qwen2.5-7B-Instruct
-
-```bash
-#!/bin/bash
-# deploy_7b_4090.sh
-#
-# Target: Development/staging environment, moderate load
-# Hardware: 1× RTX 4090 24GB (Ada Lovelace, SM89)
-
-vllm serve Qwen/Qwen2.5-7B-Instruct \
-    --dtype bfloat16 \
-    --max-model-len 16384 \          # 16K context (model default is 128K but costs KV)
-    \
-    --gpu-memory-utilization 0.85 \  # more conservative on consumer GPU
-    --kv-cache-dtype fp8 \
-    --swap-space 4 \
-    \
-    --max-num-seqs 64 \
-    --enable-chunked-prefill \
-    --max-num-batched-tokens 2048 \
-    \
-    --enable-prefix-caching \
-    \
-    --host 0.0.0.0 \
-    --port 8000
-```
+This appendix documents llama.cpp's most important runtime parameters for both the CLI (`llama-cli`) and server (`llama-server`). Parameters are as of build b4000+.
 
 ---
 
-## E.2 Multi-GPU vLLM Deployment
+## E.1 Model Loading Parameters
 
-### E.2.1 4× H100 80GB — Llama-3.1-70B-Instruct
+### `-m` / `--model` (required)
+Path to the GGUF model file.
 
 ```bash
-#!/bin/bash
-# deploy_70b_4xh100.sh
-#
-# Target: Production API, high concurrency, <800ms TTFT at p95
-# Hardware: 4× H100 80GB NVLink
-
-vllm serve meta-llama/Llama-3.1-70B-Instruct \
-    # --- Model and Parallelism ---
-    --dtype bfloat16 \
-    --tensor-parallel-size 4 \       # split across 4 H100s
-    --max-model-len 32768 \          # 32K context
-    \
-    # --- Memory (4× 80GB = 320GB total, 140GB for weights, 180GB for KV) ---
-    --gpu-memory-utilization 0.90 \
-    --kv-cache-dtype fp8 \           # 2× KV capacity: ~360GB equivalent
-    --swap-space 16 \                # per-node CPU swap
-    \
-    # --- Batching ---
-    --max-num-seqs 512 \
-    --enable-chunked-prefill \
-    --max-num-batched-tokens 4096 \
-    --scheduler-delay-factor 0.1 \   # small delay to build larger decode batches
-    \
-    # --- Prefix Caching ---
-    --enable-prefix-caching \
-    \
-    # --- Server ---
-    --host 0.0.0.0 \
-    --port 8000 \
-    --disable-log-requests \
-    --uvicorn-log-level warning
+-m ./models/llama-3.1-8b-q4_k_m.gguf
 ```
 
-### E.2.2 8× H200 141GB — DeepSeek-V3
+### `-md` / `--model-draft`
+Path to draft model for speculative decoding.
 
 ```bash
-#!/bin/bash
-# deploy_deepseek_v3_8xh200.sh
-#
-# Target: Frontier-model quality production API
-# Hardware: 8× H200 141GB NVLink (1,128GB total)
+-m ./models/llama-3.1-70b-q4_k_m.gguf \
+-md ./models/llama-3.2-1b-q8_0.gguf    # draft for speculative decoding
+```
 
-vllm serve deepseek-ai/DeepSeek-V3 \
-    --dtype bfloat16 \
-    --tensor-parallel-size 8 \
-    --max-model-len 32768 \
-    \
-    --gpu-memory-utilization 0.88 \  # conservative with 671B model
-    --kv-cache-dtype fp8 \
-    --swap-space 32 \                # 32GB swap per node
-    \
-    --max-num-seqs 128 \
-    --enable-chunked-prefill \
-    --max-num-batched-tokens 4096 \
-    \
-    --enable-prefix-caching \
-    \
-    --trust-remote-code \            # DeepSeek uses custom MoE code
-    \
-    --host 0.0.0.0 \
-    --port 8000 \
-    --disable-log-requests
+### `--mlock`
+Lock model in RAM (prevents paging to disk).
+
+```bash
+--mlock  # prevents OS from swapping model pages to disk
+         # requires sufficient RAM; use for consistent latency
+```
+
+### `--no-mmap`
+Load model fully into memory instead of using memory-mapped file access.
+
+```bash
+--no-mmap  # load fully into RAM
+
+# Default: model is mmap'd (reads pages on demand)
+# --no-mmap: reads everything upfront
+# Use when:
+#   - Model is on network filesystem (mmap has high latency)
+#   - Need consistent inference latency (avoid page faults)
+#   - Profiling (eliminate mmap effects)
+```
+
+### `-ngl` / `--n-gpu-layers`
+Number of model layers to offload to GPU.
+
+```bash
+-ngl 99    # offload all layers (use large number to offload everything)
+-ngl 32    # offload 32 layers, rest on CPU
+-ngl 0     # CPU-only (no GPU)
+
+# Memory calculation:
+# Total layers = n_layers + 1 (embedding)
+# Memory per layer ≈ model_size / n_layers
+# Example: Llama-3.1-8B Q4_K_M = 4.7 GB, 32 layers
+#   1 layer ≈ 4.7 GB / 32 ≈ 147 MB
+#   ngl=16: ~2.35 GB GPU + ~2.35 GB CPU (split)
+```
+
+### `-sm` / `--split-mode`
+How to distribute model across multiple GPUs.
+
+```
+Values: none | layer | row
+  none:  all on one GPU (no split)
+  layer: split by transformer layer (default multi-GPU mode)
+  row:   split by matrix row (for very large models)
+```
+
+### `-ts` / `--tensor-split`
+Tensor split ratios for multi-GPU distribution.
+
+```bash
+-ts 3,1    # 75% on GPU 0, 25% on GPU 1 (proportional split)
+-ts 1,1    # equal split between 2 GPUs
+-ts 1,1,1,1  # equal split across 4 GPUs
+```
+
+### `-mg` / `--main-gpu`
+GPU index for operations that can only use one GPU.
+
+```bash
+-mg 0  # use GPU 0 for non-parallel operations (default)
 ```
 
 ---
 
-## E.3 llama.cpp Production Templates
+## E.2 Context and Sequence Parameters
 
-### E.3.1 CPU-Only Server (Edge Deployment)
+### `-c` / `--ctx-size` [512]
+Context window size in tokens (KV cache size).
 
 ```bash
-#!/bin/bash
-# deploy_cpu_server.sh
-#
-# Target: Edge deployment, no GPU, low-latency single-user
-# Hardware: 32-core server, 128GB RAM
+-c 4096    # 4K context
+-c 32768   # 32K context
+-c 131072  # 128K context (requires GQA model + sufficient VRAM)
 
+# KV cache memory = c × KV_bytes_per_token
+# Llama-3.1-8B BF16: 131,072 × 131,072 bytes = 16 GB just for KV
+# Use -c as small as your task requires
+```
+
+### `-n` / `--n-predict` [-1]
+Maximum number of tokens to generate. -1 means unlimited (until EOS or context full).
+
+```bash
+-n 256    # generate at most 256 tokens
+-n -1     # generate until EOS
+-n -2     # generate until context full
+```
+
+### `-e` / `--escape`
+Enable escape sequences in prompts (allows `\n`, `\t`, etc.).
+
+```bash
+-e  # interpret escape sequences in prompt string
+```
+
+### `--keep` [0]
+Number of initial prompt tokens to keep when context shifts.
+
+```bash
+--keep 256  # keep first 256 tokens when truncating context
+
+# When context fills up, llama.cpp discards old tokens
+# --keep N: always keep the first N tokens (e.g., system prompt)
+# 0: no special protection for initial tokens
+# -1: keep all initial tokens (disables context shifting)
+```
+
+---
+
+## E.3 Sampling Parameters
+
+### `-temp` / `--temperature` [0.80]
+Sampling temperature. Lower = more deterministic.
+
+```bash
+--temp 0.7    # slightly creative
+--temp 0.0    # greedy decoding (deterministic)
+--temp 1.0    # high diversity
+```
+
+### `--top-k` [40]
+Top-k sampling. Keep only top k most likely tokens.
+
+```bash
+--top-k 50   # consider top 50 tokens
+--top-k 0    # disable (consider all tokens)
+--top-k 1    # greedy decoding (same as temp=0)
+```
+
+### `--top-p` [0.95]
+Nucleus sampling. Keep tokens whose cumulative probability exceeds p.
+
+```bash
+--top-p 0.9   # use tokens that make up top 90% of probability mass
+--top-p 1.0   # disable (use all tokens)
+```
+
+### `--min-p` [0.05]
+Min-p sampling. Discard tokens with probability below this fraction of the most likely token.
+
+```bash
+--min-p 0.1   # discard tokens with prob < 10% of top token's prob
+--min-p 0.0   # disable
+```
+
+### `--repeat-penalty` [1.0]
+Penalize repeated tokens. Values > 1 discourage repetition.
+
+```bash
+--repeat-penalty 1.1    # mild repetition penalty
+--repeat-penalty 1.3    # strong repetition penalty
+--repeat-penalty 1.0    # no penalty (default)
+```
+
+### `--repeat-last-n` [64]
+Number of recent tokens to consider for repetition penalty.
+
+```bash
+--repeat-last-n 128   # penalize tokens repeated in last 128
+--repeat-last-n -1    # consider entire context
+--repeat-last-n 0     # disable repetition penalty
+```
+
+### `--frequency-penalty` [0.0]
+Penalize tokens proportional to their frequency in the output so far.
+
+### `--presence-penalty` [0.0]
+Penalize tokens that have appeared at all (once is enough to reduce their probability).
+
+### `--seed` [-1]
+Random seed. -1 = random seed (non-deterministic). Set for reproducible outputs.
+
+```bash
+--seed 42   # reproducible sampling
+```
+
+### `-s` / `--samplers`
+Ordered list of sampler operations to apply.
+
+```bash
+--samplers "top_k;tfs_z;typical_p;top_p;min_p;temperature"
+# Apply samplers in this order
+```
+
+---
+
+## E.4 Batch and Performance Parameters
+
+### `-b` / `--batch-size` [2048]
+Physical batch size — number of tokens processed per forward pass during prefill.
+
+```bash
+-b 512    # smaller batches (lower memory, slightly slower prefill)
+-b 2048   # default (good balance)
+-b 4096   # larger batches (faster prefill if model fits)
+
+# This is the compute batch for prefill, NOT number of parallel sequences
+```
+
+### `-ub` / `--ubatch-size` [512]
+Micro-batch size. Physical processing unit within a batch.
+
+```bash
+-ub 512   # process 512 tokens at a time within each batch
+```
+
+### `-np` / `--parallel` [1]
+Number of parallel sequences (only in llama-server).
+
+```bash
+-np 8    # handle 8 simultaneous conversations
+# Each slot gets its own KV cache: total KV = np × ctx_size × KV_bytes
+```
+
+### `-t` / `--threads` [auto]
+Number of CPU threads for inference (when using CPU layers).
+
+```bash
+-t 8    # use 8 CPU threads
+-t $(nproc)  # use all CPU cores
+```
+
+### `-tb` / `--threads-batch` [same as -t]
+CPU threads for batch processing (prefill). Can be different from generation threads.
+
+### `--cont-batching` / `-cb`
+Enable continuous batching in llama-server (handles multiple requests efficiently).
+
+```bash
+-cb   # enable continuous batching (should always be enabled in server)
+```
+
+---
+
+## E.5 Quantization Type Reference
+
+GGUF quantization types ordered by quality/size trade-off:
+
+```
+Format      | Bits/Weight | Quality | Notes
+────────────────────────────────────────────────────────────────────
+F32         | 32          | Lossless| Reference, too large for use
+F16         | 16          | ~Lossless| Half precision, large
+BF16        | 16          | ~Lossless| BFloat16 (preferred for H100)
+Q8_0        |  8          | Excellent| INT8, minimal quality loss
+Q6_K        |  6          | Very good| K-quant at 6-bit
+Q5_K_M      |  5          | Good+   | K-quant medium 5-bit (recommended)
+Q5_K_S      |  5          | Good    | K-quant small 5-bit
+Q5_0        |  5          | Good    | Legacy 5-bit
+Q4_K_M      |  4.5        | Good    | K-quant medium 4-bit (most popular)
+Q4_K_S      |  4.2        | Decent  | K-quant small 4-bit
+Q4_0        |  4          | Decent  | Legacy 4-bit
+Q3_K_M      |  3.4        | Acceptable| K-quant medium 3-bit
+Q3_K_S      |  3.0        | OK      | K-quant small 3-bit
+Q2_K        |  2.6        | Degraded| Only for extreme compression
+IQ4_XS      |  4.3        | Good    | Importance-weighted 4-bit
+IQ3_M       |  3.7        | Good    | Importance-weighted 3-bit
+IQ2_M       |  2.7        | Decent  | Importance-weighted 2-bit
+────────────────────────────────────────────────────────────────────
+K-quants: use larger quantization blocks with per-block scales
+IQ-quants: use importance sampling to quantize important weights less
+```
+
+**Recommendation by use case:**
+
+```bash
+# Best quality: Q8_0 or Q6_K
+# Balanced (most users): Q4_K_M
+# Memory constrained: Q3_K_M
+# Extreme compression (quality matters less): Q2_K
+# Edge/mobile: IQ4_XS or Q4_K_S
+```
+
+---
+
+## E.6 Chat and Prompt Format Parameters
+
+### `--chat-template` [auto-detect]
+Chat template to use.
+
+```bash
+--chat-template llama3   # Llama 3.1 format
+--chat-template qwen     # Qwen format
+--chat-template chatml   # ChatML format
+--chat-template mistral  # Mistral format
+--chat-template gemma    # Gemma format
+
+# Always specify for instruct models — wrong template = garbled output
+```
+
+### `-sys` / `--system-prompt`
+System prompt to prepend.
+
+```bash
+--system-prompt "You are a helpful coding assistant."
+```
+
+### `-p` / `--prompt`
+Initial prompt string.
+
+```bash
+-p "What is the capital of France?"
+```
+
+### `-f` / `--file`
+Read prompt from file.
+
+```bash
+-f ./prompt.txt
+```
+
+### `--in-prefix` / `--in-suffix`
+Prefix/suffix wrapping user input in interactive mode.
+
+```bash
+# For manual chat templating:
+--in-prefix "<|im_start|>user\n"
+--in-suffix "<|im_end|>\n<|im_start|>assistant\n"
+```
+
+### `-i` / `--interactive`
+Enable interactive/chat mode.
+
+```bash
+-i   # interactive mode (continue generating from user input)
+```
+
+### `-r` / `--reverse-prompt`
+Reverse prompt string to pause generation and wait for input.
+
+```bash
+-r "User:"  # pause when model generates "User:"
+```
+
+---
+
+## E.7 llama-server Specific Parameters
+
+### `--host` [127.0.0.1]
+Server host address.
+
+```bash
+--host 0.0.0.0  # listen on all interfaces
+--host 127.0.0.1  # local only
+```
+
+### `--port` [8080]
+Server port.
+
+```bash
+--port 8080
+```
+
+### `--api-key`
+Bearer token for API authentication.
+
+```bash
+--api-key my-secret-key
+```
+
+### `--path`
+Root path for static files (web UI).
+
+### `--timeout` [600]
+Request timeout in seconds.
+
+### `--n-predict` / `-n` [-1]
+Default max tokens per request (can be overridden per request).
+
+### `--slots-endpoint-enabled`
+Enable the `/slots` endpoint for inspecting active KV cache slots.
+
+---
+
+## E.8 Speculative Decoding Parameters
+
+```bash
+# Enable speculative decoding
+llama-server \
+    -m ./target-70b-q4_k_m.gguf \
+    -md ./draft-1b-q8_0.gguf \
+    --draft 10 \              # speculate 10 tokens
+    -ngl 99 \                 # all layers to GPU
+    --draft-ngl 99 \          # draft model also on GPU
+    -c 4096 \
+    -np 4                     # 4 parallel slots
+
+# Parameters:
+--draft N           # number of draft tokens (default: 5)
+--draft-ngl N       # GPU layers for draft model
+-pv                 # verbose speculative decoding stats
+```
+
+---
+
+## E.9 Embedding Parameters
+
+For running llama.cpp as an embedding server:
+
+```bash
+llama-server \
+    -m ./nomic-embed-text-v1.5-q8_0.gguf \
+    --embedding \         # enable embedding mode
+    --no-cont-batching \  # embedding models don't use cont batching
+    -ngl 99 \
+    -c 2048 \
+    --port 8080
+
+# Test
+curl http://localhost:8080/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{"input": "Hello world", "model": "text-embedding"}'
+```
+
+---
+
+## E.10 Complete Server Command Reference
+
+```bash
+# Minimal production server
 llama-server \
     -m ./models/qwen2.5-7b-instruct-q4_k_m.gguf \
-    \
-    # --- CPU Threading ---
-    -t 16 \                  # 16 threads for generation
-    -tb 32 \                 # 32 threads for prompt processing
-    \
-    # --- Context ---
-    -c 8192 \                # 8K context
-    -np 4 \                  # 4 parallel slots
-    -b 512 \                 # conservative batch size for CPU
-    \
-    # --- Loading ---
-    --no-mmap \              # pre-load everything (consistent latency)
-    --mlock \                # lock in RAM
-    \
-    # --- Sampling Defaults ---
-    --temp 0.7 \
-    --top-k 40 \
-    --top-p 0.95 \
-    \
-    # --- Server ---
-    --chat-template qwen \
-    -cb \
-    --host 0.0.0.0 \
-    --port 8080 \
-    --timeout 300
-```
-
-### E.3.2 GPU Server (Single Consumer GPU)
-
-```bash
-#!/bin/bash
-# deploy_gpu_server.sh
-#
-# Target: Home lab or small team, RTX 3090/4090
-# Hardware: RTX 4090 24GB
-
-llama-server \
-    -m ./models/llama-3.1-8b-instruct-q4_k_m.gguf \
-    \
-    -ngl 99 \                # all layers to GPU
-    -c 16384 \               # 16K context
-    -np 8 \                  # 8 parallel slots
-    -b 2048 \                # batch size for prefill
-    -ub 512 \                # micro-batch size
-    \
-    --chat-template llama3 \
-    -cb \
-    --host 0.0.0.0 \
-    --port 8080
-```
-
-### E.3.3 High-Memory Server (Multi-GPU llama.cpp)
-
-```bash
-#!/bin/bash
-# deploy_multigpu_llamacpp.sh
-#
-# Target: 70B model split across 2× GPUs
-# Hardware: 2× RTX 3090 24GB = 48GB total
-
-llama-server \
-    -m ./models/llama-3.1-70b-instruct-q4_k_m.gguf \
-    \
-    -ngl 99 \
-    -sm layer \              # split by layer across GPUs
-    -ts 1,1 \               # equal split
-    -mg 0 \                 # main GPU is 0
-    \
-    -c 4096 \               # conservative context (70B is memory intensive)
-    -np 4 \
-    -b 2048 \
-    \
-    --chat-template llama3 \
-    -cb \
-    --host 0.0.0.0 \
-    --port 8080
-```
-
----
-
-## E.4 Kubernetes / KubeRay Deployment
-
-### E.4.1 KubeRay Cluster Template
-
-```yaml
-# ray-cluster.yaml
-apiVersion: ray.io/v1
-kind: RayCluster
-metadata:
-  name: vllm-cluster
-spec:
-  rayVersion: '2.32.0'
-  
-  headGroupSpec:
-    rayStartParams:
-      dashboard-host: '0.0.0.0'
-    template:
-      spec:
-        containers:
-        - name: ray-head
-          image: rayproject/ray-ml:2.32.0-gpu
-          resources:
-            limits:
-              nvidia.com/gpu: "1"
-              memory: "32Gi"
-            requests:
-              nvidia.com/gpu: "1"
-              memory: "32Gi"
-          env:
-          - name: NCCL_IB_DISABLE
-            value: "1"
-  
-  workerGroupSpecs:
-  - groupName: gpu-workers
-    replicas: 3         # 3 worker nodes
-    minReplicas: 1
-    maxReplicas: 8      # autoscale up to 8
-    rayStartParams: {}
-    template:
-      spec:
-        containers:
-        - name: ray-worker
-          image: rayproject/ray-ml:2.32.0-gpu
-          resources:
-            limits:
-              nvidia.com/gpu: "4"   # 4 GPUs per worker
-              memory: "256Gi"
-            requests:
-              nvidia.com/gpu: "4"
-              memory: "256Gi"
-          env:
-          - name: NCCL_IB_DISABLE
-            value: "1"
-          volumeMounts:
-          - name: model-cache
-            mountPath: /root/.cache/huggingface
-        volumes:
-        - name: model-cache
-          persistentVolumeClaim:
-            claimName: model-cache-pvc
-```
-
-### E.4.2 vLLM Deployment on KubeRay
-
-```python
-# vllm_serve_ray.py
-from ray import serve
-from vllm import AsyncLLMEngine
-from vllm.engine.arg_utils import AsyncEngineArgs
-from fastapi import FastAPI
-import ray
-
-app = FastAPI()
-
-@serve.deployment(
-    name="vllm-llama-70b",
-    num_replicas=1,
-    ray_actor_options={
-        "num_gpus": 4,                  # 4 GPUs per replica
-        "num_cpus": 8,
-        "memory": 64 * 1024 ** 3,      # 64GB RAM
-    },
-    autoscaling_config={
-        "min_replicas": 1,
-        "max_replicas": 4,
-        "target_ongoing_requests": 32,  # scale up when > 32 requests in flight
-    },
-)
-@serve.ingress(app)
-class VLLMDeployment:
-    def __init__(self):
-        engine_args = AsyncEngineArgs(
-            model="meta-llama/Llama-3.1-70B-Instruct",
-            tensor_parallel_size=4,
-            dtype="bfloat16",
-            max_model_len=32768,
-            gpu_memory_utilization=0.90,
-            enable_prefix_caching=True,
-            kv_cache_dtype="fp8",
-        )
-        self.engine = AsyncLLMEngine.from_engine_args(engine_args)
-
-    @app.post("/v1/completions")
-    async def completions(self, request: dict):
-        from vllm import SamplingParams
-        sampling = SamplingParams(
-            temperature=request.get("temperature", 0.7),
-            max_tokens=request.get("max_tokens", 512),
-        )
-        async for output in self.engine.generate(
-            request["prompt"], sampling, request_id="req"
-        ):
-            if output.finished:
-                return {"text": output.outputs[0].text}
-
-deployment = VLLMDeployment.bind()
-```
-
----
-
-## E.5 Load Balancer Configuration
-
-### E.5.1 nginx Configuration
-
-```nginx
-# /etc/nginx/conf.d/vllm.conf
-#
-# Load balance across multiple vLLM instances
-
-upstream vllm_backends {
-    least_conn;           # route to backend with fewest connections
-    
-    server 10.0.0.1:8000 weight=1 max_fails=3 fail_timeout=30s;
-    server 10.0.0.2:8000 weight=1 max_fails=3 fail_timeout=30s;
-    server 10.0.0.3:8000 weight=1 max_fails=3 fail_timeout=30s;
-    
-    keepalive 64;         # maintain connection pool
-}
-
-server {
-    listen 80;
-    server_name llm-api.example.com;
-    
-    location /v1/ {
-        proxy_pass http://vllm_backends;
-        
-        # Streaming support (for SSE)
-        proxy_buffering off;
-        proxy_cache off;
-        proxy_read_timeout 300s;  # long timeout for streaming responses
-        
-        # Headers
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        
-        # Connection settings
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
-    }
-    
-    location /health {
-        proxy_pass http://vllm_backends/health;
-        proxy_read_timeout 5s;
-    }
-}
-```
-
-### E.5.2 Envoy Proxy Configuration (Advanced)
-
-```yaml
-# envoy.yaml
-# Envoy proxy with health checking, circuit breaking, and retries
-
-static_resources:
-  listeners:
-  - name: listener_0
-    address:
-      socket_address:
-        address: 0.0.0.0
-        port_value: 8080
-    filter_chains:
-    - filters:
-      - name: envoy.filters.network.http_connection_manager
-        typed_config:
-          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
-          route_config:
-            virtual_hosts:
-            - name: vllm
-              domains: ["*"]
-              routes:
-              - match:
-                  prefix: "/v1/"
-                route:
-                  cluster: vllm_cluster
-                  timeout: 300s
-                  retry_policy:
-                    retry_on: "5xx,reset,connect-failure"
-                    num_retries: 2
-  
-  clusters:
-  - name: vllm_cluster
-    connect_timeout: 5s
-    type: ROUND_ROBIN
-    circuit_breakers:
-      thresholds:
-      - max_connections: 1000
-        max_pending_requests: 500
-        max_requests: 2000
-    health_checks:
-    - timeout: 5s
-      interval: 10s
-      unhealthy_threshold: 3
-      healthy_threshold: 2
-      http_health_check:
-        path: "/health"
-    load_assignment:
-      cluster_name: vllm_cluster
-      endpoints:
-      - lb_endpoints:
-        - endpoint:
-            address:
-              socket_address:
-                address: 10.0.0.1
-                port_value: 8000
-        - endpoint:
-            address:
-              socket_address:
-                address: 10.0.0.2
-                port_value: 8000
-```
-
----
-
-## E.6 Monitoring Stack
-
-### E.6.1 Prometheus Scrape Configuration
-
-```yaml
-# prometheus.yml
-global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
-
-scrape_configs:
-  - job_name: 'vllm'
-    static_configs:
-      - targets:
-        - '10.0.0.1:8000'
-        - '10.0.0.2:8000'
-    metrics_path: '/metrics'
-    
-  - job_name: 'node_exporter'
-    static_configs:
-      - targets:
-        - '10.0.0.1:9100'
-        - '10.0.0.2:9100'
-        
-  - job_name: 'dcgm_exporter'   # NVIDIA GPU metrics
-    static_configs:
-      - targets:
-        - '10.0.0.1:9400'
-        - '10.0.0.2:9400'
-```
-
-### E.6.2 Key Grafana Dashboard Queries
-
-```promql
-# Time to First Token (P95)
-histogram_quantile(0.95,
-  rate(vllm:time_to_first_token_seconds_bucket[5m])
-)
-
-# Inter-Token Latency (P95)
-histogram_quantile(0.95,
-  rate(vllm:time_per_output_token_seconds_bucket[5m])
-)
-
-# GPU Utilization
-avg(DCGM_FI_DEV_GPU_UTIL) by (instance)
-
-# KV Cache Hit Rate (prefix caching)
-rate(vllm:gpu_prefix_cache_hits_total[5m]) /
-(rate(vllm:gpu_prefix_cache_hits_total[5m]) + rate(vllm:gpu_prefix_cache_misses_total[5m]))
-
-# Request Queue Length
-vllm:num_requests_waiting
-
-# Tokens per Second
-rate(vllm:generation_tokens_total[1m])
-
-# GPU Memory Usage (%)
-vllm:gpu_cache_usage_perc
-```
-
----
-
-## E.7 Systemd Service Files
-
-### E.7.1 vLLM systemd Service
-
-```ini
-# /etc/systemd/system/vllm.service
-
-[Unit]
-Description=vLLM Inference Server
-After=network.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=inference
-Group=inference
-WorkingDirectory=/opt/vllm
-
-# Environment
-Environment="CUDA_VISIBLE_DEVICES=0,1,2,3"
-Environment="NCCL_IB_DISABLE=1"
-EnvironmentFile=/etc/vllm/env
-
-# Command
-ExecStart=/opt/vllm/venv/bin/vllm serve \
-    meta-llama/Llama-3.1-70B-Instruct \
-    --tensor-parallel-size 4 \
-    --dtype bfloat16 \
-    --max-model-len 32768 \
-    --gpu-memory-utilization 0.90 \
-    --enable-prefix-caching \
-    --kv-cache-dtype fp8 \
-    --host 0.0.0.0 \
-    --port 8000
-
-# Restart policy
-Restart=on-failure
-RestartSec=30s
-StartLimitInterval=5min
-StartLimitBurst=3
-
-# Logging
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=vllm
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-# Enable and start
-sudo systemctl daemon-reload
-sudo systemctl enable vllm
-sudo systemctl start vllm
-
-# Monitor
-sudo journalctl -u vllm -f
-sudo systemctl status vllm
-```
-
-### E.7.2 llama-server systemd Service
-
-```ini
-# /etc/systemd/system/llamacpp.service
-
-[Unit]
-Description=llama.cpp Inference Server
-After=network.target
-
-[Service]
-Type=simple
-User=inference
-WorkingDirectory=/opt/llamacpp
-
-ExecStart=/opt/llamacpp/llama-server \
-    -m /opt/models/qwen2.5-7b-instruct-q4_k_m.gguf \
     -ngl 99 \
     -c 16384 \
     -np 8 \
@@ -620,284 +457,77 @@ ExecStart=/opt/llamacpp/llama-server \
     --host 0.0.0.0 \
     --port 8080
 
-Restart=on-failure
-RestartSec=10s
+# High-throughput server (large GPU)
+llama-server \
+    -m ./models/llama-3.1-70b-instruct-q4_k_m.gguf \
+    -ngl 99 \
+    -c 8192 \
+    -np 16 \
+    -b 4096 \
+    -ub 1024 \
+    -t 8 \
+    --chat-template llama3 \
+    -cb \
+    --host 0.0.0.0 \
+    --port 8080
 
-[Install]
-WantedBy=multi-user.target
+# Long-context server
+llama-server \
+    -m ./models/qwen2.5-72b-instruct-q4_k_m.gguf \
+    -ngl 99 \
+    -c 131072 \
+    -np 2 \          # fewer slots due to large KV per slot
+    --chat-template qwen \
+    -cb \
+    --host 0.0.0.0 \
+    --port 8080
+
+# CPU-only server (no GPU)
+llama-server \
+    -m ./models/llama-3.2-1b-instruct-q4_k_m.gguf \
+    -ngl 0 \          # all layers on CPU
+    -t $(nproc) \     # use all CPU cores
+    -c 4096 \
+    -np 4 \
+    --host 0.0.0.0 \
+    --port 8080
 ```
 
 ---
 
-## E.8 Environment Variables Reference
+## E.11 Performance Tuning Guide
+
+```
+Scenario                   | Key Parameters
+─────────────────────────────────────────────────────────────────────
+Maximize tokens/second     | -b 4096, -ngl 99, -np 1 (decode single request)
+Minimize TTFT              | -b 2048, --cont-batching, small context (-c)
+Maximize concurrent users  | -np 16+, smaller context, Q4_K_M quantization
+Apple Silicon M-series     | -ngl 99, Metal enabled by default in build
+CPU-only on server         | -t $(nproc), Q4_0 or Q4_K_M, -b 512
+Memory constrained (<4GB)  | Q2_K or Q3_K_S, -c 2048, -np 1
+```
+
+---
+
+## E.12 Diagnostic Flags
 
 ```bash
-# CUDA and GPU
-export CUDA_VISIBLE_DEVICES=0,1,2,3    # which GPUs to use
-export CUDA_LAUNCH_BLOCKING=1          # debug: synchronous CUDA (slow)
+# Verbose timing output
+--verbose
 
-# NCCL (multi-GPU communication)
-export NCCL_IB_DISABLE=1              # disable InfiniBand (if unavailable)
-export NCCL_P2P_LEVEL=NVL             # NVLink P2P
-export NCCL_DEBUG=INFO                # verbose NCCL logging (debug)
-export NCCL_SOCKET_IFNAME=eth0        # network interface for NCCL
+# Log all tokens as generated
+--log-disable   # suppress logs (default: logs to stderr)
 
-# vLLM-specific
-export VLLM_ATTENTION_BACKEND=FLASHINFER    # use FlashInfer kernels
-export VLLM_USE_TRITON_FLASH_ATTN=1         # use Triton Flash Attention
-export VLLM_WORKER_MULTIPROC_METHOD=spawn   # process spawning method
-export VLLM_TRACE_FUNCTION=1                # trace function calls (debug)
+# Benchmark mode (measure tokens/second)
+llama-bench \
+    -m ./model.gguf \
+    -n 128 \          # tokens to generate
+    -p 512 \          # prompt tokens
+    -b 512 \          # batch size
+    -r 5              # repeat 5 times (for statistics)
 
-# Hugging Face
-export HF_HOME=/data/huggingface          # model cache directory
-export HUGGING_FACE_HUB_TOKEN=hf_xxx     # auth token for gated models
-export HF_HUB_OFFLINE=1                  # disable network access (use cache only)
-export TRANSFORMERS_OFFLINE=1            # offline mode for transformers
-
-# Python
-export TOKENIZERS_PARALLELISM=false    # suppress tokenizer warning
-export OMP_NUM_THREADS=8               # OpenMP thread count
+# Output format:
+# model | size | params | backend | ngl | test | t/s
+# ...   | 4.7G | 8.0B   | CUDA    | 99  | pp512| 7234.56
 ```
-
----
-
-## E.9 Complete nginx Reverse Proxy Configuration
-
-Production-grade nginx config with rate limiting, TLS termination, and vLLM health-check integration:
-
-```nginx
-# /etc/nginx/sites-available/vllm-api
-# nginx 1.25+ (for http2 directive)
-
-upstream vllm_backend {
-    least_conn;
-    server 127.0.0.1:8000 max_fails=3 fail_timeout=10s;
-    # Add more backends for multi-instance:
-    # server 127.0.0.1:8001 max_fails=3 fail_timeout=10s;
-    # server 127.0.0.1:8002 max_fails=3 fail_timeout=10s;
-    keepalive 64;
-}
-
-# Rate limiting zones
-limit_req_zone $http_authorization zone=per_api_key:20m rate=60r/m;
-limit_req_zone $binary_remote_addr zone=per_ip:10m    rate=100r/m;
-limit_conn_zone $http_authorization zone=conn_api:20m;
-
-# Log format with latency
-log_format vllm_log '$remote_addr - $http_authorization [$time_local] '
-                    '"$request" $status $body_bytes_sent '
-                    'rt=$request_time uct=$upstream_connect_time '
-                    'uht=$upstream_header_time urt=$upstream_response_time';
-
-server {
-    listen 443 ssl;
-    http2 on;
-    server_name api.yourdomain.com;
-
-    # TLS (use cert-manager or Let's Encrypt in production)
-    ssl_certificate     /etc/ssl/certs/api.yourdomain.com.crt;
-    ssl_certificate_key /etc/ssl/private/api.yourdomain.com.key;
-    ssl_protocols       TLSv1.3;
-    ssl_prefer_server_ciphers off;
-    ssl_session_cache   shared:SSL:10m;
-
-    access_log /var/log/nginx/vllm_access.log vllm_log;
-    error_log  /var/log/nginx/vllm_error.log warn;
-
-    # Security headers
-    add_header X-Content-Type-Options  nosniff;
-    add_header X-Frame-Options         SAMEORIGIN;
-    add_header Strict-Transport-Security "max-age=31536000" always;
-
-    # Large body for long prompts (128K tokens ≈ 512KB text)
-    client_max_body_size 4m;
-    client_body_timeout  30s;
-
-    # Inference API
-    location /v1/ {
-        # Rate limiting
-        limit_req zone=per_api_key burst=10 nodelay;
-        limit_req zone=per_ip      burst=20 nodelay;
-        limit_conn conn_api 5;
-        limit_req_status 429;
-        add_header Retry-After 1;
-
-        # Proxy settings
-        proxy_pass          http://vllm_backend;
-        proxy_http_version  1.1;
-        proxy_set_header    Connection "";
-        proxy_set_header    Host $host;
-        proxy_set_header    X-Real-IP $remote_addr;
-        proxy_set_header    X-Forwarded-For $proxy_add_x_forwarded_for;
-
-        # Streaming support (SSE)
-        proxy_buffering     off;
-        proxy_cache         off;
-        proxy_read_timeout  300s;   # long timeout for slow completions
-        proxy_send_timeout  60s;
-
-        # Pass Authorization header through
-        proxy_set_header    Authorization $http_authorization;
-    }
-
-    # Health check (no auth, no rate limit)
-    location /health {
-        proxy_pass http://vllm_backend/health;
-        access_log off;
-    }
-
-    # Metrics (internal only)
-    location /metrics {
-        allow 10.0.0.0/8;
-        allow 172.16.0.0/12;
-        deny  all;
-        proxy_pass http://127.0.0.1:8000/metrics;
-    }
-}
-
-# Redirect HTTP to HTTPS
-server {
-    listen 80;
-    server_name api.yourdomain.com;
-    return 301 https://$host$request_uri;
-}
-```
-
----
-
-## E.10 Systemd Service with Auto-Restart and Memory Limits
-
-```ini
-# /etc/systemd/system/vllm-serve.service
-[Unit]
-Description=vLLM OpenAI-Compatible API Server
-After=network.target
-Wants=network.target
-
-[Service]
-Type=simple
-User=vllm
-Group=vllm
-WorkingDirectory=/opt/vllm
-
-# Environment file (keep secrets out of unit file)
-EnvironmentFile=/etc/vllm/env
-
-# Command
-ExecStart=/opt/vllm/venv/bin/python -m vllm.entrypoints.openai.api_server \
-    --model /models/Meta-Llama-3.1-8B-Instruct \
-    --served-model-name llama3-8b \
-    --max-model-len 8192 \
-    --max-num-seqs 256 \
-    --dtype bfloat16 \
-    --gpu-memory-utilization 0.90 \
-    --enable-prefix-caching \
-    --port 8000
-
-# Restart policy
-Restart=on-failure
-RestartSec=10s
-StartLimitIntervalSec=120s
-StartLimitBurst=5
-
-# Resource limits
-LimitNOFILE=65536
-LimitMEMLOCK=infinity     # required for GPU pinned memory
-
-# Graceful shutdown: wait 5min for in-flight requests to complete
-TimeoutStopSec=300
-KillSignal=SIGTERM
-KillMode=mixed
-
-# Logging
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=vllm
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-# Deploy and enable
-sudo systemctl daemon-reload
-sudo systemctl enable vllm-serve
-sudo systemctl start vllm-serve
-sudo systemctl status vllm-serve
-
-# Follow logs
-journalctl -u vllm-serve -f
-
-# Graceful restart (waits for in-flight requests)
-sudo systemctl reload-or-restart vllm-serve
-```
-
----
-
-## E.11 Production Startup Checklist
-
-Run through this before going live with any new deployment:
-
-```bash
-#!/bin/bash
-# production_preflight.sh
-
-set -e
-VLLM_URL="${1:-http://localhost:8000}"
-PASS=0; FAIL=0
-
-check() {
-  local name="$1"; shift
-  if "$@" &>/dev/null; then
-    echo "  ✓ $name"; ((PASS++))
-  else
-    echo "  ✗ $name — FAILED"; ((FAIL++))
-  fi
-}
-
-echo "Pre-flight check: $VLLM_URL"
-echo "=================================================="
-
-# 1. Service reachable
-check "Service responds" curl -sf "$VLLM_URL/health"
-
-# 2. Model list
-check "Model listed" \
-  bash -c "curl -sf '$VLLM_URL/v1/models' | grep -q 'id'"
-
-# 3. Basic completion
-check "Completions endpoint works" \
-  bash -c "curl -sf -X POST '$VLLM_URL/v1/completions' \
-    -H 'Content-Type: application/json' \
-    -d '{\"model\":\"default\",\"prompt\":\"Hello\",\"max_tokens\":5}' \
-    | grep -q 'text'"
-
-# 4. Chat completions
-check "Chat endpoint works" \
-  bash -c "curl -sf -X POST '$VLLM_URL/v1/chat/completions' \
-    -H 'Content-Type: application/json' \
-    -d '{\"model\":\"default\",\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}],\"max_tokens\":5}' \
-    | grep -q 'content'"
-
-# 5. Streaming
-check "Streaming works" \
-  bash -c "curl -sf -X POST '$VLLM_URL/v1/completions' \
-    -H 'Content-Type: application/json' \
-    -d '{\"model\":\"default\",\"prompt\":\"Count:\",\"max_tokens\":10,\"stream\":true}' \
-    | grep -q 'data:'"
-
-# 6. Metrics exported
-check "Prometheus metrics" curl -sf "$VLLM_URL/metrics" | grep -q "vllm_"
-
-# 7. GPU memory not over 95%
-check "GPU memory headroom" \
-  bash -c "nvidia-smi --query-gpu=memory.used,memory.total \
-    --format=csv,noheader,nounits | \
-    awk -F',' '{if(\$1/\$2 < 0.95) exit 0; else exit 1}'"
-
-echo ""
-echo "Results: $PASS passed, $FAIL failed"
-[ $FAIL -eq 0 ] && echo "✓ READY FOR PRODUCTION" || echo "✗ NOT READY"
-exit $FAIL
-```
-

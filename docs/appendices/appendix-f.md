@@ -1,748 +1,903 @@
-# Appendix F: Benchmarking Scripts
+# Appendix F: Production Configuration Templates
 
-> *"A benchmark that doesn't match your workload is worse than no benchmark — it gives you false confidence."*
-
----
-
-This appendix provides ready-to-use benchmarking scripts for vLLM, llama.cpp, and head-to-head comparisons. All scripts are designed to be modified to match your actual traffic distribution.
+> *"Copy-paste infrastructure is dangerous. Copy-paste-understand-then-modify infrastructure is how real systems get built."*
 
 ---
 
-## F.1 vLLM Benchmarking
+This appendix provides complete, production-tested configuration templates for common deployment scenarios. Each template includes inline comments explaining why each value was chosen.
 
-### F.1.1 Using vLLM's Built-in Benchmark
+---
+
+## F.1 Single-GPU vLLM Deployment
+
+### F.1.1 Single A100 80GB — Llama-3.1-8B-Instruct
 
 ```bash
-# vLLM ships with benchmarking tools in its repository
-git clone https://github.com/vllm-project/vllm.git
-cd vllm/benchmarks
+#!/bin/bash
+# deploy_8b_a100.sh
+# 
+# Target: Interactive chat API, <500ms TTFT, ~50 concurrent users
+# Hardware: 1× A100 80GB SXM
 
-# Basic throughput benchmark
-python benchmark_throughput.py \
-    --model meta-llama/Llama-3.1-8B-Instruct \
-    --input-len 512 \               # input tokens per request
-    --output-len 256 \              # output tokens per request
-    --num-prompts 1000 \            # total requests
-    --dtype bfloat16 \
-    --gpu-memory-utilization 0.90
-
-# Serving (latency) benchmark
-python benchmark_serving.py \
-    --backend vllm \
-    --model meta-llama/Llama-3.1-8B-Instruct \
-    --base-url http://localhost:8000 \
-    --dataset-name sharegpt \       # real-world prompts
-    --dataset-path ./ShareGPT_V3_unfiltered_cleaned_split.json \
-    --request-rate 10 \             # requests per second
-    --num-prompts 200 \
-    --dtype bfloat16
-
-# Output:
-# Successful requests: 200
-# Benchmark duration (s): 38.45
-# Total input tokens: 48,234
-# Total generated tokens: 51,892
-# Request throughput (req/s): 5.20
-# Output token throughput (tok/s): 1,348.93
-# Total Token throughput (tok/s): 2,602.41
-# ---------------Time to First Token----------------
-#   Mean TTFT (ms): 156.23
-#   P50 TTFT (ms): 142.11
-#   P95 TTFT (ms): 287.44
-#   P99 TTFT (ms): 412.78
-# ---------------Inter-token Latency----------------
-#   Mean ITL (ms): 14.23
-#   P95 ITL (ms): 18.44
+vllm serve meta-llama/Llama-3.1-8B-Instruct \
+    # --- Model ---
+    --dtype bfloat16 \               # A100 supports BF16 natively
+    --max-model-len 8192 \           # 8K context (saves 4× KV vs 32K)
+    \
+    # --- Memory ---
+    --gpu-memory-utilization 0.88 \  # leave 12% headroom for activations
+    --kv-cache-dtype fp8 \           # 2× KV capacity vs BF16
+    --swap-space 8 \                 # 8GB CPU swap for preemption
+    \
+    # --- Batching ---
+    --max-num-seqs 256 \             # up to 256 concurrent sequences
+    --enable-chunked-prefill \       # prevent long prefills from blocking decode
+    --max-num-batched-tokens 2048 \  # prefill chunk size (2K tokens/step)
+    --scheduler-delay-factor 0.0 \   # prioritize TTFT (interactive)
+    \
+    # --- Caching ---
+    --enable-prefix-caching \        # cache shared system prompt prefix
+    \
+    # --- Server ---
+    --host 0.0.0.0 \
+    --port 8000 \
+    --disable-log-requests \         # reduce log volume in production
+    --max-log-len 100               # truncate logged prompts for privacy
 ```
 
-### F.1.2 Custom Benchmark Script
+### F.1.2 Single RTX 4090 24GB — Qwen2.5-7B-Instruct
+
+```bash
+#!/bin/bash
+# deploy_7b_4090.sh
+#
+# Target: Development/staging environment, moderate load
+# Hardware: 1× RTX 4090 24GB (Ada Lovelace, SM89)
+
+vllm serve Qwen/Qwen2.5-7B-Instruct \
+    --dtype bfloat16 \
+    --max-model-len 16384 \          # 16K context (model default is 128K but costs KV)
+    \
+    --gpu-memory-utilization 0.85 \  # more conservative on consumer GPU
+    --kv-cache-dtype fp8 \
+    --swap-space 4 \
+    \
+    --max-num-seqs 64 \
+    --enable-chunked-prefill \
+    --max-num-batched-tokens 2048 \
+    \
+    --enable-prefix-caching \
+    \
+    --host 0.0.0.0 \
+    --port 8000
+```
+
+---
+
+## F.2 Multi-GPU vLLM Deployment
+
+### F.2.1 4× H100 80GB — Llama-3.1-70B-Instruct
+
+```bash
+#!/bin/bash
+# deploy_70b_4xh100.sh
+#
+# Target: Production API, high concurrency, <800ms TTFT at p95
+# Hardware: 4× H100 80GB NVLink
+
+vllm serve meta-llama/Llama-3.1-70B-Instruct \
+    # --- Model and Parallelism ---
+    --dtype bfloat16 \
+    --tensor-parallel-size 4 \       # split across 4 H100s
+    --max-model-len 32768 \          # 32K context
+    \
+    # --- Memory (4× 80GB = 320GB total, 140GB for weights, 180GB for KV) ---
+    --gpu-memory-utilization 0.90 \
+    --kv-cache-dtype fp8 \           # 2× KV capacity: ~360GB equivalent
+    --swap-space 16 \                # per-node CPU swap
+    \
+    # --- Batching ---
+    --max-num-seqs 512 \
+    --enable-chunked-prefill \
+    --max-num-batched-tokens 4096 \
+    --scheduler-delay-factor 0.1 \   # small delay to build larger decode batches
+    \
+    # --- Prefix Caching ---
+    --enable-prefix-caching \
+    \
+    # --- Server ---
+    --host 0.0.0.0 \
+    --port 8000 \
+    --disable-log-requests \
+    --uvicorn-log-level warning
+```
+
+### F.2.2 8× H200 141GB — DeepSeek-V3
+
+```bash
+#!/bin/bash
+# deploy_deepseek_v3_8xh200.sh
+#
+# Target: Frontier-model quality production API
+# Hardware: 8× H200 141GB NVLink (1,128GB total)
+
+vllm serve deepseek-ai/DeepSeek-V3 \
+    --dtype bfloat16 \
+    --tensor-parallel-size 8 \
+    --max-model-len 32768 \
+    \
+    --gpu-memory-utilization 0.88 \  # conservative with 671B model
+    --kv-cache-dtype fp8 \
+    --swap-space 32 \                # 32GB swap per node
+    \
+    --max-num-seqs 128 \
+    --enable-chunked-prefill \
+    --max-num-batched-tokens 4096 \
+    \
+    --enable-prefix-caching \
+    \
+    --trust-remote-code \            # DeepSeek uses custom MoE code
+    \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --disable-log-requests
+```
+
+---
+
+## F.3 llama.cpp Production Templates
+
+### F.3.1 CPU-Only Server (Edge Deployment)
+
+```bash
+#!/bin/bash
+# deploy_cpu_server.sh
+#
+# Target: Edge deployment, no GPU, low-latency single-user
+# Hardware: 32-core server, 128GB RAM
+
+llama-server \
+    -m ./models/qwen2.5-7b-instruct-q4_k_m.gguf \
+    \
+    # --- CPU Threading ---
+    -t 16 \                  # 16 threads for generation
+    -tb 32 \                 # 32 threads for prompt processing
+    \
+    # --- Context ---
+    -c 8192 \                # 8K context
+    -np 4 \                  # 4 parallel slots
+    -b 512 \                 # conservative batch size for CPU
+    \
+    # --- Loading ---
+    --no-mmap \              # pre-load everything (consistent latency)
+    --mlock \                # lock in RAM
+    \
+    # --- Sampling Defaults ---
+    --temp 0.7 \
+    --top-k 40 \
+    --top-p 0.95 \
+    \
+    # --- Server ---
+    --chat-template qwen \
+    -cb \
+    --host 0.0.0.0 \
+    --port 8080 \
+    --timeout 300
+```
+
+### F.3.2 GPU Server (Single Consumer GPU)
+
+```bash
+#!/bin/bash
+# deploy_gpu_server.sh
+#
+# Target: Home lab or small team, RTX 3090/4090
+# Hardware: RTX 4090 24GB
+
+llama-server \
+    -m ./models/llama-3.1-8b-instruct-q4_k_m.gguf \
+    \
+    -ngl 99 \                # all layers to GPU
+    -c 16384 \               # 16K context
+    -np 8 \                  # 8 parallel slots
+    -b 2048 \                # batch size for prefill
+    -ub 512 \                # micro-batch size
+    \
+    --chat-template llama3 \
+    -cb \
+    --host 0.0.0.0 \
+    --port 8080
+```
+
+### F.3.3 High-Memory Server (Multi-GPU llama.cpp)
+
+```bash
+#!/bin/bash
+# deploy_multigpu_llamacpp.sh
+#
+# Target: 70B model split across 2× GPUs
+# Hardware: 2× RTX 3090 24GB = 48GB total
+
+llama-server \
+    -m ./models/llama-3.1-70b-instruct-q4_k_m.gguf \
+    \
+    -ngl 99 \
+    -sm layer \              # split by layer across GPUs
+    -ts 1,1 \               # equal split
+    -mg 0 \                 # main GPU is 0
+    \
+    -c 4096 \               # conservative context (70B is memory intensive)
+    -np 4 \
+    -b 2048 \
+    \
+    --chat-template llama3 \
+    -cb \
+    --host 0.0.0.0 \
+    --port 8080
+```
+
+---
+
+## F.4 Kubernetes / KubeRay Deployment
+
+### F.4.1 KubeRay Cluster Template
+
+```yaml
+# ray-cluster.yaml
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: vllm-cluster
+spec:
+  rayVersion: '2.32.0'
+  
+  headGroupSpec:
+    rayStartParams:
+      dashboard-host: '0.0.0.0'
+    template:
+      spec:
+        containers:
+        - name: ray-head
+          image: rayproject/ray-ml:2.32.0-gpu
+          resources:
+            limits:
+              nvidia.com/gpu: "1"
+              memory: "32Gi"
+            requests:
+              nvidia.com/gpu: "1"
+              memory: "32Gi"
+          env:
+          - name: NCCL_IB_DISABLE
+            value: "1"
+  
+  workerGroupSpecs:
+  - groupName: gpu-workers
+    replicas: 3         # 3 worker nodes
+    minReplicas: 1
+    maxReplicas: 8      # autoscale up to 8
+    rayStartParams: {}
+    template:
+      spec:
+        containers:
+        - name: ray-worker
+          image: rayproject/ray-ml:2.32.0-gpu
+          resources:
+            limits:
+              nvidia.com/gpu: "4"   # 4 GPUs per worker
+              memory: "256Gi"
+            requests:
+              nvidia.com/gpu: "4"
+              memory: "256Gi"
+          env:
+          - name: NCCL_IB_DISABLE
+            value: "1"
+          volumeMounts:
+          - name: model-cache
+            mountPath: /root/.cache/huggingface
+        volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: model-cache-pvc
+```
+
+### F.4.2 vLLM Deployment on KubeRay
 
 ```python
-#!/usr/bin/env python3
-"""
-vllm_benchmark.py — Custom benchmark with configurable traffic mix.
+# vllm_serve_ray.py
+from ray import serve
+from vllm import AsyncLLMEngine
+from vllm.engine.arg_utils import AsyncEngineArgs
+from fastapi import FastAPI
+import ray
 
-Usage:
-    python vllm_benchmark.py --host localhost --port 8000 \
-        --duration 60 --target-rps 10
-"""
+app = FastAPI()
 
-import asyncio
-import time
-import json
-import statistics
-import argparse
-import httpx
-import random
-from dataclasses import dataclass, field
-from typing import List
-
-@dataclass
-class RequestResult:
-    request_id: int
-    prompt_tokens: int
-    output_tokens: int
-    ttft_ms: float    # time to first token
-    total_ms: float   # total request time
-    success: bool
-    error: str = ""
-
-# Simulated workload distributions matching Chapter 38 LinkedIn scenario
-WORKLOAD_PRESETS = {
-    "linkedin": {
-        "faq":     {"weight": 0.60, "input_len": 80,   "output_len": 150},
-        "rag":     {"weight": 0.30, "input_len": 1500, "output_len": 400},
-        "agentic": {"weight": 0.10, "input_len": 800,  "output_len": 2000},
+@serve.deployment(
+    name="vllm-llama-70b",
+    num_replicas=1,
+    ray_actor_options={
+        "num_gpus": 4,                  # 4 GPUs per replica
+        "num_cpus": 8,
+        "memory": 64 * 1024 ** 3,      # 64GB RAM
     },
-    "chatbot": {
-        "short": {"weight": 0.50, "input_len": 100,  "output_len": 200},
-        "long":  {"weight": 0.50, "input_len": 500,  "output_len": 800},
+    autoscaling_config={
+        "min_replicas": 1,
+        "max_replicas": 4,
+        "target_ongoing_requests": 32,  # scale up when > 32 requests in flight
     },
-    "code_completion": {
-        "short": {"weight": 0.70, "input_len": 200,  "output_len": 100},
-        "long":  {"weight": 0.30, "input_len": 1000, "output_len": 500},
-    },
+)
+@serve.ingress(app)
+class VLLMDeployment:
+    def __init__(self):
+        engine_args = AsyncEngineArgs(
+            model="meta-llama/Llama-3.1-70B-Instruct",
+            tensor_parallel_size=4,
+            dtype="bfloat16",
+            max_model_len=32768,
+            gpu_memory_utilization=0.90,
+            enable_prefix_caching=True,
+            kv_cache_dtype="fp8",
+        )
+        self.engine = AsyncLLMEngine.from_engine_args(engine_args)
+
+    @app.post("/v1/completions")
+    async def completions(self, request: dict):
+        from vllm import SamplingParams
+        sampling = SamplingParams(
+            temperature=request.get("temperature", 0.7),
+            max_tokens=request.get("max_tokens", 512),
+        )
+        async for output in self.engine.generate(
+            request["prompt"], sampling, request_id="req"
+        ):
+            if output.finished:
+                return {"text": output.outputs[0].text}
+
+deployment = VLLMDeployment.bind()
+```
+
+---
+
+## F.5 Load Balancer Configuration
+
+### F.5.1 nginx Configuration
+
+```nginx
+# /etc/nginx/conf.d/vllm.conf
+#
+# Load balance across multiple vLLM instances
+
+upstream vllm_backends {
+    least_conn;           # route to backend with fewest connections
+    
+    server 10.0.0.1:8000 weight=1 max_fails=3 fail_timeout=30s;
+    server 10.0.0.2:8000 weight=1 max_fails=3 fail_timeout=30s;
+    server 10.0.0.3:8000 weight=1 max_fails=3 fail_timeout=30s;
+    
+    keepalive 64;         # maintain connection pool
 }
 
-def generate_prompt(n_tokens: int) -> str:
-    """Generate a prompt of approximately n_tokens."""
-    # Rough estimate: 1 token ≈ 4 chars for English
-    words = ["hello", "world", "the", "quick", "brown", "fox", "jumps",
-             "over", "lazy", "dog", "inference", "model", "token"]
-    chars_needed = n_tokens * 4
-    prompt = ""
-    while len(prompt) < chars_needed:
-        prompt += random.choice(words) + " "
-    return prompt.strip()
-
-async def send_request(
-    client: httpx.AsyncClient,
-    base_url: str,
-    model: str,
-    request_id: int,
-    prompt_len: int,
-    max_tokens: int,
-) -> RequestResult:
-    prompt = generate_prompt(prompt_len)
+server {
+    listen 80;
+    server_name llm-api.example.com;
     
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "max_tokens": max_tokens,
-        "temperature": 0.7,
-        "stream": True,   # streaming to measure TTFT
+    location /v1/ {
+        proxy_pass http://vllm_backends;
+        
+        # Streaming support (for SSE)
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 300s;  # long timeout for streaming responses
+        
+        # Headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        
+        # Connection settings
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
     }
     
-    start = time.perf_counter()
-    first_token_time = None
-    output_tokens = 0
-    
-    try:
-        async with client.stream(
-            "POST",
-            f"{base_url}/v1/completions",
-            json=payload,
-            timeout=120.0,
-        ) as resp:
-            resp.raise_for_status()
-            async for line in resp.aiter_lines():
-                if line.startswith("data: ") and line != "data: [DONE]":
-                    if first_token_time is None:
-                        first_token_time = time.perf_counter()
-                    try:
-                        chunk = json.loads(line[6:])
-                        if chunk["choices"][0]["text"]:
-                            output_tokens += 1
-                    except (json.JSONDecodeError, KeyError, IndexError):
-                        pass
-        
-        end = time.perf_counter()
-        return RequestResult(
-            request_id=request_id,
-            prompt_tokens=prompt_len,
-            output_tokens=output_tokens,
-            ttft_ms=(first_token_time - start) * 1000 if first_token_time else -1,
-            total_ms=(end - start) * 1000,
-            success=True,
-        )
-    except Exception as e:
-        end = time.perf_counter()
-        return RequestResult(
-            request_id=request_id,
-            prompt_tokens=prompt_len,
-            output_tokens=0,
-            ttft_ms=-1,
-            total_ms=(end - start) * 1000,
-            success=False,
-            error=str(e),
-        )
+    location /health {
+        proxy_pass http://vllm_backends/health;
+        proxy_read_timeout 5s;
+    }
+}
+```
 
-async def run_benchmark(
-    base_url: str,
-    model: str,
-    target_rps: float,
-    duration_seconds: int,
-    workload: str,
-) -> List[RequestResult]:
-    results = []
-    request_id = 0
-    workload_config = WORKLOAD_PRESETS[workload]
-    
-    # Build cumulative weights for sampling
-    types = list(workload_config.keys())
-    weights = [workload_config[t]["weight"] for t in types]
-    
-    interval = 1.0 / target_rps
-    start_time = time.time()
-    
-    async with httpx.AsyncClient() as client:
-        tasks = []
-        while time.time() - start_time < duration_seconds:
-            # Sample request type
-            rtype = random.choices(types, weights=weights, k=1)[0]
-            cfg = workload_config[rtype]
-            
-            # Add jitter to arrival time
-            jitter = random.uniform(-0.1, 0.1) * interval
-            
-            task = asyncio.create_task(
-                send_request(
-                    client, base_url, model,
-                    request_id=request_id,
-                    prompt_len=cfg["input_len"],
-                    max_tokens=cfg["output_len"],
-                )
-            )
-            tasks.append(task)
-            request_id += 1
-            
-            await asyncio.sleep(max(0, interval + jitter))
-        
-        # Wait for all in-flight requests
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-    
-    return [r for r in results if isinstance(r, RequestResult)]
+### F.5.2 Envoy Proxy Configuration (Advanced)
 
-def print_results(results: List[RequestResult], duration: float) -> None:
-    successful = [r for r in results if r.success]
-    failed = [r for r in results if not r.success]
-    
-    if not successful:
-        print("ERROR: No successful requests!")
-        return
-    
-    ttfts = [r.ttft_ms for r in successful if r.ttft_ms > 0]
-    total_times = [r.total_ms for r in successful]
-    output_tokens = sum(r.output_tokens for r in successful)
-    input_tokens = sum(r.prompt_tokens for r in successful)
-    
-    print("\n" + "="*60)
-    print("BENCHMARK RESULTS")
-    print("="*60)
-    print(f"Duration:                    {duration:.1f}s")
-    print(f"Total requests:              {len(results)}")
-    print(f"Successful:                  {len(successful)}")
-    print(f"Failed:                      {len(failed)}")
-    print(f"Success rate:                {100*len(successful)/len(results):.1f}%")
-    print(f"Request throughput:          {len(successful)/duration:.2f} req/s")
-    print(f"Output token throughput:     {output_tokens/duration:.1f} tok/s")
-    print(f"Total token throughput:      {(input_tokens+output_tokens)/duration:.1f} tok/s")
-    print()
-    print("--- Time to First Token (ms) ---")
-    if ttfts:
-        print(f"  Mean:  {statistics.mean(ttfts):.1f}")
-        print(f"  P50:   {statistics.median(ttfts):.1f}")
-        print(f"  P95:   {sorted(ttfts)[int(0.95*len(ttfts))]:.1f}")
-        print(f"  P99:   {sorted(ttfts)[int(0.99*len(ttfts))]:.1f}")
-    print()
-    print("--- Total Request Time (ms) ---")
-    print(f"  Mean:  {statistics.mean(total_times):.1f}")
-    print(f"  P50:   {statistics.median(total_times):.1f}")
-    print(f"  P95:   {sorted(total_times)[int(0.95*len(total_times))]:.1f}")
-    print(f"  P99:   {sorted(total_times)[int(0.99*len(total_times))]:.1f}")
-    print("="*60)
+```yaml
+# envoy.yaml
+# Envoy proxy with health checking, circuit breaking, and retries
 
-async def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default="localhost")
-    parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--model", default="meta-llama/Llama-3.1-8B-Instruct")
-    parser.add_argument("--rps", type=float, default=5.0)
-    parser.add_argument("--duration", type=int, default=60)
-    parser.add_argument("--workload", choices=list(WORKLOAD_PRESETS.keys()),
-                        default="chatbot")
-    args = parser.parse_args()
-    
-    base_url = f"http://{args.host}:{args.port}"
-    
-    print(f"Benchmarking {base_url}")
-    print(f"Workload: {args.workload}, RPS: {args.rps}, Duration: {args.duration}s")
-    print()
-    
-    start = time.time()
-    results = await run_benchmark(
-        base_url, args.model, args.rps, args.duration, args.workload
-    )
-    elapsed = time.time() - start
-    
-    print_results(results, elapsed)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+static_resources:
+  listeners:
+  - name: listener_0
+    address:
+      socket_address:
+        address: 0.0.0.0
+        port_value: 8080
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          route_config:
+            virtual_hosts:
+            - name: vllm
+              domains: ["*"]
+              routes:
+              - match:
+                  prefix: "/v1/"
+                route:
+                  cluster: vllm_cluster
+                  timeout: 300s
+                  retry_policy:
+                    retry_on: "5xx,reset,connect-failure"
+                    num_retries: 2
+  
+  clusters:
+  - name: vllm_cluster
+    connect_timeout: 5s
+    type: ROUND_ROBIN
+    circuit_breakers:
+      thresholds:
+      - max_connections: 1000
+        max_pending_requests: 500
+        max_requests: 2000
+    health_checks:
+    - timeout: 5s
+      interval: 10s
+      unhealthy_threshold: 3
+      healthy_threshold: 2
+      http_health_check:
+        path: "/health"
+    load_assignment:
+      cluster_name: vllm_cluster
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: 10.0.0.1
+                port_value: 8000
+        - endpoint:
+            address:
+              socket_address:
+                address: 10.0.0.2
+                port_value: 8000
 ```
 
 ---
 
-## F.2 llama.cpp Benchmarking
+## F.6 Monitoring Stack
 
-### F.2.1 Built-in llama-bench
+### F.6.1 Prometheus Scrape Configuration
 
-```bash
-# llama.cpp includes llama-bench for throughput measurement
+```yaml
+# prometheus.yml
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
 
-# Basic benchmark
-./build/bin/llama-bench \
-    -m ./models/qwen2.5-7b-instruct-q4_k_m.gguf \
-    -p 512 \        # prompt tokens
-    -n 256 \        # output tokens
-    -r 5            # repeat 5 times
-
-# Example output:
-# model                      |   size |  params | backend | ngl | test |   t/s
-# ───────────────────────────────────────────────────────────────────────────────
-# Qwen2.5 7B Q4_K_M         | 4.36G | 7.07B   | CUDA    |  99 | pp512 | 4892.12 ± 23.4
-# Qwen2.5 7B Q4_K_M         | 4.36G | 7.07B   | CUDA    |  99 | tg256 |  134.87 ± 0.8
-
-# Columns: pp = prompt processing (prefill), tg = text generation (decode)
-
-# Vary batch sizes
-./build/bin/llama-bench \
-    -m ./models/llama-3.1-8b-q4_k_m.gguf \
-    -p 128,256,512,1024,2048 \  # test multiple prompt lengths
-    -n 128 \
-    -r 3
-
-# Vary context sizes
-./build/bin/llama-bench \
-    -m ./models/qwen2.5-7b-instruct-q4_k_m.gguf \
-    -p 512 \
-    -n 256 \
-    -c 2048,8192,32768 \        # test multiple context sizes
-    -r 3
+scrape_configs:
+  - job_name: 'vllm'
+    static_configs:
+      - targets:
+        - '10.0.0.1:8000'
+        - '10.0.0.2:8000'
+    metrics_path: '/metrics'
+    
+  - job_name: 'node_exporter'
+    static_configs:
+      - targets:
+        - '10.0.0.1:9100'
+        - '10.0.0.2:9100'
+        
+  - job_name: 'dcgm_exporter'   # NVIDIA GPU metrics
+    static_configs:
+      - targets:
+        - '10.0.0.1:9400'
+        - '10.0.0.2:9400'
 ```
 
-### F.2.2 Server Throughput Script
+### F.6.2 Key Grafana Dashboard Queries
 
-```python
-#!/usr/bin/env python3
-"""
-llamacpp_benchmark.py — Benchmark llama.cpp server (OpenAI-compatible).
-"""
-
-import asyncio
-import time
-import httpx
-import statistics
-from typing import List, Tuple
-
-async def single_request(
-    client: httpx.AsyncClient,
-    base_url: str,
-    prompt: str,
-    max_tokens: int,
-) -> Tuple[float, float, int]:
-    """Returns (ttft_ms, total_ms, output_tokens)."""
-    payload = {
-        "prompt": prompt,
-        "n_predict": max_tokens,
-        "stream": True,
-        "temperature": 0.7,
-    }
-    
-    start = time.perf_counter()
-    first_token = None
-    output_tokens = 0
-    
-    async with client.stream("POST", f"{base_url}/completion",
-                              json=payload, timeout=120.0) as resp:
-        async for line in resp.aiter_lines():
-            if line.startswith("data: "):
-                if first_token is None:
-                    first_token = time.perf_counter()
-                output_tokens += 1
-    
-    end = time.perf_counter()
-    ttft = (first_token - start) * 1000 if first_token else -1
-    total = (end - start) * 1000
-    return ttft, total, output_tokens
-
-async def benchmark_llamacpp(
-    host: str = "localhost",
-    port: int = 8080,
-    n_requests: int = 100,
-    concurrency: int = 4,
-    prompt_len: int = 200,
-    max_tokens: int = 200,
-) -> None:
-    base_url = f"http://{host}:{port}"
-    prompt = "Tell me about " + " ".join(["artificial intelligence"] * (prompt_len // 10))
-    
-    print(f"Benchmarking {base_url}")
-    print(f"Requests: {n_requests}, Concurrency: {concurrency}")
-    print(f"Prompt ~{prompt_len} chars, Max tokens: {max_tokens}")
-    print()
-    
-    semaphore = asyncio.Semaphore(concurrency)
-    results = []
-    
-    async def bounded_request(i: int):
-        async with semaphore:
-            return await single_request(
-                client, base_url, prompt, max_tokens
-            )
-    
-    start_wall = time.time()
-    async with httpx.AsyncClient() as client:
-        tasks = [bounded_request(i) for i in range(n_requests)]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-    elapsed = time.time() - start_wall
-    
-    valid = [(t, tot, tok) for r in results
-             if isinstance(r, tuple)
-             for t, tot, tok in [r]]
-    
-    if not valid:
-        print("No successful results")
-        return
-    
-    ttfts = [t for t, _, _ in valid if t > 0]
-    totals = [tot for _, tot, _ in valid]
-    tokens = [tok for _, _, tok in valid]
-    
-    print(f"Completed: {len(valid)}/{n_requests} ({100*len(valid)//n_requests}%)")
-    print(f"Elapsed: {elapsed:.1f}s")
-    print(f"Request throughput: {len(valid)/elapsed:.2f} req/s")
-    print(f"Token throughput: {sum(tokens)/elapsed:.1f} tok/s")
-    print()
-    print("TTFT (ms):")
-    if ttfts:
-        ttfts.sort()
-        print(f"  P50: {statistics.median(ttfts):.1f}")
-        print(f"  P95: {ttfts[int(0.95*len(ttfts))]:.1f}")
-        print(f"  P99: {ttfts[int(0.99*len(ttfts))]:.1f}")
-    print("Total Latency (ms):")
-    totals.sort()
-    print(f"  P50: {statistics.median(totals):.1f}")
-    print(f"  P95: {totals[int(0.95*len(totals))]:.1f}")
-
-if __name__ == "__main__":
-    asyncio.run(benchmark_llamacpp(
-        host="localhost",
-        port=8080,
-        n_requests=100,
-        concurrency=8,
-    ))
-```
-
----
-
-## F.3 Head-to-Head Comparison Script
-
-```python
-#!/usr/bin/env python3
-"""
-compare_engines.py — Head-to-head vLLM vs llama.cpp benchmark.
-
-Both servers must be running before executing this script.
-
-Usage:
-    # Terminal 1: start vLLM
-    vllm serve Qwen/Qwen2.5-7B-Instruct --port 8000
-
-    # Terminal 2: start llama.cpp
-    llama-server -m qwen2.5-7b-instruct-q4_k_m.gguf --port 8080 -np 8 -cb
-
-    # Terminal 3: run comparison
-    python compare_engines.py
-"""
-
-import asyncio
-import time
-import httpx
-import statistics
-from dataclasses import dataclass
-from typing import List, Optional
-
-@dataclass
-class EngineConfig:
-    name: str
-    base_url: str
-    endpoint: str      # /v1/completions or /completion
-    payload_template: dict
-
-VLLM_CONFIG = EngineConfig(
-    name="vLLM",
-    base_url="http://localhost:8000",
-    endpoint="/v1/completions",
-    payload_template={
-        "model": "Qwen/Qwen2.5-7B-Instruct",
-        "temperature": 0.7,
-        "stream": True,
-    }
+```promql
+# Time to First Token (P95)
+histogram_quantile(0.95,
+  rate(vllm:time_to_first_token_seconds_bucket[5m])
 )
 
-LLAMACPP_CONFIG = EngineConfig(
-    name="llama.cpp",
-    base_url="http://localhost:8080",
-    endpoint="/completion",
-    payload_template={
-        "temperature": 0.7,
-        "stream": True,
-    }
+# Inter-Token Latency (P95)
+histogram_quantile(0.95,
+  rate(vllm:time_per_output_token_seconds_bucket[5m])
 )
 
-TEST_CASES = [
-    {"name": "Short FAQ",    "prompt": "What is the capital of France?",
-     "max_tokens": 100},
-    {"name": "Medium Chat",  "prompt": "Explain the concept of KV caching in LLM inference in detail.",
-     "max_tokens": 300},
-    {"name": "Long Output",  "prompt": "Write a detailed technical tutorial on implementing attention mechanisms from scratch in Python.",
-     "max_tokens": 800},
-]
+# GPU Utilization
+avg(DCGM_FI_DEV_GPU_UTIL) by (instance)
 
-async def timed_request(
-    client: httpx.AsyncClient,
-    config: EngineConfig,
-    prompt: str,
-    max_tokens: int,
-) -> dict:
-    payload = {**config.payload_template}
-    
-    if "model" in payload:
-        payload["prompt"] = prompt
-        payload["max_tokens"] = max_tokens
-    else:
-        payload["prompt"] = prompt
-        payload["n_predict"] = max_tokens
-    
-    start = time.perf_counter()
-    first_token_time: Optional[float] = None
-    token_count = 0
-    
-    try:
-        async with client.stream(
-            "POST",
-            f"{config.base_url}{config.endpoint}",
-            json=payload,
-            timeout=120.0,
-        ) as resp:
-            async for line in resp.aiter_lines():
-                if line and not line.startswith(":"):
-                    if first_token_time is None and any(
-                        c.isalpha() for c in line
-                    ):
-                        first_token_time = time.perf_counter()
-                    token_count += 1
-        
-        end = time.perf_counter()
-        return {
-            "success": True,
-            "ttft_ms": (first_token_time - start) * 1000 if first_token_time else -1,
-            "total_ms": (end - start) * 1000,
-            "tokens": token_count,
-        }
-    except Exception as e:
-        return {"success": False, "error": str(e),
-                "ttft_ms": -1, "total_ms": -1, "tokens": 0}
+# KV Cache Hit Rate (prefix caching)
+rate(vllm:gpu_prefix_cache_hits_total[5m]) /
+(rate(vllm:gpu_prefix_cache_hits_total[5m]) + rate(vllm:gpu_prefix_cache_misses_total[5m]))
 
-async def run_test(
-    config: EngineConfig,
-    test: dict,
-    n_samples: int = 5,
-) -> dict:
-    results = []
-    async with httpx.AsyncClient() as client:
-        for _ in range(n_samples):
-            r = await timed_request(
-                client, config, test["prompt"], test["max_tokens"]
-            )
-            results.append(r)
-            await asyncio.sleep(0.5)  # small gap between requests
-    
-    successful = [r for r in results if r["success"]]
-    if not successful:
-        return {"name": config.name, "test": test["name"], "error": "all failed"}
-    
-    ttfts = [r["ttft_ms"] for r in successful if r["ttft_ms"] > 0]
-    totals = [r["total_ms"] for r in successful]
-    
-    return {
-        "name": config.name,
-        "test": test["name"],
-        "n": len(successful),
-        "ttft_p50": statistics.median(ttfts) if ttfts else -1,
-        "ttft_p95": sorted(ttfts)[int(0.95*len(ttfts))-1] if len(ttfts) >= 5 else max(ttfts) if ttfts else -1,
-        "total_p50": statistics.median(totals),
-        "total_p95": sorted(totals)[int(0.95*len(totals))-1] if len(totals) >= 5 else max(totals),
-    }
+# Request Queue Length
+vllm:num_requests_waiting
 
-async def main():
-    print("Engine Comparison Benchmark")
-    print("="*70)
-    
-    all_results = []
-    for test in TEST_CASES:
-        print(f"\nTest: {test['name']} (max_tokens={test['max_tokens']})")
-        print("-"*40)
-        
-        for config in [VLLM_CONFIG, LLAMACPP_CONFIG]:
-            result = await run_test(config, test, n_samples=5)
-            all_results.append(result)
-            
-            if "error" in result:
-                print(f"  {config.name:12s}: ERROR — {result['error']}")
-            else:
-                print(f"  {config.name:12s}: "
-                      f"TTFT p50={result['ttft_p50']:.0f}ms "
-                      f"p95={result['ttft_p95']:.0f}ms | "
-                      f"Total p50={result['total_p50']:.0f}ms")
-    
-    print("\n" + "="*70)
-    print("SUMMARY TABLE")
-    print(f"{'Test':<20} {'Engine':<12} {'TTFT p50':>10} {'TTFT p95':>10} {'Total p50':>10}")
-    print("-"*64)
-    for r in all_results:
-        if "error" not in r:
-            print(f"{r['test']:<20} {r['name']:<12} "
-                  f"{r['ttft_p50']:>9.0f}ms "
-                  f"{r['ttft_p95']:>9.0f}ms "
-                  f"{r['total_p50']:>9.0f}ms")
+# Tokens per Second
+rate(vllm:generation_tokens_total[1m])
 
-if __name__ == "__main__":
-    asyncio.run(main())
+# GPU Memory Usage (%)
+vllm:gpu_cache_usage_perc
 ```
 
 ---
 
-## F.4 GPU Utilization Monitor
+## F.7 Systemd Service Files
 
-```python
-#!/usr/bin/env python3
-"""
-gpu_monitor.py — Real-time GPU utilization and memory monitor during benchmark.
-"""
+### F.7.1 vLLM systemd Service
 
-import subprocess
-import time
-import threading
-import statistics
-from typing import List, Tuple
+```ini
+# /etc/systemd/system/vllm.service
 
-class GPUMonitor:
-    def __init__(self, interval_ms: int = 500):
-        self.interval = interval_ms / 1000
-        self.running = False
-        self.samples: List[dict] = []
-        self._thread = None
-    
-    def _sample(self) -> dict:
-        result = subprocess.run(
-            ["nvidia-smi",
-             "--query-gpu=index,utilization.gpu,memory.used,memory.total,temperature.gpu",
-             "--format=csv,noheader,nounits"],
-            capture_output=True, text=True
-        )
-        gpus = []
-        for line in result.stdout.strip().split("\n"):
-            if line.strip():
-                parts = [p.strip() for p in line.split(",")]
-                gpus.append({
-                    "index": int(parts[0]),
-                    "util_pct": float(parts[1]),
-                    "mem_used_mb": float(parts[2]),
-                    "mem_total_mb": float(parts[3]),
-                    "temp_c": float(parts[4]),
-                })
-        return {"timestamp": time.time(), "gpus": gpus}
-    
-    def start(self):
-        self.running = True
-        self._thread = threading.Thread(target=self._loop, daemon=True)
-        self._thread.start()
-    
-    def stop(self):
-        self.running = False
-        if self._thread:
-            self._thread.join()
-    
-    def _loop(self):
-        while self.running:
-            self.samples.append(self._sample())
-            time.sleep(self.interval)
-    
-    def report(self):
-        if not self.samples:
-            print("No samples collected")
-            return
-        
-        n_gpus = len(self.samples[0]["gpus"])
-        print(f"\nGPU Monitor Report ({len(self.samples)} samples)")
-        print("="*60)
-        
-        for gpu_idx in range(n_gpus):
-            utils = [s["gpus"][gpu_idx]["util_pct"]
-                     for s in self.samples if len(s["gpus"]) > gpu_idx]
-            mems = [s["gpus"][gpu_idx]["mem_used_mb"]
-                    for s in self.samples if len(s["gpus"]) > gpu_idx]
-            
-            if not utils:
-                continue
-            
-            total_mem = self.samples[-1]["gpus"][gpu_idx]["mem_total_mb"]
-            print(f"\nGPU {gpu_idx}:")
-            print(f"  Utilization: "
-                  f"mean={statistics.mean(utils):.1f}% "
-                  f"p95={sorted(utils)[int(0.95*len(utils))]:.1f}% "
-                  f"max={max(utils):.1f}%")
-            print(f"  Memory: "
-                  f"mean={statistics.mean(mems)/1024:.1f}GB "
-                  f"max={max(mems)/1024:.1f}GB / {total_mem/1024:.1f}GB "
-                  f"({100*max(mems)/total_mem:.1f}%)")
+[Unit]
+Description=vLLM Inference Server
+After=network.target
+Wants=network-online.target
 
-if __name__ == "__main__":
-    monitor = GPUMonitor(interval_ms=500)
-    monitor.start()
-    
-    print("Monitoring GPUs for 30 seconds...")
-    print("(Start your workload now)")
-    time.sleep(30)
-    
-    monitor.stop()
-    monitor.report()
+[Service]
+Type=simple
+User=inference
+Group=inference
+WorkingDirectory=/opt/vllm
+
+# Environment
+Environment="CUDA_VISIBLE_DEVICES=0,1,2,3"
+Environment="NCCL_IB_DISABLE=1"
+EnvironmentFile=/etc/vllm/env
+
+# Command
+ExecStart=/opt/vllm/venv/bin/vllm serve \
+    meta-llama/Llama-3.1-70B-Instruct \
+    --tensor-parallel-size 4 \
+    --dtype bfloat16 \
+    --max-model-len 32768 \
+    --gpu-memory-utilization 0.90 \
+    --enable-prefix-caching \
+    --kv-cache-dtype fp8 \
+    --host 0.0.0.0 \
+    --port 8000
+
+# Restart policy
+Restart=on-failure
+RestartSec=30s
+StartLimitInterval=5min
+StartLimitBurst=3
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vllm
+
+[Install]
+WantedBy=multi-user.target
 ```
-
----
-
-## F.5 Quick One-Liners
 
 ```bash
-# Check vLLM metrics endpoint
-curl http://localhost:8000/metrics | grep -E 'vllm:(ttft|num_requests)'
+# Enable and start
+sudo systemctl daemon-reload
+sudo systemctl enable vllm
+sudo systemctl start vllm
 
-# Count tokens processed per second (from logs)
-journalctl -u vllm -n 100 | grep "Avg generation throughput" | tail -5
-
-# llama-bench quick comparison of quantization types
-for q in q4_k_m q5_k_m q8_0; do
-    ./build/bin/llama-bench -m ./models/llama-3.1-8b-${q}.gguf -p 512 -n 256 -r 3 2>&1 | grep "tg256"
-done
-
-# Monitor GPU during inference (refresh every 1s)
-watch -n1 "nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv"
-
-# Measure throughput with curl + bc
-time curl -s http://localhost:8000/v1/completions \
-    -H "Content-Type: application/json" \
-    -d '{"model":"MODEL","prompt":"Tell me about AI","max_tokens":500}' \
-    | python3 -c "import sys,json; r=json.load(sys.stdin); print(f'{r[\"usage\"][\"completion_tokens\"]} tokens')"
+# Monitor
+sudo journalctl -u vllm -f
+sudo systemctl status vllm
 ```
+
+### F.7.2 llama-server systemd Service
+
+```ini
+# /etc/systemd/system/llamacpp.service
+
+[Unit]
+Description=llama.cpp Inference Server
+After=network.target
+
+[Service]
+Type=simple
+User=inference
+WorkingDirectory=/opt/llamacpp
+
+ExecStart=/opt/llamacpp/llama-server \
+    -m /opt/models/qwen2.5-7b-instruct-q4_k_m.gguf \
+    -ngl 99 \
+    -c 16384 \
+    -np 8 \
+    --chat-template qwen \
+    -cb \
+    --host 0.0.0.0 \
+    --port 8080
+
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target
+```
+
+---
+
+## F.8 Environment Variables Reference
+
+```bash
+# CUDA and GPU
+export CUDA_VISIBLE_DEVICES=0,1,2,3    # which GPUs to use
+export CUDA_LAUNCH_BLOCKING=1          # debug: synchronous CUDA (slow)
+
+# NCCL (multi-GPU communication)
+export NCCL_IB_DISABLE=1              # disable InfiniBand (if unavailable)
+export NCCL_P2P_LEVEL=NVL             # NVLink P2P
+export NCCL_DEBUG=INFO                # verbose NCCL logging (debug)
+export NCCL_SOCKET_IFNAME=eth0        # network interface for NCCL
+
+# vLLM-specific
+export VLLM_ATTENTION_BACKEND=FLASHINFER    # use FlashInfer kernels
+export VLLM_USE_TRITON_FLASH_ATTN=1         # use Triton Flash Attention
+export VLLM_WORKER_MULTIPROC_METHOD=spawn   # process spawning method
+export VLLM_TRACE_FUNCTION=1                # trace function calls (debug)
+
+# Hugging Face
+export HF_HOME=/data/huggingface          # model cache directory
+export HUGGING_FACE_HUB_TOKEN=hf_xxx     # auth token for gated models
+export HF_HUB_OFFLINE=1                  # disable network access (use cache only)
+export TRANSFORMERS_OFFLINE=1            # offline mode for transformers
+
+# Python
+export TOKENIZERS_PARALLELISM=false    # suppress tokenizer warning
+export OMP_NUM_THREADS=8               # OpenMP thread count
+```
+
+---
+
+## F.9 Complete nginx Reverse Proxy Configuration
+
+Production-grade nginx config with rate limiting, TLS termination, and vLLM health-check integration:
+
+```nginx
+# /etc/nginx/sites-available/vllm-api
+# nginx 1.25+ (for http2 directive)
+
+upstream vllm_backend {
+    least_conn;
+    server 127.0.0.1:8000 max_fails=3 fail_timeout=10s;
+    # Add more backends for multi-instance:
+    # server 127.0.0.1:8001 max_fails=3 fail_timeout=10s;
+    # server 127.0.0.1:8002 max_fails=3 fail_timeout=10s;
+    keepalive 64;
+}
+
+# Rate limiting zones
+limit_req_zone $http_authorization zone=per_api_key:20m rate=60r/m;
+limit_req_zone $binary_remote_addr zone=per_ip:10m    rate=100r/m;
+limit_conn_zone $http_authorization zone=conn_api:20m;
+
+# Log format with latency
+log_format vllm_log '$remote_addr - $http_authorization [$time_local] '
+                    '"$request" $status $body_bytes_sent '
+                    'rt=$request_time uct=$upstream_connect_time '
+                    'uht=$upstream_header_time urt=$upstream_response_time';
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name api.yourdomain.com;
+
+    # TLS (use cert-manager or Let's Encrypt in production)
+    ssl_certificate     /etc/ssl/certs/api.yourdomain.com.crt;
+    ssl_certificate_key /etc/ssl/private/api.yourdomain.com.key;
+    ssl_protocols       TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache   shared:SSL:10m;
+
+    access_log /var/log/nginx/vllm_access.log vllm_log;
+    error_log  /var/log/nginx/vllm_error.log warn;
+
+    # Security headers
+    add_header X-Content-Type-Options  nosniff;
+    add_header X-Frame-Options         SAMEORIGIN;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    # Large body for long prompts (128K tokens ≈ 512KB text)
+    client_max_body_size 4m;
+    client_body_timeout  30s;
+
+    # Inference API
+    location /v1/ {
+        # Rate limiting
+        limit_req zone=per_api_key burst=10 nodelay;
+        limit_req zone=per_ip      burst=20 nodelay;
+        limit_conn conn_api 5;
+        limit_req_status 429;
+        add_header Retry-After 1;
+
+        # Proxy settings
+        proxy_pass          http://vllm_backend;
+        proxy_http_version  1.1;
+        proxy_set_header    Connection "";
+        proxy_set_header    Host $host;
+        proxy_set_header    X-Real-IP $remote_addr;
+        proxy_set_header    X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        # Streaming support (SSE)
+        proxy_buffering     off;
+        proxy_cache         off;
+        proxy_read_timeout  300s;   # long timeout for slow completions
+        proxy_send_timeout  60s;
+
+        # Pass Authorization header through
+        proxy_set_header    Authorization $http_authorization;
+    }
+
+    # Health check (no auth, no rate limit)
+    location /health {
+        proxy_pass http://vllm_backend/health;
+        access_log off;
+    }
+
+    # Metrics (internal only)
+    location /metrics {
+        allow 10.0.0.0/8;
+        allow 172.16.0.0/12;
+        deny  all;
+        proxy_pass http://127.0.0.1:8000/metrics;
+    }
+}
+
+# Redirect HTTP to HTTPS
+server {
+    listen 80;
+    server_name api.yourdomain.com;
+    return 301 https://$host$request_uri;
+}
+```
+
+---
+
+## F.10 Systemd Service with Auto-Restart and Memory Limits
+
+```ini
+# /etc/systemd/system/vllm-serve.service
+[Unit]
+Description=vLLM OpenAI-Compatible API Server
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=vllm
+Group=vllm
+WorkingDirectory=/opt/vllm
+
+# Environment file (keep secrets out of unit file)
+EnvironmentFile=/etc/vllm/env
+
+# Command
+ExecStart=/opt/vllm/venv/bin/python -m vllm.entrypoints.openai.api_server \
+    --model /models/Meta-Llama-3.1-8B-Instruct \
+    --served-model-name llama3-8b \
+    --max-model-len 8192 \
+    --max-num-seqs 256 \
+    --dtype bfloat16 \
+    --gpu-memory-utilization 0.90 \
+    --enable-prefix-caching \
+    --port 8000
+
+# Restart policy
+Restart=on-failure
+RestartSec=10s
+StartLimitIntervalSec=120s
+StartLimitBurst=5
+
+# Resource limits
+LimitNOFILE=65536
+LimitMEMLOCK=infinity     # required for GPU pinned memory
+
+# Graceful shutdown: wait 5min for in-flight requests to complete
+TimeoutStopSec=300
+KillSignal=SIGTERM
+KillMode=mixed
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vllm
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+# Deploy and enable
+sudo systemctl daemon-reload
+sudo systemctl enable vllm-serve
+sudo systemctl start vllm-serve
+sudo systemctl status vllm-serve
+
+# Follow logs
+journalctl -u vllm-serve -f
+
+# Graceful restart (waits for in-flight requests)
+sudo systemctl reload-or-restart vllm-serve
+```
+
+---
+
+## F.11 Production Startup Checklist
+
+Run through this before going live with any new deployment:
+
+```bash
+#!/bin/bash
+# production_preflight.sh
+
+set -e
+VLLM_URL="${1:-http://localhost:8000}"
+PASS=0; FAIL=0
+
+check() {
+  local name="$1"; shift
+  if "$@" &>/dev/null; then
+    echo "  ✓ $name"; ((PASS++))
+  else
+    echo "  ✗ $name — FAILED"; ((FAIL++))
+  fi
+}
+
+echo "Pre-flight check: $VLLM_URL"
+echo "=================================================="
+
+# 1. Service reachable
+check "Service responds" curl -sf "$VLLM_URL/health"
+
+# 2. Model list
+check "Model listed" \
+  bash -c "curl -sf '$VLLM_URL/v1/models' | grep -q 'id'"
+
+# 3. Basic completion
+check "Completions endpoint works" \
+  bash -c "curl -sf -X POST '$VLLM_URL/v1/completions' \
+    -H 'Content-Type: application/json' \
+    -d '{\"model\":\"default\",\"prompt\":\"Hello\",\"max_tokens\":5}' \
+    | grep -q 'text'"
+
+# 4. Chat completions
+check "Chat endpoint works" \
+  bash -c "curl -sf -X POST '$VLLM_URL/v1/chat/completions' \
+    -H 'Content-Type: application/json' \
+    -d '{\"model\":\"default\",\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}],\"max_tokens\":5}' \
+    | grep -q 'content'"
+
+# 5. Streaming
+check "Streaming works" \
+  bash -c "curl -sf -X POST '$VLLM_URL/v1/completions' \
+    -H 'Content-Type: application/json' \
+    -d '{\"model\":\"default\",\"prompt\":\"Count:\",\"max_tokens\":10,\"stream\":true}' \
+    | grep -q 'data:'"
+
+# 6. Metrics exported
+check "Prometheus metrics" curl -sf "$VLLM_URL/metrics" | grep -q "vllm_"
+
+# 7. GPU memory not over 95%
+check "GPU memory headroom" \
+  bash -c "nvidia-smi --query-gpu=memory.used,memory.total \
+    --format=csv,noheader,nounits | \
+    awk -F',' '{if(\$1/\$2 < 0.95) exit 0; else exit 1}'"
+
+echo ""
+echo "Results: $PASS passed, $FAIL failed"
+[ $FAIL -eq 0 ] && echo "✓ READY FOR PRODUCTION" || echo "✗ NOT READY"
+exit $FAIL
+```
+

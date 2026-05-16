@@ -1045,3 +1045,170 @@ The **KV cache** stores only the K and V projections computed inside the attenti
 4. SwiGLU uses three weight matrices (W₁, W₂, W₃) rather than the two in a vanilla FFN. What is the purpose of the gating matrix W₂, and how does it interact with the SiLU activation? *(Section 3.5.3)*
 
 5. In an MoE layer with 8 experts and top-2 routing, a token triggers experts 3 and 7. Describe the exact computation path, including what happens to the two expert outputs before the residual add. *(Section 3.5.5)*
+
+
+---
+
+## Worked Solutions
+
+---
+
+### Solution 1 — FFN parameter count vs attention parameter count (LLaMA-3 8B)
+
+**What we need:** FFN params for one layer, compare to attention params.
+
+**Given:** hidden_size (d_model) = 4,096; intermediate_size = 14,336 (for SwiGLU)
+
+**Step 1 — FFN parameter count (SwiGLU uses three matrices).**
+
+SwiGLU FFN has three weight matrices (no biases in LLaMA):
+- W₁ (gate): `d_model × intermediate_size` = 4,096 × 14,336 = 58,720,256
+- W₂ (down-projection): `intermediate_size × d_model` = 14,336 × 4,096 = 58,720,256
+- W₃ (up-projection): `d_model × intermediate_size` = 4,096 × 14,336 = 58,720,256
+
+$$\text{FFN params} = 3 \times 4{,}096 \times 14{,}336 = 3 \times 58{,}720{,}256 = \textbf{176,160,768} \approx 176 \text{M}$$
+
+**Step 2 — Attention parameter count.**
+
+For LLaMA-3 8B: 32 Q-heads, 8 KV-heads (GQA), head_dim=128:
+- Q projection: d_model × (n_q_heads × head_dim) = 4,096 × (32 × 128) = 4,096 × 4,096 = 16,777,216
+- K projection: d_model × (n_kv_heads × head_dim) = 4,096 × (8 × 128) = 4,096 × 1,024 = 4,194,304
+- V projection: same as K = 4,194,304
+- O projection: (n_q_heads × head_dim) × d_model = 4,096 × 4,096 = 16,777,216
+
+$$\text{Attention params} = 16{,}777{,}216 + 4{,}194{,}304 + 4{,}194{,}304 + 16{,}777{,}216 = \textbf{41,943,040} \approx 42 \text{M}$$
+
+**Step 3 — Comparison.**
+
+$$\frac{\text{FFN params}}{\text{Attention params}} = \frac{176 \text{M}}{42 \text{M}} \approx 4.2\times$$
+
+The FFN is approximately **4× larger** than the attention block in LLaMA-3 8B. This is typical for transformer models. FFN dominates the parameter count and therefore dominates both memory bandwidth consumption during decode and compute during prefill.
+
+---
+
+### Solution 2 — RMSNorm vs LayerNorm: stability vs efficiency argument
+
+**What we need:** One argument for and one against keeping mean-centering.
+
+**Background:** LayerNorm computes both mean and variance, then subtracts the mean before scaling. RMSNorm skips the mean subtraction entirely — it only computes the root-mean-square (RMS) and divides by it.
+
+$$\text{LayerNorm: } \hat{x}_i = \frac{x_i - \mu}{\sqrt{\sigma^2 + \epsilon}} \cdot \gamma_i + \beta_i$$
+
+$$\text{RMSNorm: } \hat{x}_i = \frac{x_i}{\text{RMS}(x)} \cdot \gamma_i \quad \text{where RMS}(x) = \sqrt{\frac{1}{d}\sum_j x_j^2}$$
+
+**Argument FOR keeping mean-centering (stability):**
+
+Mean-centering ensures activations are zero-mean before scaling. If the activations have a large positive or negative bias, RMSNorm does not remove it — the bias remains and can push the distribution into regions where the nonlinearity saturates. For models trained from scratch on diverse data with fluctuating mean activations, LayerNorm's mean subtraction provides a regularizing effect that prevents activation drift.
+
+**Argument FOR dropping mean-centering (efficiency):**
+
+Computing the mean requires a first pass over all `d_model` elements of the vector, followed by a second pass to compute the variance. This is 2× the memory reads compared to RMSNorm, which only needs one pass to compute the sum-of-squares. For large `d_model` values (8,192 for larger models), this 2× pass reduction matters in practice. Additionally, pre-norm architectures (where normalization happens before each sublayer) empirically show that zero-mean initialization and careful learning rate scheduling can substitute for mean-centering, making it redundant at the cost of a measured training run.
+
+---
+
+### Solution 3 — KV cache vs weight memory scaling with batch size
+
+**What we need:** How each scales when batch size doubles from 16 to 32.
+
+**Step 1 — KV cache scaling.**
+
+The KV cache stores the key and value tensors for every *sequence* being served. Each sequence has its own KV history:
+
+$$\text{KV cache} \propto \text{batch\_size} \times \text{sequence\_length} \times \text{KV\_size\_per\_token}$$
+
+Doubling batch size from 16 to 32 doubles the number of sequences → **KV cache doubles** (×2 growth). ✓
+
+**Step 2 — Weight memory scaling.**
+
+Model weights are **shared** across all sequences in the batch. No matter how many sequences you serve simultaneously, the weights occupy the same memory:
+
+$$\text{Weight memory} = \text{constant (independent of batch size)}$$
+
+Doubling batch size: **weight memory unchanged** (×1 growth). ✓
+
+**Step 3 — Implications.**
+
+| Component | Batch 16 → 32 |
+|-----------|---------------|
+| KV cache | 2× growth |
+| Weights | No change |
+| Activation buffers | 2× growth (per-token activations) |
+
+This is why "how many concurrent users can I serve?" is fundamentally a KV cache capacity question, not a weight memory question. The weights are a fixed overhead; the KV cache is the variable cost per user.
+
+---
+
+### Solution 4 — SwiGLU gating: W₂ purpose and SiLU interaction
+
+**What we need:** Mechanistic explanation of the gating in SwiGLU.
+
+**Step 1 — Vanilla FFN computation (for comparison).**
+
+$$\text{FFN}(x) = \text{ReLU}(x W_1) \cdot W_2$$
+
+A single weight matrix W₁ projects up, ReLU removes negatives, W₂ projects back down.
+
+**Step 2 — SwiGLU computation.**
+
+$$\text{SwiGLU}(x) = \Big(x W_1 \otimes \text{SiLU}(x W_3)\Big) \cdot W_2$$
+
+Where ⊗ is element-wise multiplication. There are now three matrices:
+- **W₁ (up-projection):** projects x from d_model → intermediate_size, producing the "content" vector.
+- **W₃ (gate-projection):** independently projects x → intermediate_size, producing the "gate" vector.
+- **W₂ (down-projection):** projects the gated result back to d_model.
+
+**Step 3 — What W₂ (gate/W₃) does.**
+
+The gate vector is passed through SiLU (Sigmoid Linear Unit = x × σ(x)), producing values in approximately [0, 1]:
+
+$$\text{SiLU}(z) = z \cdot \sigma(z) = \frac{z}{1 + e^{-z}}$$
+
+Element-wise multiplying the content vector (from W₁) by the SiLU gate (from W₃) gives the model a learned mechanism to **suppress or amplify individual dimensions** of the intermediate representation. Dimensions where the gate is near 0 are effectively zeroed out; dimensions where the gate is near 1 pass through unchanged. This is a soft, differentiable version of feature selection — the model learns which intermediate features to "let through" as a function of the input x.
+
+The interaction with SiLU is key: SiLU is smooth (differentiable everywhere, unlike ReLU) and approximately linear for large positive values. This prevents the "dead neuron" problem of ReLU while maintaining the gating behavior.
+
+---
+
+### Solution 5 — MoE token routing: expert computation path
+
+**What we need:** Trace a token through 8-expert top-2 routing with experts 3 and 7.
+
+**Step 1 — Router computation.**
+
+The token's hidden state **x** (shape: `[d_model]`) is passed through the router:
+
+$$\text{router\_logits} = x \cdot W_{\text{router}} \in \mathbb{R}^8$$
+
+Softmax is applied to get routing probabilities:
+
+$$p_i = \frac{e^{\text{router\_logits}_i}}{\sum_j e^{\text{router\_logits}_j}}$$
+
+The top-2 probabilities are selected: say p₃ = 0.45 and p₇ = 0.35. These are *renormalized* to sum to 1: p₃_norm = 0.45/0.80 = 0.5625, p₇_norm = 0.35/0.80 = 0.4375.
+
+**Step 2 — Expert 3 computation.**
+
+Token **x** is fed through Expert 3's FFN (an independent MLP with its own weights):
+
+$$h_3 = \text{Expert}_3(x) = W_{2,3} \cdot \text{SiLU}(W_{1,3} \cdot x \otimes W_{3,3} \cdot x)$$
+
+This produces an output vector h₃ ∈ ℝ^d_model.
+
+**Step 3 — Expert 7 computation.**
+
+Same procedure with Expert 7's weights → h₇ ∈ ℝ^d_model. This computation is *independent* of Expert 3 (hence parallelizable).
+
+**Step 4 — Weighted combination.**
+
+The two expert outputs are combined using the renormalized routing weights:
+
+$$h_\text{combined} = p_{3,\text{norm}} \cdot h_3 + p_{7,\text{norm}} \cdot h_7$$
+$$= 0.5625 \cdot h_3 + 0.4375 \cdot h_7$$
+
+**Step 5 — Residual addition.**
+
+The combined expert output is added to the residual stream:
+
+$$x_{\text{out}} = x + h_{\text{combined}}$$
+
+The remaining 6 experts (0, 1, 2, 4, 5, 6) are **not involved** in this token's computation. This is the sparsity that makes MoE efficient: while the model has 8× the parameters of a dense FFN, each token only activates 2/8 = 25% of them. Total FLOPs = 2 expert FLOPs + routing overhead, not 8 expert FLOPs.
+

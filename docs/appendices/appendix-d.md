@@ -1,533 +1,610 @@
-# Appendix D: llama.cpp Context and Model Parameters Reference
+# Appendix D: Full vLLM EngineArgs Reference
 
-> *"llama.cpp has a deceptively simple CLI. Under the surface, every parameter tunes a specific trade-off between speed, memory, and quality."*
-
----
-
-This appendix documents llama.cpp's most important runtime parameters for both the CLI (`llama-cli`) and server (`llama-server`). Parameters are as of build b4000+.
+> *"Every knob matters at scale. Knowing what each parameter does — and what it trades off — is the difference between a system that works and one that works well."*
 
 ---
 
-## D.1 Model Loading Parameters
+This appendix documents all significant vLLM EngineArgs parameters, grouped by function. Values are for vLLM 0.6.x. Defaults are shown in brackets.
 
-### `-m` / `--model` (required)
-Path to the GGUF model file.
+---
 
-```bash
--m ./models/llama-3.1-8b-q4_k_m.gguf
-```
+## D.1 Model and Loading Parameters
 
-### `-md` / `--model-draft`
-Path to draft model for speculative decoding.
+### `--model` (required)
+The Hugging Face model ID or local path.
 
 ```bash
--m ./models/llama-3.1-70b-q4_k_m.gguf \
--md ./models/llama-3.2-1b-q8_0.gguf    # draft for speculative decoding
+--model meta-llama/Llama-3.1-8B-Instruct
+--model /local/path/to/model
 ```
 
-### `--mlock`
-Lock model in RAM (prevents paging to disk).
+### `--tokenizer` [same as model]
+Path to tokenizer. Use when tokenizer and model are in separate directories.
 
 ```bash
---mlock  # prevents OS from swapping model pages to disk
-         # requires sufficient RAM; use for consistent latency
+--tokenizer /path/to/tokenizer
 ```
 
-### `--no-mmap`
-Load model fully into memory instead of using memory-mapped file access.
+### `--dtype` [auto]
+Weight data type. `auto` selects BF16 on supported hardware, else FP16.
+
+```
+Values: auto | float32 | float16 | bfloat16
+Notes:
+  float32: 2× memory vs BF16, no quality benefit for inference
+  float16: use on hardware without BF16 support (older A100s, T4)
+  bfloat16: preferred on A100/H100; wider dynamic range than FP16
+  auto: almost always correct choice
+```
+
+### `--revision` [None]
+Specific model revision (commit hash or branch) on Hugging Face Hub.
+
+### `--trust-remote-code` [False]
+Allow executing custom model code from the Hugging Face repo. Required for some models (e.g., Phi-3, custom architectures).
 
 ```bash
---no-mmap  # load fully into RAM
-
-# Default: model is mmap'd (reads pages on demand)
-# --no-mmap: reads everything upfront
-# Use when:
-#   - Model is on network filesystem (mmap has high latency)
-#   - Need consistent inference latency (avoid page faults)
-#   - Profiling (eliminate mmap effects)
+--trust-remote-code  # required for models with custom modeling code
 ```
 
-### `-ngl` / `--n-gpu-layers`
-Number of model layers to offload to GPU.
+### `--load-format` [auto]
+How to load model weights.
+
+```
+Values: auto | pt | safetensors | npcache | dummy | gguf | bitsandbytes
+  auto:         detect from file format
+  safetensors:  fastest loading, memory-safe
+  pt:           PyTorch .bin files
+  npcache:      convert to numpy cache on first load (faster subsequent loads)
+  dummy:        load random weights (for testing/benchmarking)
+  gguf:         load GGUF format directly into vLLM
+  bitsandbytes: use bitsandbytes quantization on load
+```
+
+### `--max-model-len` [model's default]
+Maximum total sequence length (input + output tokens combined).
 
 ```bash
--ngl 99    # offload all layers (use large number to offload everything)
--ngl 32    # offload 32 layers, rest on CPU
--ngl 0     # CPU-only (no GPU)
+# Set lower than model maximum to reduce KV cache memory
+--max-model-len 8192   # saves KV memory if you don't need full context
+--max-model-len 131072  # full context for Qwen2.5-72B
 
-# Memory calculation:
-# Total layers = n_layers + 1 (embedding)
-# Memory per layer ≈ model_size / n_layers
-# Example: Llama-3.1-8B Q4_K_M = 4.7 GB, 32 layers
-#   1 layer ≈ 4.7 GB / 32 ≈ 147 MB
-#   ngl=16: ~2.35 GB GPU + ~2.35 GB CPU (split)
+# KV cache memory at L tokens:
+# mem = L × KV_bytes_per_token
+# Reducing max-model-len reduces the KV cache allocation
 ```
 
-### `-sm` / `--split-mode`
-How to distribute model across multiple GPUs.
+### `--tokenizer-mode` [auto]
+How to load the tokenizer.
 
 ```
-Values: none | layer | row
-  none:  all on one GPU (no split)
-  layer: split by transformer layer (default multi-GPU mode)
-  row:   split by matrix row (for very large models)
-```
-
-### `-ts` / `--tensor-split`
-Tensor split ratios for multi-GPU distribution.
-
-```bash
--ts 3,1    # 75% on GPU 0, 25% on GPU 1 (proportional split)
--ts 1,1    # equal split between 2 GPUs
--ts 1,1,1,1  # equal split across 4 GPUs
-```
-
-### `-mg` / `--main-gpu`
-GPU index for operations that can only use one GPU.
-
-```bash
--mg 0  # use GPU 0 for non-parallel operations (default)
+Values: auto | slow | mistral
+  auto: use HF fast tokenizer if available
+  slow: use slow tokenizer (for debugging token issues)
+  mistral: use Mistral's custom tokenizer (for Mistral/Mixtral models)
 ```
 
 ---
 
-## D.2 Context and Sequence Parameters
+## D.2 Parallelism Parameters
 
-### `-c` / `--ctx-size` [512]
-Context window size in tokens (KV cache size).
+### `--tensor-parallel-size` / `-tp` [1]
+Number of GPUs for tensor parallelism. Must divide evenly into number of attention heads.
 
 ```bash
--c 4096    # 4K context
--c 32768   # 32K context
--c 131072  # 128K context (requires GQA model + sufficient VRAM)
+--tensor-parallel-size 4  # 4-way tensor parallel across 4 GPUs
 
-# KV cache memory = c × KV_bytes_per_token
-# Llama-3.1-8B BF16: 131,072 × 131,072 bytes = 16 GB just for KV
-# Use -c as small as your task requires
+# Requirements:
+# - n_heads % tp_size == 0
+# - n_kv_heads % tp_size == 0  (or n_kv_heads == 1)
+# - GPUs must be on same node (NCCL required)
+# For multi-node: combine with --pipeline-parallel-size
 ```
 
-### `-n` / `--n-predict` [-1]
-Maximum number of tokens to generate. -1 means unlimited (until EOS or context full).
+### `--pipeline-parallel-size` / `-pp` [1]
+Number of pipeline stages. Each stage runs on a separate group of GPUs.
 
 ```bash
--n 256    # generate at most 256 tokens
--n -1     # generate until EOS
--n -2     # generate until context full
+--pipeline-parallel-size 2  # 2 pipeline stages
+# Total GPUs = tp_size × pp_size
+# E.g., tp=4, pp=2 → 8 GPUs total
+
+# Use for models that don't fit in a single TP group
+# Adds pipeline bubble overhead (5-10% throughput penalty)
 ```
 
-### `-e` / `--escape`
-Enable escape sequences in prompts (allows `\n`, `\t`, etc.).
+### `--max-parallel-loading-workers` [1]
+Number of processes for parallel weight loading. Speeds up model load time.
 
 ```bash
--e  # interpret escape sequences in prompt string
-```
-
-### `--keep` [0]
-Number of initial prompt tokens to keep when context shifts.
-
-```bash
---keep 256  # keep first 256 tokens when truncating context
-
-# When context fills up, llama.cpp discards old tokens
-# --keep N: always keep the first N tokens (e.g., system prompt)
-# 0: no special protection for initial tokens
-# -1: keep all initial tokens (disables context shifting)
+--max-parallel-loading-workers 4  # 4 parallel loaders
 ```
 
 ---
 
-## D.3 Sampling Parameters
+## D.3 Memory Management
 
-### `-temp` / `--temperature` [0.80]
-Sampling temperature. Lower = more deterministic.
+### `--gpu-memory-utilization` [0.90]
+Fraction of GPU memory to use for the KV cache (after weights and activations).
 
 ```bash
---temp 0.7    # slightly creative
---temp 0.0    # greedy decoding (deterministic)
---temp 1.0    # high diversity
+--gpu-memory-utilization 0.90  # default: leave 10% free
+
+# Lower to 0.80 if you see OOM during peak load
+# Can increase to 0.95 if stable (monitor with nvidia-smi)
+
+# What it controls:
+# After loading weights: available = total_gpu_mem × utilization - weight_mem
+# This "available" goes to KV cache blocks
 ```
 
-### `--top-k` [40]
-Top-k sampling. Keep only top k most likely tokens.
+### `--swap-space` [4] (GB)
+CPU DRAM swap space for KV blocks when GPU memory is full.
 
 ```bash
---top-k 50   # consider top 50 tokens
---top-k 0    # disable (consider all tokens)
---top-k 1    # greedy decoding (same as temp=0)
+--swap-space 16  # 16 GB CPU DRAM swap
+
+# When a sequence is preempted (swapped out):
+#   KV blocks move GPU → CPU DRAM
+#   When resumed: CPU → GPU
+# Latency penalty: PCIe bandwidth (~32 GB/s)
+# Set to 0 to disable swapping (requests fail if KV cache full)
 ```
 
-### `--top-p` [0.95]
-Nucleus sampling. Keep tokens whose cumulative probability exceeds p.
+### `--cpu-offload-gb` [0] (GB)
+Amount of model weights to offload to CPU. Use for large models that don't fit on GPU.
 
 ```bash
---top-p 0.9   # use tokens that make up top 90% of probability mass
---top-p 1.0   # disable (use all tokens)
+--cpu-offload-gb 20  # offload 20GB of weights to CPU
+
+# Creates split execution: some layers on GPU, some on CPU
+# Significant latency penalty per offloaded layer
+# Use only when no other option
 ```
 
-### `--min-p` [0.05]
-Min-p sampling. Discard tokens with probability below this fraction of the most likely token.
+### `--kv-cache-dtype` [auto]
+Quantization format for KV cache values.
 
-```bash
---min-p 0.1   # discard tokens with prob < 10% of top token's prob
---min-p 0.0   # disable
+```
+Values: auto | fp8 | fp8_e5m2 | fp8_e4m3
+  auto:     match model dtype (BF16 by default)
+  fp8:      FP8 KV cache (2× memory savings vs BF16)
+  fp8_e5m2: 5-bit exponent, 2-bit mantissa (more range)
+  fp8_e4m3: 4-bit exponent, 3-bit mantissa (more precision, preferred)
+
+Memory impact:
+  BF16 → FP8: 2× more KV capacity → 2× more max sequences
+  Quality impact: small (< 0.3 PPL on most models)
 ```
 
-### `--repeat-penalty` [1.0]
-Penalize repeated tokens. Values > 1 discourage repetition.
+### `--block-size` [16]
+Number of tokens per KV cache block. Larger blocks improve throughput but waste memory for short sequences.
 
-```bash
---repeat-penalty 1.1    # mild repetition penalty
---repeat-penalty 1.3    # strong repetition penalty
---repeat-penalty 1.0    # no penalty (default)
 ```
-
-### `--repeat-last-n` [64]
-Number of recent tokens to consider for repetition penalty.
-
-```bash
---repeat-last-n 128   # penalize tokens repeated in last 128
---repeat-last-n -1    # consider entire context
---repeat-last-n 0     # disable repetition penalty
-```
-
-### `--frequency-penalty` [0.0]
-Penalize tokens proportional to their frequency in the output so far.
-
-### `--presence-penalty` [0.0]
-Penalize tokens that have appeared at all (once is enough to reduce their probability).
-
-### `--seed` [-1]
-Random seed. -1 = random seed (non-deterministic). Set for reproducible outputs.
-
-```bash
---seed 42   # reproducible sampling
-```
-
-### `-s` / `--samplers`
-Ordered list of sampler operations to apply.
-
-```bash
---samplers "top_k;tfs_z;typical_p;top_p;min_p;temperature"
-# Apply samplers in this order
+Values: 8 | 16 | 32 (must be power of 2)
+  16: default, good balance
+  8: better for short sequences (less internal fragmentation)
+  32: marginally better throughput for long sequences
 ```
 
 ---
 
-## D.4 Batch and Performance Parameters
+## D.4 Scheduling and Batching
 
-### `-b` / `--batch-size` [2048]
-Physical batch size — number of tokens processed per forward pass during prefill.
+### `--max-num-seqs` [256]
+Maximum number of sequences in flight simultaneously.
 
 ```bash
--b 512    # smaller batches (lower memory, slightly slower prefill)
--b 2048   # default (good balance)
--b 4096   # larger batches (faster prefill if model fits)
+--max-num-seqs 512  # allow up to 512 concurrent sequences
 
-# This is the compute batch for prefill, NOT number of parallel sequences
+# Increase for high-throughput workloads
+# Each sequence occupies KV cache blocks
+# Too high: OOM. Too low: underutilized GPU
 ```
 
-### `-ub` / `--ubatch-size` [512]
-Micro-batch size. Physical processing unit within a batch.
+### `--max-num-batched-tokens` [max_model_len × max_num_seqs or 2048 for chunked prefill]
+Maximum total tokens across all sequences in a single forward pass.
 
 ```bash
--ub 512   # process 512 tokens at a time within each batch
+--max-num-batched-tokens 8192
+
+# Controls compute per step:
+# Higher = more GPU utilization during prefill
+# Lower = better latency fairness (chunked prefill behavior)
+# With --enable-chunked-prefill: typically set to 512-2048
 ```
 
-### `-np` / `--parallel` [1]
-Number of parallel sequences (only in llama-server).
+### `--scheduler-delay-factor` [0.0]
+Fraction of mean decode time to wait before scheduling new requests. Increases decode batch size at the cost of TTFT.
 
 ```bash
--np 8    # handle 8 simultaneous conversations
-# Each slot gets its own KV cache: total KV = np × ctx_size × KV_bytes
+--scheduler-delay-factor 0.5  # wait 50% of mean decode time
+
+# Set > 0 when throughput > TTFT (batch processing use case)
+# Set 0.0 for interactive use cases (minimize TTFT)
 ```
 
-### `-t` / `--threads` [auto]
-Number of CPU threads for inference (when using CPU layers).
+### `--enable-chunked-prefill` [False]
+Split prefill across multiple steps to interleave with decode.
 
 ```bash
--t 8    # use 8 CPU threads
--t $(nproc)  # use all CPU cores
+--enable-chunked-prefill
+--max-num-batched-tokens 2048  # chunk size
+
+# Benefits:
+#   - Reduces TTFT variance (long prefills don't block short decode requests)
+#   - Required for mixed prefill/decode workloads
+# Trade-off: slightly lower prefill throughput (more iterations)
 ```
 
-### `-tb` / `--threads-batch` [same as -t]
-CPU threads for batch processing (prefill). Can be different from generation threads.
+### `--preemption-mode` [recompute]
+What to do when KV cache is exhausted.
 
-### `--cont-batching` / `-cb`
-Enable continuous batching in llama-server (handles multiple requests efficiently).
+```
+Values: recompute | swap
+  recompute: evict and recompute KV from scratch (no CPU memory needed)
+  swap:      move KV blocks to CPU DRAM (requires --swap-space > 0)
 
-```bash
--cb   # enable continuous batching (should always be enabled in server)
+Use swap when:
+  Recompute cost is high (long context)
+  CPU DRAM available
+Use recompute when:
+  Short sequences (fast recompute)
+  Limited CPU memory
 ```
 
 ---
 
-## D.5 Quantization Type Reference
+## D.5 Attention Mechanism
 
-GGUF quantization types ordered by quality/size trade-off:
+### `--attention-backend` [Flash Attention 2 or FlashInfer]
+Attention kernel implementation.
 
 ```
-Format      | Bits/Weight | Quality | Notes
-────────────────────────────────────────────────────────────────────
-F32         | 32          | Lossless| Reference, too large for use
-F16         | 16          | ~Lossless| Half precision, large
-BF16        | 16          | ~Lossless| BFloat16 (preferred for H100)
-Q8_0        |  8          | Excellent| INT8, minimal quality loss
-Q6_K        |  6          | Very good| K-quant at 6-bit
-Q5_K_M      |  5          | Good+   | K-quant medium 5-bit (recommended)
-Q5_K_S      |  5          | Good    | K-quant small 5-bit
-Q5_0        |  5          | Good    | Legacy 5-bit
-Q4_K_M      |  4.5        | Good    | K-quant medium 4-bit (most popular)
-Q4_K_S      |  4.2        | Decent  | K-quant small 4-bit
-Q4_0        |  4          | Decent  | Legacy 4-bit
-Q3_K_M      |  3.4        | Acceptable| K-quant medium 3-bit
-Q3_K_S      |  3.0        | OK      | K-quant small 3-bit
-Q2_K        |  2.6        | Degraded| Only for extreme compression
-IQ4_XS      |  4.3        | Good    | Importance-weighted 4-bit
-IQ3_M       |  3.7        | Good    | Importance-weighted 3-bit
-IQ2_M       |  2.7        | Decent  | Importance-weighted 2-bit
-────────────────────────────────────────────────────────────────────
-K-quants: use larger quantization blocks with per-block scales
-IQ-quants: use importance sampling to quantize important weights less
+Values: FLASH_ATTN | FLASHINFER | XFORMERS | ROCM_FLASH | TORCH_SDPA
+  FLASH_ATTN:  Flash Attention 2 (default on NVIDIA, good all-around)
+  FLASHINFER:  FlashInfer kernels (faster for decode-heavy workloads)
+  XFORMERS:    xFormers attention (legacy)
+  ROCM_FLASH:  AMD GPU Flash Attention
+  TORCH_SDPA:  PyTorch scaled dot-product attention (fallback)
+
+Set via environment variable:
+  export VLLM_ATTENTION_BACKEND=FLASHINFER
 ```
 
-**Recommendation by use case:**
+### `--enable-prefix-caching` [False]
+Cache and reuse KV blocks for repeated prompt prefixes.
 
 ```bash
-# Best quality: Q8_0 or Q6_K
-# Balanced (most users): Q4_K_M
-# Memory constrained: Q3_K_M
-# Extreme compression (quality matters less): Q2_K
-# Edge/mobile: IQ4_XS or Q4_K_S
+--enable-prefix-caching
+
+# Enables RadixAttention (Chapter 11)
+# Benefits:
+#   - Repeated system prompts: compute prefix KV once
+#   - RAG workflows: shared context prefix amortized
+# Overhead: ~1% memory for hash table
+# Recommended: always enable for RAG/chat workloads
+```
+
+### `--num-gpu-blocks-override` [None]
+Override the auto-calculated number of KV cache GPU blocks.
+
+```bash
+--num-gpu-blocks-override 2000  # exactly 2000 GPU blocks
+
+# Use for reproducible benchmarking across configurations
+# Normal usage: leave unset (let vLLM calculate)
 ```
 
 ---
 
-## D.6 Chat and Prompt Format Parameters
+## D.6 Quantization
 
-### `--chat-template` [auto-detect]
-Chat template to use.
+### `--quantization` / `-q` [None]
+Post-training quantization method.
 
-```bash
---chat-template llama3   # Llama 3.1 format
---chat-template qwen     # Qwen format
---chat-template chatml   # ChatML format
---chat-template mistral  # Mistral format
---chat-template gemma    # Gemma format
+```
+Values: awq | gptq | squeezellm | fp8 | bitsandbytes | gguf | None
+  awq:           AWQ INT4 (Activation-aware Weight Quantization)
+  gptq:          GPTQ INT4 (one-shot weight quantization)
+  squeezellm:    SqueezeLLM sparse quantization
+  fp8:           FP8 E4M3 weight quantization (H100 only)
+  bitsandbytes:  4-bit or 8-bit quantization via bitsandbytes
+  None:          no quantization (load in original dtype)
 
-# Always specify for instruct models — wrong template = garbled output
+# Must match the model format. AWQ model needs --quantization awq.
+# Do not set --quantization if model is already in original BF16/FP16.
 ```
 
-### `-sys` / `--system-prompt`
-System prompt to prepend.
+### `--quantization-param-path` [None]
+Path to FP8 quantization parameter file (KV cache scale factors).
 
 ```bash
---system-prompt "You are a helpful coding assistant."
+--quantization-param-path /path/to/kv_cache_scales.json
+
+# Required when using FP8 KV cache with dynamically quantized models
+# Generated by: python examples/fp8/extract_scales.py
 ```
 
-### `-p` / `--prompt`
-Initial prompt string.
+### `--enforce-eager` [False]
+Disable CUDA graph capture. Use for debugging or models with dynamic control flow.
 
 ```bash
--p "What is the capital of France?"
-```
+--enforce-eager  # disables CUDA graphs (slower, but avoids graph capture issues)
 
-### `-f` / `--file`
-Read prompt from file.
-
-```bash
--f ./prompt.txt
-```
-
-### `--in-prefix` / `--in-suffix`
-Prefix/suffix wrapping user input in interactive mode.
-
-```bash
-# For manual chat templating:
---in-prefix "<|im_start|>user\n"
---in-suffix "<|im_end|>\n<|im_start|>assistant\n"
-```
-
-### `-i` / `--interactive`
-Enable interactive/chat mode.
-
-```bash
--i   # interactive mode (continue generating from user input)
-```
-
-### `-r` / `--reverse-prompt`
-Reverse prompt string to pause generation and wait for input.
-
-```bash
--r "User:"  # pause when model generates "User:"
+# CUDA graphs accelerate decode by 10-15%
+# Disable when:
+#   Debugging OOM or incorrect outputs
+#   Model has unsupported dynamic shapes
+#   Adapter hot-swapping (some LoRA configurations)
 ```
 
 ---
 
-## D.7 llama-server Specific Parameters
+## D.7 Speculative Decoding
 
-### `--host` [127.0.0.1]
-Server host address.
+### `--speculative-model` [None]
+Draft model for speculative decoding.
 
 ```bash
---host 0.0.0.0  # listen on all interfaces
---host 127.0.0.1  # local only
+--speculative-model meta-llama/Llama-3.2-1B  # use 1B as draft
+--model meta-llama/Llama-3.1-70B-Instruct    # 70B as target
+
+# Requirements:
+#   Draft and target must share tokenizer vocabulary
+#   Draft must be substantially smaller than target
 ```
 
-### `--port` [8080]
+### `--num-speculative-tokens` [None]
+Number of draft tokens to generate per step.
+
+```bash
+--num-speculative-tokens 5  # generate 5 draft tokens, verify with target
+
+# Optimal value depends on acceptance rate:
+#   High acceptance (α > 0.8): increase to 7-10
+#   Low acceptance (α < 0.5):  decrease to 2-3
+#   Rule of thumb: start at 5, tune based on acceptance rate metric
+```
+
+### `--speculative-draft-tensor-parallel-size` [same as main model]
+Tensor parallel size for the draft model.
+
+```bash
+--speculative-draft-tensor-parallel-size 1  # run draft on 1 GPU
+
+# Draft models are small; TP=1 usually optimal
+# Target can still use TP=4+
+```
+
+### `--use-v2-block-manager` [True in recent versions]
+Use V2 block manager with speculative decoding support.
+
+```bash
+--use-v2-block-manager  # required for speculative decoding
+```
+
+---
+
+## D.8 LoRA and Adapters
+
+### `--enable-lora` [False]
+Enable LoRA adapter serving.
+
+```bash
+--enable-lora
+--max-loras 4          # max simultaneously loaded adapters
+--max-lora-rank 64     # max rank across all adapters
+--lora-extra-vocab-size 0  # extra vocab tokens for LoRA models
+```
+
+### `--max-loras` [1]
+Maximum number of LoRA adapters loaded simultaneously.
+
+### `--max-lora-rank` [16]
+Maximum rank parameter across all LoRA adapters.
+
+### `--long-lora-scaling-factors` [None]
+Scaling factors for long-context LoRA adapters. Comma-separated list of floats.
+
+---
+
+## D.9 Server and API
+
+### `--host` [0.0.0.0]
+Server hostname.
+
+### `--port` [8000]
 Server port.
 
 ```bash
---port 8080
+--host 127.0.0.1 --port 8080  # local only, port 8080
 ```
 
-### `--api-key`
-Bearer token for API authentication.
+### `--api-key` [None]
+API key for authentication. If set, requests must include `Authorization: Bearer <key>`.
 
 ```bash
---api-key my-secret-key
+--api-key my-secret-key-here
 ```
 
-### `--path`
-Root path for static files (web UI).
-
-### `--timeout` [600]
-Request timeout in seconds.
-
-### `--n-predict` / `-n` [-1]
-Default max tokens per request (can be overridden per request).
-
-### `--slots-endpoint-enabled`
-Enable the `/slots` endpoint for inspecting active KV cache slots.
-
----
-
-## D.8 Speculative Decoding Parameters
+### `--chat-template` [model default]
+Jinja2 chat template file or string. Use to override model's built-in template.
 
 ```bash
-# Enable speculative decoding
-llama-server \
-    -m ./target-70b-q4_k_m.gguf \
-    -md ./draft-1b-q8_0.gguf \
-    --draft 10 \              # speculate 10 tokens
-    -ngl 99 \                 # all layers to GPU
-    --draft-ngl 99 \          # draft model also on GPU
-    -c 4096 \
-    -np 4                     # 4 parallel slots
+--chat-template ./my_custom_template.jinja
 
-# Parameters:
---draft N           # number of draft tokens (default: 5)
---draft-ngl N       # GPU layers for draft model
--pv                 # verbose speculative decoding stats
+# Useful when:
+#   Model's template is wrong or missing
+#   Applying non-default instruct format
+```
+
+### `--response-role` [assistant]
+Role name in chat response.
+
+### `--max-log-len` [None]
+Maximum characters to log per request (for privacy).
+
+```bash
+--max-log-len 100  # truncate request logs to 100 chars
+```
+
+### `--root-path` [None]
+URL root path when running behind a reverse proxy.
+
+```bash
+--root-path /llm  # serve at http://host/llm/v1/completions
 ```
 
 ---
 
-## D.9 Embedding Parameters
+## D.10 Multimodal
 
-For running llama.cpp as an embedding server:
+### `--limit-mm-per-prompt` [None]
+Maximum number of multimodal items per prompt.
 
 ```bash
-llama-server \
-    -m ./nomic-embed-text-v1.5-q8_0.gguf \
-    --embedding \         # enable embedding mode
-    --no-cont-batching \  # embedding models don't use cont batching
-    -ngl 99 \
-    -c 2048 \
-    --port 8080
+--limit-mm-per-prompt image=5  # allow up to 5 images per prompt
+--limit-mm-per-prompt image=10,video=2
+```
 
-# Test
-curl http://localhost:8080/v1/embeddings \
-  -H "Content-Type: application/json" \
-  -d '{"input": "Hello world", "model": "text-embedding"}'
+### `--mm-processor-kwargs` [None]
+Extra keyword arguments for the multimodal processor.
+
+```bash
+--mm-processor-kwargs '{"max_dynamic_patch": 4}'
 ```
 
 ---
 
-## D.10 Complete Server Command Reference
+## D.11 Logging and Observability
+
+### `--disable-log-requests` [False]
+Disable per-request logging. Recommended in high-throughput production.
 
 ```bash
-# Minimal production server
-llama-server \
-    -m ./models/qwen2.5-7b-instruct-q4_k_m.gguf \
-    -ngl 99 \
-    -c 16384 \
-    -np 8 \
-    --chat-template qwen \
-    -cb \
-    --host 0.0.0.0 \
-    --port 8080
+--disable-log-requests  # production: reduce log volume
+```
 
-# High-throughput server (large GPU)
-llama-server \
-    -m ./models/llama-3.1-70b-instruct-q4_k_m.gguf \
-    -ngl 99 \
-    -c 8192 \
-    -np 16 \
-    -b 4096 \
-    -ub 1024 \
-    -t 8 \
-    --chat-template llama3 \
-    -cb \
-    --host 0.0.0.0 \
-    --port 8080
+### `--disable-log-stats` [False]
+Disable periodic statistics logging.
 
-# Long-context server
-llama-server \
-    -m ./models/qwen2.5-72b-instruct-q4_k_m.gguf \
-    -ngl 99 \
-    -c 131072 \
-    -np 2 \          # fewer slots due to large KV per slot
-    --chat-template qwen \
-    -cb \
-    --host 0.0.0.0 \
-    --port 8080
+### `--log-level` [INFO]
+Logging verbosity.
 
-# CPU-only server (no GPU)
-llama-server \
-    -m ./models/llama-3.2-1b-instruct-q4_k_m.gguf \
-    -ngl 0 \          # all layers on CPU
-    -t $(nproc) \     # use all CPU cores
-    -c 4096 \
-    -np 4 \
-    --host 0.0.0.0 \
-    --port 8080
+```
+Values: DEBUG | INFO | WARNING | ERROR
+```
+
+### `--collect-detailed-traces` [None]
+Enable detailed tracing for observability (Prometheus/OpenTelemetry).
+
+```bash
+--collect-detailed-traces all  # trace all components
+--collect-detailed-traces model,scheduler  # trace specific components
 ```
 
 ---
 
-## D.11 Performance Tuning Guide
+## D.12 Quick Presets by Use Case
 
-```
-Scenario                   | Key Parameters
-─────────────────────────────────────────────────────────────────────
-Maximize tokens/second     | -b 4096, -ngl 99, -np 1 (decode single request)
-Minimize TTFT              | -b 2048, --cont-batching, small context (-c)
-Maximize concurrent users  | -np 16+, smaller context, Q4_K_M quantization
-Apple Silicon M-series     | -ngl 99, Metal enabled by default in build
-CPU-only on server         | -t $(nproc), Q4_0 or Q4_K_M, -b 512
-Memory constrained (<4GB)  | Q2_K or Q3_K_S, -c 2048, -np 1
+```bash
+# === HIGH THROUGHPUT (batch inference) ===
+vllm serve MODEL \
+    --max-num-seqs 512 \
+    --max-num-batched-tokens 32768 \
+    --scheduler-delay-factor 0.3 \
+    --gpu-memory-utilization 0.92
+
+# === LOW LATENCY (interactive) ===
+vllm serve MODEL \
+    --max-num-seqs 32 \
+    --enable-chunked-prefill \
+    --max-num-batched-tokens 2048 \
+    --scheduler-delay-factor 0.0
+
+# === LONG CONTEXT (RAG) ===
+vllm serve MODEL \
+    --max-model-len 131072 \
+    --enable-chunked-prefill \
+    --enable-prefix-caching \
+    --kv-cache-dtype fp8 \
+    --max-num-batched-tokens 4096
+
+# === MEMORY CONSTRAINED (small GPU) ===
+vllm serve MODEL \
+    --quantization awq \
+    --max-model-len 4096 \
+    --gpu-memory-utilization 0.85 \
+    --max-num-seqs 16
+
+# === SPECULATIVE DECODING ===
+vllm serve LARGE_MODEL \
+    --speculative-model SMALL_DRAFT_MODEL \
+    --num-speculative-tokens 5 \
+    --use-v2-block-manager
+
+# === MULTI-GPU (4×H100) ===
+vllm serve LARGE_MODEL \
+    --tensor-parallel-size 4 \
+    --dtype bfloat16 \
+    --gpu-memory-utilization 0.90
 ```
 
 ---
 
-## D.12 Diagnostic Flags
+## D.13 EngineArgs in Python
 
-```bash
-# Verbose timing output
---verbose
+For programmatic configuration:
 
-# Log all tokens as generated
---log-disable   # suppress logs (default: logs to stderr)
+```python
+from vllm import AsyncLLMEngine
+from vllm.engine.arg_utils import AsyncEngineArgs
 
-# Benchmark mode (measure tokens/second)
-llama-bench \
-    -m ./model.gguf \
-    -n 128 \          # tokens to generate
-    -p 512 \          # prompt tokens
-    -b 512 \          # batch size
-    -r 5              # repeat 5 times (for statistics)
+engine_args = AsyncEngineArgs(
+    model="meta-llama/Llama-3.1-8B-Instruct",
+    dtype="bfloat16",
+    max_model_len=8192,
+    tensor_parallel_size=1,
+    gpu_memory_utilization=0.90,
+    max_num_seqs=256,
+    enable_prefix_caching=True,
+    enable_chunked_prefill=True,
+    max_num_batched_tokens=2048,
+    kv_cache_dtype="fp8",
+    disable_log_requests=True,
+)
 
-# Output format:
-# model | size | params | backend | ngl | test | t/s
-# ...   | 4.7G | 8.0B   | CUDA    | 99  | pp512| 7234.56
+engine = AsyncLLMEngine.from_engine_args(engine_args)
+```
+
+---
+
+## D.14 SamplingParams Reference
+
+SamplingParams controls how tokens are sampled per request (not engine-level):
+
+```python
+from vllm import SamplingParams
+
+params = SamplingParams(
+    temperature=0.7,        # sampling temperature (0 = greedy)
+    top_p=0.9,              # nucleus sampling threshold
+    top_k=50,               # top-k sampling (0 = disabled)
+    min_p=0.0,              # min-p sampling (0 = disabled)
+    repetition_penalty=1.0, # penalize repeated tokens (1.0 = no penalty)
+    frequency_penalty=0.0,  # penalize by frequency (0 = no penalty)
+    presence_penalty=0.0,   # penalize presence (0 = no penalty)
+    max_tokens=512,         # max output tokens
+    min_tokens=0,           # min output tokens (0 = no minimum)
+    stop=["<|im_end|>"],    # stop sequences
+    stop_token_ids=[],      # stop token IDs
+    include_stop_str_in_output=False,
+    ignore_eos=False,       # continue past EOS token
+    logprobs=None,          # return top-k logprobs (None = disabled)
+    prompt_logprobs=None,   # return input token logprobs
+    skip_special_tokens=True,
+    spaces_between_special_tokens=True,
+    seed=None,              # random seed for reproducibility
+)
 ```

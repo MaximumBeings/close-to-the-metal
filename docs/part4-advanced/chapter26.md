@@ -1206,3 +1206,106 @@ Running `python alignment_demo.py` executes 50 steps of simulated GRPO training,
 4. MT-Bench uses an LLM judge (GPT-4 or equivalent) to score model outputs. Name two failure modes of LLM judges that could give misleading alignment evaluation results. *(Section 26.5)*
 
 5. Krippendorff's α = 0.55 on your preference annotation dataset. What does this mean for reward model training stability, and what would you do before continuing to the PPO stage? *(Section 26.6)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**Reward model forward pass: prompt=256 tokens, completion=512 tokens. Prefill or decode? FLOPs vs 512-token generation:**
+
+**Prefill or decode?**
+The reward model processes the *concatenated* prompt + completion as a single sequence of 256+512=768 tokens in **one forward pass**. This is **prefill** -- all 768 tokens are processed simultaneously (no autoregressive generation). The reward model outputs a scalar score from the final token's hidden state (or a special [EOS] token).
+
+**FLOPs comparison:**
+- Reward model forward pass: 768 tokens x (2 x d_model x num_layers x 4d_model) ~= 768 x C FLOPs
+- 512-token generation: each of 512 decode steps processes all prior tokens autoregressively. Total prefill + decode FLOPs ~= 256*C (input prefill) + sum_{t=1}^{512}(256+t)*C. This sum ~= 256x512 + 512x256 = 262,144*C FLOPs.
+- Reward model: 768*C FLOPs.
+
+**Ratio:** Generation uses ~341x more FLOPs than the reward model forward pass. The reward model is computationally cheap relative to generation, but it must be called for EVERY training example -- so aggregate cost is significant at scale.
+
+---
+
+### Question 2
+**DPO: both policy and reference model on same GPU. Policy updated every 100 steps. Memory pressure:**
+
+DPO requires computing log-probabilities from both:
+- The policy model (updated weights)
+- The reference model (frozen SFT weights -- never updated)
+
+If both are on the same GPU:
+```
+memory = policy_weights + reference_weights + optimizer_states + activations
+       = 2 x model_size + optimizer (Adam: 2x model_size) + activations
+       = 4 x model_size + activations
+```
+
+For a 7B BF16 model: 14 GB model, 28 GB optimizer states, 14 GB reference = 56 GB + activations.
+For a 70B BF16 model: 140 GB model x 4 = 560 GB -- impossible on a single GPU.
+
+**Policy update at every 100 steps:**
+The reference model never changes, so it can be loaded once and kept frozen. The policy accumulates gradients over 100 steps before updating. If gradient accumulation is used, gradient memory = model_size (14 GB for 7B). The 100-step cadence itself doesn't change peak memory -- peak is during the backward pass when both model activations and gradients are live simultaneously.
+
+**Mitigation:** For large models, serve the reference model on a separate GPU or CPU-offload its weights. Use LoRA for the policy (frozen base + small adapter updates), reducing the policy's trainable parameter memory from 14 GB to <<1 GB.
+
+---
+
+### Question 3
+**Constitutional AI: N=3 critique-revision cycles, each: 200 critique + 300 revision tokens. Total generation vs standard RLHF (1x 500-token completion):**
+
+**CAI total generation per example:**
+```
+Cycle 1: 200 critique + 300 revision = 500 tokens
+Cycle 2: 200 critique + 300 revision = 500 tokens  
+Cycle 3: 200 critique + 300 revision = 500 tokens
+Total: 3 x 500 = 1,500 tokens
+```
+
+**Standard RLHF:**
+```
+1 x 500-token completion = 500 tokens
+```
+
+**Ratio:** CAI requires 3x more generation tokens per training example than standard RLHF.
+
+**Additional cost:** CAI also requires a model to generate the critique (could be the same model -- a self-critique), and each revision must be conditioned on the prior revision. This means each cycle's context grows: cycle 1 context = original prompt + first completion, cycle 2 = prompt + completion + critique + revision. Context length grows by ~500 tokens per cycle, increasing KV cache cost quadratically.
+
+---
+
+### Question 4
+**Two failure modes of LLM judges (MT-Bench):**
+
+**Failure Mode 1 -- Verbosity bias (length preference).**
+LLM judges (including GPT-4) systematically prefer longer responses, even when additional length adds no useful information. A model that pads its answers with verbose restatements will receive higher scores than a concise, accurate model. MT-Bench scores can be inflated simply by generating longer outputs, making it a poor metric for production deployments where token cost matters.
+
+**Failure Mode 2 -- Self-referential bias (same-provider advantage).**
+When GPT-4 is the judge and GPT-4 outputs are one of the candidates, the judge systematically favors its own style, vocabulary, and reasoning patterns -- even when objectively equivalent alternatives are presented. Similarly, Claude judges favor Claude outputs. This introduces a systematic bias that makes cross-company comparisons using LLM judges unreliable.
+
+**Mitigation:** Use multiple diverse judges (GPT-4, Claude, Gemini) and average scores. Blind the judge to model identity. Compare against human rater preference as ground truth for judge calibration.
+
+---
+
+### Question 5
+**Krippendorff's alpha = 0.55 on preference annotation dataset. Implications:**
+
+**What alpha=0.55 means:**
+Krippendorff's alpha measures inter-annotator agreement above chance. Scale:
+- alpha < 0.20: slight agreement (near-random)
+- 0.20-0.40: fair agreement
+- 0.40-0.60: moderate agreement  <-- 0.55 is here
+- 0.60-0.80: substantial agreement
+- > 0.80: near-perfect agreement
+
+At alpha=0.55, annotators agree moderately but there is significant disagreement (~45% of annotations would differ between two randomly selected annotators). This is **insufficient** for reliable reward model training -- high annotation noise directly translates to noisy reward signal, which destabilizes PPO training (reward variance leads to high policy gradient variance).
+
+**What to do before continuing to PPO:**
+
+1. **Audit annotation disagreements.** Categorize examples with low agreement -- are they systematically in a specific domain (e.g., ambiguous instructions, humor, cultural nuances)? Remove or relabel these.
+
+2. **Improve annotation guidelines.** Provide more specific rubrics, worked examples of edge cases, and mandatory annotator calibration sessions.
+
+3. **Add a tie option.** If annotators disagree because both responses are genuinely equivalent, forcing a binary choice creates artificial noise. A "tie / roughly equal" option can reduce ambiguous forced choices.
+
+4. **Target alpha >= 0.70** before proceeding to reward model training. With alpha < 0.60, the reward model will learn to exploit annotation artifacts rather than genuine quality differences, producing unstable PPO training.
+

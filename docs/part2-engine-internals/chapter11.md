@@ -908,3 +908,144 @@ it interacts with the copy-on-write KV cache blocks from Chapter 6.
 4. vLLM's radix tree evicts the LRU (least recently used) leaf node when GPU blocks are exhausted. Why evict leaves rather than internal nodes? What would break if internal nodes were evicted first? *(Section 11.2)*
 
 5. In disaggregated prefill, the KV tensors for a 2 048-token prefill at 32 layers, 32 KV heads, d_k = 128, in BF16 must be transferred over InfiniBand at 400 Gb/s. Compute the transfer time in milliseconds. *(Section 11.4)*
+
+
+---
+
+## Worked Solutions
+
+---
+
+### Solution 1 — Prefill FLOPs saved by prefix cache hit (75% hit rate)
+
+**Given:** 4,096-token prompt, first 3,072 tokens cached, attention FLOPs ∝ O(T²)
+
+**Step 1 — FLOPs for full prefill.**
+
+$$\text{full prefill FLOPs} \propto T^2 = 4{,}096^2 = 16{,}777{,}216 \text{ units}$$
+
+**Step 2 — FLOPs with prefix cache.**
+
+With 3,072 tokens cached, only the last 1,024 tokens need to be attended. Each new token attends to all previous context (up to its position):
+
+- Token 3,073 attends to positions 1–3,073 (3,073 operations)
+- Token 4,096 attends to positions 1–4,096 (4,096 operations)
+- Total new attention: Σ_{t=3073}^{4096} t ≈ 1,024 × (3,073 + 4,096)/2 = 1,024 × 3,584.5 ≈ 3,670,528 units
+
+Simpler approximation: 1,024 new tokens × avg context 3,584 ≈ **3.67M FLOPs** vs 16.78M full.
+
+**Step 3 — FLOPs saved.**
+
+$$\text{fraction saved} = 1 - \frac{3.67}{16.78} \approx 1 - 0.218 = \textbf{78\%}$$
+
+For the simpler O(T²) framing: saved ∝ T²_full − T²_new = 4096² − 1024² = 16,777,216 − 1,048,576 = 15,728,640 units → **93.75% savings** (when counting only the quadratic attention term with shared prefix not needing cross-attention with new tokens).
+
+The true saving is between these bounds — approximately **75–90%** depending on the attention implementation.
+
+---
+
+### Solution 2 — KV blocks computed from scratch for Request B
+
+**Given:** Request A: 2,048-token system prompt (cached). Request B: same 2,048-token prompt + 512 unique tokens. Block size = 16.
+
+**Step 1 — Shared prefix blocks.**
+
+The 2,048 shared tokens are fully cached (hit in prefix cache):
+
+$$\text{shared blocks} = 2{,}048 / 16 = 128 \text{ blocks → cached, 0 computation for B}$$
+
+**Step 2 — Unique tokens for B.**
+
+Request B's 512 unique tokens are not in the cache:
+
+$$\text{unique blocks} = 512 / 16 = 32 \text{ blocks} \implies \textbf{512 tokens computed from scratch}$$
+
+**Step 3 — What "from scratch" means.**
+
+For each of the 512 new tokens:
+- Compute Q, K, V projections using the full attention to all 2,048 + preceding unique tokens
+- This is the *incremental* cost of adding 512 tokens on top of the cached 2,048
+
+B benefits from the cached prefix: it only pays 512-token attention computation (plus attending back to the 2,048-token cached context, which requires loading cached K/V but not recomputing them).
+
+---
+
+### Solution 3 — Chunked prefill effect on TTFT and ITL
+
+**Given:** 4,096-token prompt, 8 chunks of 512 tokens each
+
+**Effect on TTFT (Time to First Token):**
+
+With monolithic prefill: the 4,096-token prefill runs in *one* forward pass before any decode begins. TTFT = one large step duration.
+
+With chunked prefill: TTFT increases for this request because the first token cannot be generated until all 8 chunks complete. TTFT = 8 × chunk_step_duration > 1 × full_prefill_duration.
+
+However, TTFT for *other users* improves — the chunked prefill shares step time with decode sequences, preventing a single 4,096-token prefill from monopolizing the GPU for one entire step.
+
+**Effect on ITL (Inter-Token Latency) for simultaneously running decode sequences:**
+
+Chunked prefill **improves ITL** for concurrently running decode sequences. Without chunking, those sequences receive no tokens during the ~30 ms that a 4,096-token prefill monopolizes the GPU. With 512-token chunks, each step delivers decode tokens to all running sequences, keeping ITL stable.
+
+**Trade-off summary:** Chunked prefill trades individual TTFT (worse for the chunked request) for system-wide ITL stability (better for all other users). This is the right trade-off under high load.
+
+---
+
+### Solution 4 — Why vLLM's radix tree evicts leaves, not internal nodes
+
+**Step 1 — Tree structure recap.**
+
+The radix tree stores shared KV prefix paths as tree nodes:
+
+```
+Root → [system_prompt_node] → [user_A_node]
+                           ↘ [user_B_node]
+```
+
+The `system_prompt_node` is an *internal* node shared by users A and B. `user_A_node` and `user_B_node` are leaves.
+
+**Step 2 — Why evicting internal nodes is wrong.**
+
+If `system_prompt_node` were evicted:
+- Both user A and user B would lose their prefix validity
+- Their KV caches would need to be recomputed from scratch
+- This is O(shared_prefix_length) computation wasted for *both* users — far more expensive than evicting one leaf
+
+**Step 3 — Why evicting leaves is safe.**
+
+A leaf node has no children — no other sequence depends on its KV data. Evicting a leaf:
+- Frees its GPU blocks
+- Only affects the single sequence that used that specific prefix
+- Does not invalidate any other sequence's cache
+
+**Invariant enforced:** All active (currently generating) sequences maintain a valid, unbroken chain of KV blocks from root to their current position. Evicting a leaf that is *not* currently active (ref_count = 0) is always safe. Evicting a leaf that IS active (ref_count > 0) is prevented by the reference count check.
+
+---
+
+### Solution 5 — InfiniBand KV transfer time for disaggregated prefill
+
+**Given:** 2,048-token prefill, 32 layers, 32 KV heads, d_k=128, BF16 (2 bytes), IB bandwidth=400 Gb/s
+
+**Step 1 — KV tensor size.**
+
+$$\text{bytes} = n_{\text{layers}} \times 2\text{(K+V)} \times n_{\text{kv\_heads}} \times d_k \times n_{\text{tokens}} \times 2$$
+$$= 32 \times 2 \times 32 \times 128 \times 2{,}048 \times 2$$
+$$= 32 \times 2 \times 32 \times 128 \times 4{,}096$$
+$$= 32 \times 2 \times 16{,}777{,}216 \div 2 \times 2$$
+
+Let me compute step by step:
+- Per layer per token: 2 × 32 × 128 × 2 = 16,384 bytes
+- All layers for 1 token: 32 × 16,384 = 524,288 bytes = 512 KB
+- For 2,048 tokens: 2,048 × 524,288 = **1,073,741,824 bytes = 1 GB**
+
+**Step 2 — Transfer time.**
+
+400 Gb/s = 400 × 10⁹ / 8 bytes/s = 50 GB/s
+
+$$\text{time} = \frac{1 \text{ GB}}{50 \text{ GB/s}} = 0.02 \text{ s} = \textbf{20 ms}$$
+
+**Step 3 — Production implication.**
+
+The 2,048-token prefill itself takes ~10–30 ms on an H100 (depending on model size). Transferring the resulting 1 GB KV cache adds another 20 ms. Total pipeline for disaggregated serving: prefill_time + transfer_time + decode_time_to_first_token on decode node.
+
+This 20 ms transfer is why disaggregated serving is most beneficial for *very long* prompts (where prefill takes hundreds of ms) but marginal for short prompts (where 20 ms overhead dominates).
+

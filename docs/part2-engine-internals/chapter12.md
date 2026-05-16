@@ -968,3 +968,159 @@ built-in server implements the same SSE protocol in fewer lines of C++.
 4. Beam search with width 4 runs for 200 decode steps. Each step, CoW may be triggered when two beams diverge. In the worst case, how many CoW copies occur? What is the maximum KV cache overhead relative to greedy decoding? *(Section 12.5)*
 
 5. A JSON schema requires the model to output `{"name": "...", "age": N}`. Describe how structured decoding masks logits at the step where `"age": ` has just been emitted to enforce an integer. *(Section 12.6)*
+
+
+---
+
+## Worked Solutions
+
+---
+
+### Solution 1 — Softmax probabilities and entropy change with temperature
+
+**Given logits:** [3.1, 2.9, 2.1, 0.8, 0.1]
+
+**Part A — Standard softmax (T=1):**
+
+$$\text{softmax}(x_i) = \frac{e^{x_i}}{\sum_j e^{x_j}}$$
+
+| Token | logit | exp(logit) | probability |
+|-------|-------|------------|-------------|
+| 1 | 3.1 | 22.198 | 22.198/51.822 = 0.4284 |
+| 2 | 2.9 | 18.174 | 0.3507 |
+| 3 | 2.1 | 8.166 | 0.1576 |
+| 4 | 0.8 | 2.226 | 0.0430 |
+| 5 | 0.1 | 1.105 | 0.0213 |
+| | | **Sum: 51.869** | **1.000** |
+
+**Part B — Temperature T=0.5 (divide logits by T, then softmax):**
+
+Scaled logits: [6.2, 5.8, 4.2, 1.6, 0.2]
+
+| Token | scaled logit | exp | probability |
+|-------|-------------|-----|-------------|
+| 1 | 6.2 | 492.75 | 0.5498 |
+| 2 | 5.8 | 330.30 | 0.3686 |
+| 3 | 4.2 | 66.69 | 0.0744 |
+| 4 | 1.6 | 4.953 | 0.0055 |
+| 5 | 0.2 | 1.221 | 0.0014 |
+| | | **Sum: 895.91** | **1.000** |
+
+**Entropy change:**
+
+$$H = -\sum_i p_i \log_2 p_i$$
+
+T=1: H = −(0.4284 log₂ 0.4284 + 0.3507 log₂ 0.3507 + ...) ≈ **1.92 bits**
+
+T=0.5: H = −(0.5498 log₂ 0.5498 + ...) ≈ **1.43 bits**
+
+Lower temperature → lower entropy → sharper, more deterministic distribution. Token 1 went from 42.8% → 55.0% probability; tokens 4,5 nearly vanished.
+
+---
+
+### Solution 2 — Top-p = 0.9 nucleus computation
+
+**Using T=1 probabilities (sorted descending):** [0.4284, 0.3507, 0.1576, 0.0430, 0.0213]
+
+| Token | Probability | Cumulative |
+|-------|-------------|------------|
+| Token 1 | 0.4284 | 0.4284 |
+| Token 2 | 0.3507 | 0.7791 |
+| Token 3 | 0.1576 | **0.9367** ← first cumulative ≥ 0.9 |
+
+**Nucleus:** {Token 1, Token 2, Token 3}
+
+**Re-normalization within nucleus:**
+
+$$p_1^* = 0.4284/0.9367 = 0.4573, \quad p_2^* = 0.3507/0.9367 = 0.3745, \quad p_3^* = 0.1576/0.9367 = 0.1683$$
+
+**Interpretation:** Top-p=0.9 dynamically adjusts the number of candidates based on the distribution shape. For a uniform distribution, more tokens would be included; for a peaked distribution, fewer. This is why top-p is more robust than top-k: it adapts to the model's confidence automatically.
+
+---
+
+### Solution 3 — Repetition penalty diagnosis and configuration
+
+**Situation:** Long-context story becomes repetitive after 2,000 tokens.
+
+**Part (a) — Recommended value.**
+
+Set `repetition_penalty = 1.2` to `1.4`. The penalty divides logits for previously generated tokens by the penalty factor (for positive logits) or multiplies (for negative logits), reducing their probability.
+
+A value of 1.3 is a good starting point: strong enough to discourage loops, mild enough not to distort grammar.
+
+**Part (b) — Side effects of high penalty (e.g., 1.7+).**
+
+1. **Pronoun and article avoidance:** The model cannot naturally repeat "the", "he", "she", "it" → produces awkward paraphrases ("this individual" instead of "he").
+
+2. **Factual inconsistency:** A story character's name may be mentioned 20 times but a high penalty makes it likely the model will switch names mid-story.
+
+3. **Grammatical degradation:** Common grammatical words (prepositions, articles, conjunctions) are used repeatedly in any text; penalizing them produces syntactically awkward output.
+
+4. **Vocabulary depletion:** In long-form generation, the available unpenalized vocabulary shrinks with each token — eventually forcing rare or ill-fitting words.
+
+**Better alternatives:** Use `frequency_penalty` (lighter-weight) instead of `repetition_penalty` for long-form generation, or use structured prompting to guide topic progression.
+
+---
+
+### Solution 4 — Beam search CoW overhead
+
+**Given:** Beam width=4, 200 decode steps, block_size=16, 32 KV heads, d_k=128, FP16
+
+**Maximum CoW copies:**
+
+CoW is triggered when two beams share a physical block's tail and one of them needs to extend. In the absolute worst case, at every decode step, all 4 beams diverge and each needs a new block:
+
+- Steps 1–15: beams share the same single growing block (block 1). When block 1 fills at step 16, a CoW creates 3 copies (beams 2,3,4 copy beam 1's block).
+- But actually, for beam search: all 4 beams start from the same prefix → CoW is needed the *first* time any beam writes to a shared block.
+
+The worst case: 4 beams, each diverging immediately. Each step after divergence: all 4 beams write to their own blocks (no sharing → no CoW after the initial split).
+
+**Total CoW copies (worst case):** 3 copies at step 1 (when beams diverge). Subsequently, each beam manages its own independent blocks. = **3 total CoW events** (one per new beam copy).
+
+**Maximum KV cache overhead vs greedy:**
+
+Greedy: 1 sequence × 200 tokens = 13 blocks × 256 KB = 3.25 MB
+
+Beam search (4 beams, fully diverged): 4 sequences × 200 tokens each = 52 blocks × 256 KB = 13 MB
+
+Overhead ratio: **4× greedy** (one copy per beam). This is an upper bound — in practice beams share prefixes for many steps, so the real overhead is 1.5–3×.
+
+---
+
+### Solution 5 — Structured decoding mask for JSON integer field
+
+**Context:** After emitting `"age": `, the FSM is in state `IN_NUMBER_VALUE`. The next token must start a valid integer.
+
+**Step 1 — Identify valid tokens.**
+
+The JSON grammar requires an integer value. Valid next tokens are any token whose text begins with a digit (0–9) or a minus sign (−). This includes:
+- Single-digit tokens: `"0"` through `"9"`
+- Multi-digit tokens: `"10"`, `"42"`, `"123"`, `"1000"`, etc.
+- Negative sign: `"-"` (followed by digits)
+
+**Step 2 — Build the mask.**
+
+For a vocabulary of size V (e.g., 128,000 tokens):
+
+```python
+mask = torch.full((V,), float('-inf'))  # start: all tokens forbidden
+for token_id, token_str in vocabulary.items():
+    stripped = token_str.lstrip()  # handle leading whitespace
+    if stripped and (stripped[0].isdigit() or stripped[0] == '-'):
+        mask[token_id] = 0.0  # allow this token
+```
+
+**Step 3 — Apply mask BEFORE temperature.**
+
+The mask is applied to raw logits before any temperature scaling or sampling:
+
+```
+logits_masked = logits + mask  # -inf propagates through softmax to 0 probability
+logits_scaled = logits_masked / temperature
+probs = softmax(logits_scaled)
+```
+
+**Step 4 — FSM transitions after the integer.**
+
+After the digit token(s) are emitted, the FSM monitors for `}` or `,` to detect end of the integer value and transitions accordingly. If the model emits a second digit (continuing the integer), the FSM stays in `IN_NUMBER_VALUE`. If it emits `}`, the FSM transitions to `COMPLETE`.
+

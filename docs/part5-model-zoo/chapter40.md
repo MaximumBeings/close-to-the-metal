@@ -822,3 +822,91 @@ Step 6: Completion and block recycling
 ---
 
 *Next: Chapter 41 — Disaggregated Prefill and Decode: Separating KV Compute from KV Serving Across Machines*
+
+
+---
+
+## Worked Solutions
+
+### Question 1 (Foundational)
+**Why adding more GPU workers (tensor parallelism) doesn't solve the scheduler bottleneck in V0:**
+
+In V0 vLLM, the scheduler runs in the **main Python process** on the CPU. It is responsible for:
+1. Receiving new requests from the API server.
+2. Allocating KV blocks from the block manager.
+3. Building `SequenceGroupMetadata` Python objects for each request in the batch.
+4. Serializing these objects and sending them to GPU workers.
+5. Collecting outputs from GPU workers.
+6. Running the sampler logic.
+
+All of these steps run sequentially in a single Python thread. Adding more GPU workers increases compute parallelism but does NOT parallelize the scheduler. The Python GIL prevents multi-threaded scheduling. At high concurrency (e.g., 500 concurrent sequences), the scheduler's Python overhead (object construction, serialization, output processing) can consume 20-40 ms per scheduling cycle -- approaching or exceeding the actual GPU forward pass time for small models. The GPU workers sit idle waiting for the next batch while the scheduler prepares it.
+
+---
+
+### Question 2 (Foundational)
+**Why V1 block hash deduplication only applies to full blocks. When does this prevent prefix sharing?**
+
+**Why only full blocks:**
+vLLM's block size is fixed (e.g., 16 tokens). A block is hashed once all 16 token positions are filled. A partial block (fewer than 16 tokens) has incomplete content -- its hash would be based on partial data and would not be stable (future tokens could change the sequence's token IDs within the block). Hashing partial blocks would create false positives (two requests might match on a partial block that later diverges).
+
+**Condition that prevents prefix sharing despite nearly-identical prompts:**
+If two prompts differ at token position 14 of the first block (block size=16):
+- Prompt A: tokens [t1, t2, ..., t14, X, t16] -> block hash H_A
+- Prompt B: tokens [t1, t2, ..., t14, Y, t16] -> block hash H_B (H_A != H_B)
+
+No prefix sharing is possible for any subsequent blocks, even if all tokens after position 14 are identical. The single differing token within the first block causes all blocks to have different hashes.
+
+**Common trap:** Two users with the same system prompt but different unicode normalization (e.g., "é" vs "é") will produce different token IDs, different block hashes, and no prefix sharing -- despite the text appearing identical to humans.
+
+---
+
+### Question 3 (Deep Dive)
+**`--num-scheduler-steps=10`. Request emits EOS at decode step 3. What happens for steps 4-10?**
+
+With `--num-scheduler-steps=10`, the scheduler dispatches 10 decode steps to the GPU workers as a single batch operation (a "multi-step" batch), without returning to Python between steps. The GPU workers execute all 10 steps autonomously.
+
+**At step 3 when EOS is generated:**
+The GPU worker detects the EOS token in the sampler output. It marks the sequence as finished internally.
+
+**For steps 4-10:**
+The GPU worker does NOT generate further tokens for this sequence. The EOS detection causes the sequence to be "padded" with dummy tokens or simply excluded from subsequent attention computations. The other sequences in the batch continue generating.
+
+**KV block over-allocation:**
+The scheduler pre-allocated KV blocks for potentially 10 new tokens when it dispatched the multi-step batch. The request only used 3 of the 10 allocated slots. After the worker returns results to the scheduler, the scheduler sees EOS in the output at step 3 and calls the block manager to free the unused blocks (steps 4-10 allocations are revoked).
+
+**No permanent waste:** Block over-allocation is temporary (one scheduling cycle = 10 steps). After the scheduler processes the worker's output, all over-allocated blocks are freed. The freed blocks are immediately available for new requests.
+
+---
+
+### Question 4 (Deep Dive)
+**Why eliminating Python object serialization matters even on the same machine:**
+
+In V0, the scheduler builds `SequenceGroupMetadata` objects in Python and "sends" them to workers. Even on the same machine, this involves:
+
+1. **Python object construction overhead:** `SequenceGroupMetadata` is a complex nested Python object. Constructing it for 500 sequences requires thousands of Python attribute assignments. Each assignment involves Python dict lookups, reference counting, and GIL acquisition. For 500 sequences with 10 attributes each: 5,000 Python operations per scheduling step.
+
+2. **Memory copies:** Even with shared memory, Python's pickling (used for cross-process communication) serializes the objects to bytes and deserializes them in the worker process. This is equivalent to a deep copy of all scheduling metadata.
+
+3. **GIL contention:** While the main process serializes metadata, no other Python thread can run (GIL). This blocks the API server from accepting new connections or running sampling logic concurrently.
+
+**V1's improvement:** V1 sends compact typed messages (e.g., a struct with block table indices, token IDs as a numpy array) via ZMQ, bypassing Python object construction. numpy arrays can be sent as zero-copy shared memory buffers. The GIL is held for microseconds (integer and buffer operations) rather than milliseconds (Python object construction).
+
+At 500 req/s throughput, eliminating 5 ms of Python serialization overhead per step increases scheduling throughput by ~5 ms / (5 ms + 15 ms GPU time) = 25%.
+
+---
+
+### Question 5 (Common Trap)
+**V1 with `--num-scheduler-steps=10` produces burst-then-pause SSE pattern. Is this a bug?**
+
+**Not a bug.** This is the expected behavior of multi-step scheduling.
+
+**What causes it:**
+With `--num-scheduler-steps=10`, the V1 scheduler dispatches 10 decode steps to the GPU workers in a single batch. The GPU workers execute all 10 steps and return 10 tokens simultaneously. The API server receives 10 tokens at once and streams them to the SSE client in rapid succession ("burst").
+
+Then there is a "pause" while the next 10-step batch executes on the GPU. The client sees: 10 tokens in ~5 ms, then 20 ms pause (10 steps x 2 ms/step), then 10 more tokens in ~5 ms.
+
+**Why it disappears:**
+With `--num-scheduler-steps=1` (default behavior), each decode step returns 1 token and immediately triggers the next scheduling cycle. The SSE stream delivers tokens at a steady drip rate matching the decode step latency (~20 ms/token for a 70B model).
+
+**Developer trap:** Latency measurement code that measures "time to first token in each burst" will see artificially low ITL for the first token in each burst (it arrives with 9 others). Correct ITL measurement must account for the burst delivery: measure time from end of last token to end of current last token and divide by 10.
+

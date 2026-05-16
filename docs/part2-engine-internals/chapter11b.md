@@ -827,3 +827,110 @@ attention computation for the surviving sequence?
 ---
 
 *End of Chapter 11.5*
+
+
+---
+
+## Worked Solutions
+
+---
+
+### Solution 1 — 100K-token document, KV cache full at 64K slots
+
+**What we need:** What happens at the 64K limit, two safe strategies, one unsafe.
+
+**What happens:**
+
+The scheduler attempts to allocate a new KV block for the next decode token but finds the block pool exhausted. The model cannot proceed without evicting something.
+
+**Safe Strategy 1 — Sliding window eviction (StreamingLLM / attention sink).**
+
+Keep the first 4 tokens (attention sinks) permanently. Evict the oldest non-sink tokens (e.g., tokens 5 through 4,097) to make room for new tokens. The model always has access to:
+- The attention sinks (first 4 tokens)
+- The most recent W tokens (configurable window size)
+
+This is safe because: LLMs can generate coherent text using local context + attention sinks. The evicted middle tokens are "forgotten" — the model cannot refer back to them, but the output remains locally coherent.
+
+**Safe Strategy 2 — Importance-based eviction (H2O/SnapKV).**
+
+Compute accumulated attention scores for each token across all recent steps. Evict the tokens with the lowest scores — these are the tokens the model rarely attends to and likely isn't using.
+
+This is safe because: the retained tokens are exactly those the model has been drawing information from, making the eviction minimally harmful to output quality.
+
+**Unsafe Strategy — Random eviction.**
+
+Randomly select tokens to evict regardless of their attention scores or position.
+
+This is unsafe because: critical factual context (a number, name, or clause introduced 20,000 tokens ago) might be the randomly evicted token. The model's output could become factually wrong in ways that are hard to detect.
+
+---
+
+### Solution 2 — Why first 4 tokens survive eviction despite low attention scores
+
+**The attention sink phenomenon:**
+
+During softmax computation, the denominator must be nonzero. If all the "meaningful" tokens have very low logit scores (e.g., they are all irrelevant to the current generation step), the softmax still must sum to 1. Probability mass flows to *somewhere* — and the model learns to park this "nowhere to go" probability mass on early tokens that are syntactically simple and abundant (articles, punctuation, BOS tokens).
+
+**The softmax property responsible:**
+
+Softmax is a "soft argmax" — it produces a proper probability distribution that sums to 1 regardless of the input values. There is no "abstain" option. When no attended token is genuinely relevant, the model distributes probability across all positions, but the learned attention patterns often concentrate this default probability on early tokens (especially the first token or BOS).
+
+**Mathematical consequence:**
+
+If you evict these early tokens, the accumulated denominator in the online softmax update becomes wrong — partial sums that were computed with the early tokens' contributions are now invalid. Re-running attention without those tokens produces numerically different (and usually worse) outputs even for positions that never semantically needed those early tokens.
+
+---
+
+### Solution 3 — H2O: total accumulated score vs recency-weighted score
+
+**Total accumulated score — better for:**
+
+**Factual document QA.** A user asks "What was the revenue in Q1?" about a 100K-token annual report. The Q1 revenue figure appears at token 500 and is heavily attended when generating the answer — regardless of when the question is asked. Its total accumulated score is high, so it's retained. Recency weighting would decay this old-but-critical fact away.
+
+**Recency-weighted score — better for:**
+
+**Multi-turn conversational chat.** A user's emotional state in turn 2 (tokens 50–200) is largely irrelevant 30 turns later. Recency weighting correctly deprioritizes this stale context. Total accumulated score would retain it (it received high attention in early turns) even when it's no longer useful.
+
+**Design principle:**
+
+Use total accumulated score for **reference-heavy workloads** (code review, document QA, contract analysis) and recency-weighted score for **conversational workloads** (chatbots, assistants, interactive tutors).
+
+---
+
+### Solution 4 — SnapKV: why the observation window works, and what breaks it
+
+**Why the observation window is effective:**
+
+The last W tokens of the prompt are what the model "has in mind" just before generating output. The tokens they attend to from the earlier context are exactly the tokens needed for the next generation step. Using these W tokens as the observation window captures the model's current information needs.
+
+Compared to a random window (tokens 1,000–2,000 from a 50,000-token prompt), the last W tokens are:
+1. **Semantically relevant:** they contain the question, instruction, or continuation cue
+2. **Causally connected:** they causally depend on whatever context they attended to
+3. **Forward-looking:** their attention weights predict what future decode steps will need
+
+**Task that breaks this assumption:**
+
+**Document summarization where the key information is in the beginning or middle.** If the user asks "summarize this document" and appends the document, the last W tokens of the prompt are the end of the document — which may be less important than the beginning (executive summary, abstract, key findings). SnapKV's window would incorrectly deprioritize the most information-dense early sections.
+
+Similarly, **retrieval-augmented generation (RAG)** with multiple retrieved chunks: if the most relevant chunk is in the middle of the prompt, the end-of-prompt window misses it.
+
+---
+
+### Solution 5 — Which 2 of 8 blocks to evict (H2O, blocks 3/5/7 are lowest)
+
+**Setup:** 8 blocks total, blocks 3, 5, and 7 have the three lowest importance scores. Must free exactly 2 blocks.
+
+**Step 1 — Rank all blocks by importance.**
+
+Given: blocks 3, 5, 7 are the three least important. The two absolute least important are blocks 3 and 5 (the bottom 2 of the bottom 3, assuming 3 < 5 < 7 by rank).
+
+**Step 2 — Evict blocks 3 and 5.**
+
+Evicting the two lowest-scoring blocks minimizes expected quality degradation. Block 7 (the third-lowest) is retained, providing a small safety margin.
+
+**Step 3 — Caveats.**
+
+- Check **block contiguity:** if blocks 3 and 5 are adjacent in the block table, their eviction might orphan block 4 from the active generation path (depending on the attention implementation). If block-level contiguity is required, the scheduler should prefer evicting contiguous low-importance blocks.
+
+- Check **attention sink protection:** if block 0 contains the first 16 tokens (attention sinks), it must never be evicted regardless of its importance score. In this case, block 0 is excluded from the candidate pool entirely.
+

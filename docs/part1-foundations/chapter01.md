@@ -1076,3 +1076,197 @@ Chapter 2 opens the memory subsystem in detail. We will compute the exact HBM bu
 
 *Code for this chapter: `vllm_book/code/chapter_01/hello_vllm.py` and `hello_llamacpp.cpp`*
 *Next: Chapter 2 — The GPU and CPU Memory Landscapes*
+
+
+---
+
+## Worked Solutions
+
+> Work through each question yourself first. The solutions below are step-by-step
+> for learners who are new to inference engineering — no steps are skipped.
+
+---
+
+### Solution 1 — Forward passes for a 20-token prompt + 50-token response
+
+**What we need:** Count the forward passes and name them.
+
+**Step 1 — Understand the two phases of LLM inference.**
+
+Every LLM inference job has exactly two distinct phases:
+
+- **Prefill (prompt processing):** The entire prompt is fed through the model in a *single* forward pass. All 20 prompt tokens are processed simultaneously, and the key-value (KV) cache is populated for every prompt token.
+
+- **Decode (autoregressive generation):** The model generates *one token at a time*. Each generated token is fed back into the model as input for the next step. This continues until an end-of-sequence token is produced or the requested length is reached.
+
+**Step 2 — Count the passes.**
+
+| Phase | Tokens processed | Forward passes |
+|-------|-----------------|----------------|
+| Prefill | All 20 prompt tokens at once | **1** |
+| Decode | 1 token per step × 50 steps | **50** |
+| **Total** | | **51** |
+
+**Step 3 — Why exactly one prefill pass?**
+
+During prefill, the attention mechanism allows every prompt token to attend to every other prompt token simultaneously (using the causal mask). This parallelism is why a 20-token prompt takes the same number of forward passes as a 1-token prompt — both take exactly 1. The work per pass is proportional to sequence length (longer prompt = more FLOPs per pass), but always exactly 1 pass.
+
+**Step 4 — Why 50 separate decode passes?**
+
+Each decode step *produces* one token and *consumes* one token (the previous output). The autoregressive property means token N cannot be generated until token N−1 exists. There is no way to parallelize this within a single request. Each of the 50 steps is a separate forward pass.
+
+**Common mistake:** Saying "71 forward passes" (20 + 50 + 1). The 20 prompt tokens are NOT processed one at a time — they are processed together in the single prefill pass.
+
+---
+
+### Solution 2 — H100 ridge point calculation
+
+**What we need:** Ridge point in FLOPs/byte = Peak FLOPS ÷ Peak Bandwidth.
+
+**Step 1 — Write down the values.**
+
+- Peak compute: 1,979 TFLOPS = 1,979 × 10¹² FLOPS/s
+- Peak bandwidth: 3.35 TB/s = 3.35 × 10¹² bytes/s
+
+**Step 2 — Compute the ridge point.**
+
+$$\text{Ridge point} = \frac{\text{Peak FLOPS/s}}{\text{Peak Bandwidth (bytes/s)}} = \frac{1{,}979 \times 10^{12}}{3.35 \times 10^{12}} \approx 591 \text{ FLOPs/byte}$$
+
+**Step 3 — Interpret the result.**
+
+The ridge point is the arithmetic intensity at which a workload *just barely* saturates both compute and memory simultaneously. It is the crossover point on the roofline model:
+
+- **Below 591 FLOPs/byte:** the workload is **memory-bound** (memory delivers data faster than compute can consume it).
+- **Above 591 FLOPs/byte:** the workload is **compute-bound** (compute is the bottleneck).
+
+**Step 4 — Where does decode sit?**
+
+A single-batch decode step has an arithmetic intensity of roughly 1 FLOPs/byte (see Solution 3 below). Since 1 ≪ 591, decode is *deeply* memory-bound. This is the central fact of LLM inference: the GPU's 1,979 TFLOPS of compute sits almost entirely idle during single-request decode.
+
+---
+
+### Solution 3 — Arithmetic intensity for 13B FP16 model at batch size 1
+
+**What we need:** FLOPs per decode step ÷ bytes read from HBM.
+
+**Step 1 — Compute the weight size.**
+
+$$13 \times 10^9 \text{ parameters} \times 2 \text{ bytes/parameter (FP16)} = 26 \times 10^9 \text{ bytes} = 26 \text{ GB}$$
+
+**Step 2 — Compute the FLOPs per decode step (batch size 1).**
+
+During a single decode step, the model multiplies one input activation vector (the single new token) by each weight matrix. Each multiplication is a dot product. For each parameter:
+
+- 1 multiply + 1 add = **2 FLOPs per weight**
+
+$$\text{FLOPs} = 2 \times 13 \times 10^9 = 26 \times 10^9 = 26 \text{ GFLOPs}$$
+
+**Step 3 — Compute bytes read.**
+
+At batch size 1, each weight is needed exactly once per decode step (the single token's activation is multiplied by every weight). All 26 GB of weights must be streamed from HBM:
+
+$$\text{Bytes read} = 26 \text{ GB}$$
+
+**Step 4 — Compute arithmetic intensity.**
+
+$$\text{Arithmetic intensity} = \frac{26 \text{ GFLOPs}}{26 \text{ GB}} = 1 \text{ FLOP/byte}$$
+
+**Step 5 — Compare to the H100 ridge point.**
+
+H100 ridge point ≈ 591 FLOPs/byte. Our decode intensity = 1 FLOPs/byte.
+
+$$1 \ll 591 \implies \text{Deeply memory-bound}$$
+
+The model is using less than 0.2% of the H100's available compute. The GPU is 99.8% idle on compute — waiting for memory to deliver the next set of weights.
+
+**Intuition:** A 26 GB weight matrix load takes about 26 GB ÷ 3.35 TB/s ≈ 7.8 ms. During those 7.8 ms, the H100 could perform 1,979 TFLOPS × 0.0078 s ≈ 15.4 TFLOPS of compute — but we only ask it to do 26 GFLOPs. We are wasting 15,374 GFLOPs of available compute every decode step at batch size 1.
+
+---
+
+### Solution 4 — Why batch size 32 increases arithmetic intensity by 32× without 32× more memory
+
+**What we need:** Explain the asymmetry between FLOPs (scale with batch) and bytes (don't).
+
+**Step 1 — What changes with batch size?**
+
+At batch size 32, we process 32 token vectors simultaneously instead of 1.
+
+**Step 2 — How FLOPs scale.**
+
+Each of the 32 token vectors must be multiplied by every weight matrix. The computation for each token is independent:
+
+$$\text{FLOPs at batch 32} = 32 \times 26 \text{ GFLOPs} = 832 \text{ GFLOPs}$$
+
+FLOPs scale linearly with batch size. ✓
+
+**Step 3 — How bytes read scale.**
+
+Here is the key insight: **the same weights serve all 32 tokens.**
+
+When we read a weight matrix column from HBM, we multiply it by *all 32 token activation vectors* before we need to read the next column. The weight bytes are read *once* regardless of batch size:
+
+$$\text{Bytes read at batch 32} \approx 26 \text{ GB (same as batch 1)}$$
+
+The activation vectors (the 32 token embeddings) are small — each is typically `d_model` floats, so 32 × 4096 × 2 bytes ≈ 256 KB — negligible compared to 26 GB of weights.
+
+**Step 4 — New arithmetic intensity.**
+
+$$\text{Arithmetic intensity at batch 32} = \frac{832 \text{ GFLOPs}}{26 \text{ GB}} = 32 \text{ FLOPs/byte}$$
+
+This is 32× higher than batch size 1 — exactly equal to the batch size. ✓
+
+**Step 5 — The general rule.**
+
+For a model with W weights in FP16 (W bytes × 2):
+
+| Batch size B | FLOPs | Bytes | Arithmetic intensity |
+|---|---|---|---|
+| 1 | 2W | 2W | 1 FLOPs/byte |
+| 32 | 2W × 32 | 2W | 32 FLOPs/byte |
+| 591 | 2W × 591 | 2W | 591 FLOPs/byte (ridge!) |
+
+At batch size ~591, an FP16 13B model would *just* saturate the H100's compute. Below that, you are memory-bound. This is why large-scale serving operations care so much about maintaining high batch sizes.
+
+---
+
+### Solution 5 — llama.cpp mmap vs vLLM eager loading: advantage and trade-off
+
+**What we need:** The main advantage of mmap, and what it costs.
+
+**Step 1 — How vLLM loads models (eager loading).**
+
+vLLM reads the entire model checkpoint into GPU HBM before serving any request. For a 70B FP16 model, this means copying 140 GB from disk → CPU DRAM → GPU HBM. On a typical server with an NVMe SSD (7 GB/s read speed), this takes 140 GB ÷ 7 GB/s ≈ 20 seconds *just for disk reads*, plus PCIe transfer time.
+
+**Step 2 — How llama.cpp loads models (mmap).**
+
+`mmap` (memory-mapped file I/O) maps the GGUF model file into the process's virtual address space *without reading it*. The OS page table is updated to say "if address range X is accessed, load it from file offset Y," but no bytes are copied yet. The function returns almost instantly — in milliseconds.
+
+$$\text{Startup time with mmap} \approx \text{milliseconds} \quad \text{vs} \quad \text{Startup time with eager} \approx 10\text{–}60 \text{ seconds}$$
+
+**Step 3 — The advantage.**
+
+The main advantage is **dramatically faster first-token time from a cold start**. A laptop running llama.cpp can serve its first token within 300 ms of launch. This is critical for:
+- Interactive desktop applications
+- Low-latency mobile/edge use cases
+- Testing and development where you restart the server frequently
+
+**Step 4 — The trade-off.**
+
+mmap causes **page faults during inference**. When a weight page is accessed for the first time, the OS must:
+1. Detect the page fault
+2. Issue a disk I/O to load the page into DRAM
+3. Map it into the process's address space
+4. Resume execution
+
+This page fault typically costs 1–50 ms and causes **unpredictable latency spikes**. After the model has run a few inference passes and all pages have been loaded ("warm" state), performance stabilizes — but the first few requests pay the penalty.
+
+**Summary table:**
+
+| Property | vLLM (eager) | llama.cpp (mmap) |
+|---|---|---|
+| Cold start time | 10–60 s | < 1 s |
+| First-request latency (cold) | Low | High (page faults) |
+| First-request latency (warm) | Low | Low |
+| Supports GPU memory pinning | Yes | Partial |
+| RAM required | Full model | On-demand |
+

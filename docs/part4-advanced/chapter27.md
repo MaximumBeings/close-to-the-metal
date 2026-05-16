@@ -1840,3 +1840,142 @@ the C API, and building production applications directly on the llama.cpp librar
 4. Sliding window attention with window W = 4 096 limits attention to recent tokens. For a RAG document retrieval task where the relevant passage is at position 60K in a 128K context, would sliding window attention find the passage? Explain. *(Section 27.5)*
 
 5. Kimi's Moon-Cache has three tiers: GPU (2 GB), CPU (128 GB), SSD (2 TB). A 1M-token sequence needs ~500 GB of KV cache. Describe how the hierarchical manager decides which blocks to evict from GPU and when to prefetch from SSD. *(Section 27.6)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**LLaMA-3 70B: 32 layers, 8 GQA KV heads, d_k=128, BF16. Sequence=128K tokens.**
+
+**KV cache per token:**
+```
+bytes_per_token = 2 (K and V) x 32 layers x 8 heads x 128 dim x 2 bytes
+                = 2 x 32 x 8 x 128 x 2
+                = 131,072 bytes = 128 KB per token
+```
+
+**Total KV cache for 128K tokens:**
+```
+total = 128,000 x 128 KB = 16,384,000 KB = 16 GB
+```
+
+**H100 80 GB cards needed just for KV cache:**
+```
+cards = ceil(16 GB / 80 GB) = 1 card
+```
+
+Wait -- 16 GB fits on one H100. But the model weights also need space: 70B x 2 bytes = 140 GB. So in total:
+```
+total_HBM = 140 GB (weights) + 16 GB (KV) = 156 GB
+cards_needed = ceil(156 / 80) = 2 H100s (with tensor parallelism)
+```
+
+With TP=2: weights = 70 GB/GPU, KV = 8 GB/GPU (KV sharded), activations ~= 2 GB/GPU. Total per GPU ~= 80 GB -- fits exactly on 80 GB H100s.
+
+---
+
+### Question 2
+**Prefill FLOPs for 128K-token sequence: LLaMA-3 70B, d_model=8192, 64 attention heads.**
+
+**Attention FLOPs (dominant term):**
+For T=128K tokens, d_k=128:
+```
+attention_FLOPs = 2 x T^2 x d_k x num_heads x num_layers
+                = 2 x (131072)^2 x 128 x 64 x 32
+                = 2 x 1.718e10 x 128 x 64 x 32
+                = 2 x 1.718e10 x 262144
+                = 9.01e15 FLOPs = 9.01 PFLOPs
+```
+
+**Estimate prefill time on H100 (1,979 TFLOPS BF16):**
+```
+t_prefill = 9.01e15 / 1.979e12 = 4,553 s ??? 
+```
+
+This can't be right -- attention on H100 is memory-bandwidth-bound at this scale. Let me recalculate with the correct formula:
+
+Actually, T^2 is: (128,000)^2 = 1.638e10. With 64 heads x 128 d_k = 8,192 = d_model, and 32 layers:
+```
+FLOPs = 2 x T x T x d_model x layers
+      = 2 x 128000 x 128000 x 8192 x 32
+```
+
+Hmm, standard formula for multi-head attention is:
+QK^T: 2 * T * T * d_model FLOPs per layer (T queries, each dotted with T keys at d_model total)
+Wait, per head: 2 * T * T * d_k. Across 64 heads: 2 * T^2 * d_k * 64 = 2 * T^2 * d_model.
+
+```
+per_layer = 2 x (128000)^2 x 8192 = 2 x 1.638e10 x 8192 = 2.685e14 FLOPs
+total_attention = 2.685e14 x 32 layers = 8.59e15 FLOPs
+```
+
+At H100 1,979 TFLOPS:
+```
+t = 8.59e15 / 1.979e12 = 4,341 s
+```
+
+This is clearly not realistic -- H100 is memory-bandwidth-bound at these scales, and FlashAttention tiles the computation. The true prefill time with FlashAttention is ~10-30 seconds for 128K tokens on 2 H100s in practice, dominated by HBM bandwidth rather than compute. The roofline model applies: actual throughput is min(compute_bound, bandwidth_bound).
+
+For exam purposes: compute ~= 8.6 PFLOPs for attention alone. At H100 peak BF16 performance of 1.979 PFLOPS per GPU: minimum 8.6/1.979 ~= 4.3 seconds per H100, ~= 2.2 seconds on 2 H100s (TP=2). Real systems achieve 30-60s for 128K due to memory bandwidth limits on the KV cache access pattern.
+
+---
+
+### Question 3
+**YaRN RoPE interpolation factor and perplexity degradation:**
+
+**Interpolation factor lambda:**
+YaRN extends context from L_base to L_target by scaling the RoPE frequencies:
+```
+lambda = L_target / L_base = 128K / 8K = 16
+```
+
+This means RoPE positional frequencies are divided by 16, "stretching" the positional encoding space to accommodate 16x more positions before they repeat.
+
+**Perplexity degradation:**
+- Models fine-tuned with YaRN (RoPE scaling applied during extended fine-tuning on long documents) typically show 0-3% perplexity increase vs natively long-context trained models at the target length.
+- Models that only apply YaRN at inference time (no fine-tuning) show 10-20% perplexity degradation at 128K tokens vs 8K tokens, because the base model's attention patterns were never trained on distant position pairs.
+- The "needle in a haystack" retrieval accuracy at distances > 32K positions degrades significantly without fine-tuning at the extended context length.
+
+---
+
+### Question 4
+**Sliding window W=4096. Document passage at position 60K in 128K context. Would SW attention find it?**
+
+**No.** Sliding window attention at position t can only attend to positions [t-W, t]. For a query at position 127,999 (end of context) and a passage at position 60,000:
+```
+distance = 127,999 - 60,000 = 67,999 tokens
+```
+
+67,999 >> W=4,096. The query at the end of the document **cannot attend to** the passage at position 60K.
+
+**Why this fails for RAG retrieval:** The entire premise of retrieving from a long document fails when the relevant passage is outside the sliding window. The model at each position can only "see" the last 4,096 tokens -- everything before that is invisible.
+
+**Solutions:** Use landmark attention (special tokens every L positions that attend to all prior landmarks), or hierarchical attention with global tokens, or simply use RAG with a retriever to extract the relevant 4K passage and include it in a short context.
+
+---
+
+### Question 5
+**Kimi Moon-Cache: GPU=2 GB, CPU=128 GB, SSD=2 TB. 1M-token sequence: how does the hierarchical manager work?**
+
+**KV cache for 1M tokens at LLaMA-3 8B (32 layers, 8 GQA heads, d_k=128, BF16):**
+```
+bytes_per_token = 2 x 32 x 8 x 128 x 2 = 131,072 bytes = 128 KB
+total = 1,000,000 x 128 KB = 128 GB
+```
+
+GPU (2 GB) holds: 2,000,000 / 128,000 = ~15,625 tokens worth of KV blocks.
+CPU (128 GB) holds: ~1,000,000 tokens.
+SSD (2 TB) holds: the rest (overflow, archived blocks).
+
+**Eviction decisions (GPU -> CPU):**
+The GPU holds the most recently accessed KV blocks (those needed for the current decode step's attention window). When a decode step needs a block at position P:
+- If P is in GPU: cache hit, zero latency.
+- If P is in CPU: copy 128 KB from CPU DRAM to GPU HBM (~0.06 ms at 2 TB/s DRAM bandwidth).
+- If P is on SSD: prefetch from SSD (~500 ms) -- must be done speculatively BEFORE the decode step that needs it.
+
+**Eviction policy:** LRU (Least Recently Used) within each tier. For long-context decoding with sliding window attention, only the last W tokens' blocks are needed at each step -- blocks outside the window are evicted to CPU, then SSD, as the generation progresses.
+
+**Prefetch strategy:** Moon-Cache uses predictive prefetching -- the system analyzes the attention pattern (landmarks at every L tokens) to predict which SSD blocks will be needed K decode steps ahead, and initiates prefetch K steps early. This hides the 500 ms SSD latency behind concurrent decode computation.
+

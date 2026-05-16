@@ -843,3 +843,152 @@ For inference-only pipelines, the relevant schedule is the **all-forward-then-dr
 6. A pipeline has P=6 stages. You want to keep the bubble fraction below 20%. What is the minimum number of microbatches M required? Show your work using the bubble formula. *(Section 15.15)*
 
 7. In an MoE model with 128 experts, EP=4, top-2 routing, and batch=128 tokens, compute the expected number of tokens each GPU's experts process. If the 10 most popular experts each receive 12 tokens while all others receive the average, what is the maximum per-GPU token load and how does it affect step latency? *(Section 15.14)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**Setup:** TP=4, weight matrix W of shape (4096, 16384).
+
+**Column-parallel sharding:**
+The weight is split along the output dimension (columns). Each rank holds:
+```
+W_rank = shape (4096, 4096)   # 16384 / 4 columns each
+```
+
+**After the matmul:**
+Each rank computes `x @ W_rank`, producing a partial output of shape `(batch, 4096)`.
+
+These partial outputs must be concatenated (not summed), because column-parallel splits the output features — each rank produces a different subset of output neurons. The operation needed is **AllGather**, not AllReduce. The four partial outputs are gathered so every rank has the full `(batch, 16384)` result.
+
+*Exception:* For the row-parallel layer that follows (which splits the input dimension), each rank receives its own slice of the input and the partial products are summed — that layer requires **AllReduce**.
+
+---
+
+### Question 2
+**Setup:** AllReduce = 0.05 ms, matmul = 0.8 ms, 32 layers.
+
+**Per-layer compute time:**
+```
+t_layer = matmul + AllReduce = 0.8 + 0.05 = 0.85 ms
+```
+
+**TP efficiency per layer:**
+```
+efficiency = t_useful / t_total = 0.8 / 0.85 ≈ 94.1%
+```
+
+**For 32 layers:**
+All layers are sequential. The efficiency is the same at each layer:
+```
+total useful   = 32 × 0.8  = 25.6 ms
+total elapsed  = 32 × 0.85 = 27.2 ms
+overall TP efficiency = 25.6 / 27.2 ≈ 94.1%
+```
+
+This 5.9% overhead is acceptable on NVLink. On PCIe, AllReduce cost rises to ~0.5 ms per layer, dropping TP efficiency to 0.8/1.3 ≈ 61.5% — a strong reason to avoid high TP on PCIe nodes.
+
+---
+
+### Question 3
+**Pipeline bubble with P=4, micro-batch=1:**
+
+**Bubble fraction formula:** `(P − 1) / P = 3/4 = 75%`
+
+This means 75% of GPU time is wasted on pipeline fill and drain (GPUs idle while the pipeline fills up at startup and drains at the end).
+
+**Reducing the bubble:**
+Use more micro-batches (M). Bubble fraction becomes:
+```
+bubble = (P − 1) / (M + P − 1)
+```
+
+**With M=8, P=4:**
+```
+bubble = (4 − 1) / (8 + 4 − 1) = 3 / 11 ≈ 27.3%
+```
+
+This is a 2.75× reduction. In practice, M=8–16 micro-batches are used to push bubble fraction below 20%, which requires M ≥ 4(P−1) = 12 for sub-20% at P=4.
+
+---
+
+### Question 4
+**Setup:** N=8 GPUs, NVLink 600 GB/s bidirectional, tensor = 256 MB.
+
+**Ring AllReduce formula:**
+```
+time = 2 × (N − 1)/N × bytes / bandwidth
+```
+
+Substituting:
+```
+time = 2 × (7/8) × 256 MB / 600 GB/s
+     = 2 × 0.875 × (256 × 10⁻³ GB) / 600 GB/s
+     = 2 × 0.875 × 4.267 × 10⁻⁴ s
+     = 7.467 × 10⁻⁴ s
+     ≈ 0.747 ms
+```
+
+**In context:** A typical forward pass matmul for a 70B model layer at batch=32 takes ~5–10 ms. A 0.75 ms AllReduce is ~7–15% overhead — significant but tolerable on NVLink. On PCIe at 64 GB/s, the same AllReduce takes ~7 ms, nearly equalling the compute time and making TP unattractive.
+
+---
+
+### Question 5
+**Setup:** 256 experts, top-8 routing, EP=64 GPUs.
+
+**Expert assignment:** 256 experts / 64 GPUs = 4 experts per GPU.
+
+**All-to-all pattern:**
+Every GPU holds tokens that need to be routed to 8 experts. Since experts are distributed across GPUs:
+
+Per token: top-8 experts selected → each expert may be on a different GPU.
+Per forward pass step: each GPU sends token activations to up to 8 other GPUs and receives tokens from up to 8 other GPUs.
+
+**Messages sent per token per step:**
+A token is processed on 8 expert GPUs → 8 send operations (one per expert). Each send carries the token's hidden-state activation vector (d_model floats).
+
+**Total messages in the system per step:**
+With batch B tokens distributed across 64 GPUs, each GPU sends ≤ B/64 × 8 messages = up to 128 messages per GPU per step (2 all-to-all collectives: dispatch + combine).
+
+This all-to-all is the primary bottleneck for MoE scaling. NVLink or InfiniBand with RDMA is required; PCIe cannot sustain the necessary bandwidth at scale.
+
+---
+
+### Question 6
+**Bubble formula:** `bubble = (P − 1) / (M + P − 1) < 0.20`
+
+Solve for M with P=6:
+```
+(6 − 1) / (M + 6 − 1) < 0.20
+5 / (M + 5) < 0.20
+M + 5 > 25
+M > 20
+```
+**Minimum M = 21 micro-batches.**
+
+Verification: bubble = 5 / (21 + 5) = 5/26 ≈ 19.2% < 20% ✓
+
+---
+
+### Question 7
+**Setup:** 128 experts, EP=4, top-2 routing, batch=128 tokens.
+
+**Average tokens per expert:** Each token routes to 2 experts. Total expert "visits" = 128 × 2 = 256. With 128 experts:
+```
+average tokens per expert = 256 / 128 = 2 tokens
+```
+
+**Experts per GPU:** 128 / 4 = 32 experts/GPU.
+
+**Average tokens per GPU:** 32 × 2 = 64 tokens.
+
+**Load imbalance:** The top 10 experts each receive 12 tokens. If these 10 experts are on 1–2 GPUs (worst case), one GPU processes:
+```
+max load = 10 × 12 + 22 × 2 = 120 + 44 = 164 tokens
+```
+vs. average of 64 tokens → **2.56× load imbalance**.
+
+**Effect on step latency:** The step cannot complete until the most-loaded GPU finishes. At 2.56× overload, step latency is effectively 2.56× the average-case latency — even though 3 of 4 GPUs are sitting idle waiting. This is the "expert collapse" problem. Mitigation strategies: auxiliary load-balancing loss during training, token dropping with capacity factor < 1.0, or expert parallelism rebalancing.
+

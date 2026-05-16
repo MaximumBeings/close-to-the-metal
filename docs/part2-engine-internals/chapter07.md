@@ -1304,3 +1304,150 @@ print("\nDone.")
 4. You observe that ITL (inter-token latency) suddenly spikes when new users arrive. Diagnose three scheduler-level causes and the configuration parameter that addresses each. *(Section 7.5)*
 
 5. Why does the scheduler need to call `can_allocate` from the block manager before promoting a sequence from `waiting` to `running`? What would break if it skipped this check? *(Section 7.2)*
+
+
+---
+
+## Worked Solutions
+
+---
+
+### Solution 1 — Batch filling with 6 running + 10 waiting sequences
+
+**Given:** Token budget=2,048; 6 running (1 token each, decode); 2 waiting prefills (400 and 800 tokens)
+
+**Step 1 — Reserve decode tokens.**
+
+$$\text{decode tokens} = 6 \times 1 = 6$$
+$$\text{remaining budget} = 2{,}048 - 6 = 2{,}042$$
+
+**Step 2 — Greedily admit waiting sequences (FCFS by default).**
+
+| Action | Cost | Remaining |
+|--------|------|-----------|
+| Admit seq-W1 (400-token prefill) | 400 | 2,042 − 400 = **1,642** |
+| Admit seq-W2 (800-token prefill) | 800 | 1,642 − 800 = **842** |
+| Continue checking remaining 8 waiting sequences | Depends on their lengths | up to 842 more tokens |
+
+**Step 3 — Interpret.**
+
+The final batch contains at minimum: 6 decode + W1 + W2 = 8 sequences, 1,206 tokens. Up to 842 more tokens from the remaining 8 waiting sequences can fit. For instance, if the next waiting sequence has a 600-token prefill: 842 − 600 = 242 remaining → could fit one more ~200-token prefill.
+
+**Step 4 — Why this matters.**
+
+The scheduler's goal is to maximize GPU utilization (fill the token budget) while maintaining fairness (process waiting requests in order). The 2,048 token budget prevents any single step from being dominated by one enormous prefill at the expense of currently running decode sequences.
+
+---
+
+### Solution 2 — Swap procedure for a mid-decode sequence at token 150
+
+**Given:** Sequence at token 150, GPU block pool exhausted
+
+**Step 1 — What data is swapped.**
+
+The sequence's KV cache consists of all physical GPU blocks allocated to it. For a typical model (32 layers, 8 KV heads, d_k=128, FP16) at 150 tokens:
+
+$$\text{blocks} = \lceil 150/16 \rceil = 10 \text{ blocks} \times 256 \text{ KB} = 2.5 \text{ MB of KV data}$$
+
+**Step 2 — Where it moves.**
+
+GPU HBM → CPU DRAM via PCIe. The block manager:
+1. Identifies all 10 physical blocks belonging to this sequence.
+2. Issues CUDA `cudaMemcpyDeviceToHost` for each block.
+3. Allocates equivalent CPU memory buffers.
+4. Updates the sequence's `block_table` to point to CPU-side blocks.
+5. Marks the GPU blocks as free.
+
+**Step 3 — Latency cost.**
+
+PCIe Gen4 bandwidth ≈ 32 GB/s bidirectional (practical ~16–20 GB/s for small transfers):
+
+$$\text{swap-out time} \approx \frac{2.5 \text{ MB}}{16 \text{ GB/s}} \approx 0.16 \text{ ms}$$
+
+Swap-in (when resumed) adds another ~0.16 ms. Total round-trip: ~0.32 ms for this size sequence.
+
+**Step 4 — Memory freed.**
+
+10 blocks × 256 KB = 2.5 MB returned to the GPU block pool for other sequences.
+
+**Step 5 — When the sequence is resumed.**
+
+The scheduler waits until enough GPU blocks are free to accommodate all 10 blocks. Then it issues `cudaMemcpyHostToDevice` and returns the sequence to the `running` queue. The sequence continues from token 150 without any recalculation.
+
+---
+
+### Solution 3 — Chunked prefill: steps and decode compatibility
+
+**Given:** 4,096-token prompt, chunk_size=512
+
+**Step 1 — Number of prefill steps.**
+
+$$\text{steps} = \lceil 4{,}096 / 512 \rceil = \textbf{8 steps}$$
+
+Each step processes 512 tokens of the prompt before the sequence can begin decoding.
+
+**Step 2 — Can decode sequences continue during chunked prefill?**
+
+**Yes.** This is the key advantage of chunked prefill. Without it (monolithic prefill), the entire 4,096-token prefill occupies one step, blocking ALL decode sequences for that step duration. With chunked prefill:
+
+- Step 1: 512 prefill tokens + decode tokens from all running sequences (e.g., 32 sequences × 1 decode token = 32 tokens). Total: 544 tokens.
+- Steps 2–8: Same pattern — 512 prefill tokens per step + running decode tokens.
+
+Decode sequences experience slightly higher per-step latency (because they share the batch with the prefill chunk), but they are never completely blocked.
+
+**Step 3 — TTFT trade-off.**
+
+For the new request: TTFT increases (must wait 8 steps × step_duration instead of 1 step). For other requests: ITL (inter-token latency) is more stable because no single step is dominated by a massive prefill.
+
+---
+
+### Solution 4 — Diagnosing ITL spikes when new users arrive
+
+**What we need:** Three scheduler-level causes and their configuration remedies.
+
+**Cause 1: Large monolithic prefills preempting decode sequences.**
+
+When a 4,096-token prefill arrives, it occupies the entire token budget for one step. All running decode sequences must wait. Each missing decode step adds one ITL to every running request.
+
+*Fix:* Enable chunked prefill with `--enable-chunked-prefill --max-num-batched-tokens 2048`. This limits prefill to 2,048 tokens per step, allowing decode sequences to share the batch.
+
+**Cause 2: Block pool exhaustion triggering preemptions.**
+
+New users require new KV cache blocks. If the pool is full, the scheduler must preempt (swap or recompute) some running sequences, adding their swap latency to ITL.
+
+*Fix:* Reduce `--gpu-memory-utilization` from 0.90 to 0.85 to keep a safety margin in the block pool. Alternatively, use `--max-num-seqs` to cap concurrent requests before the pool fills.
+
+**Cause 3: Scheduler priority bias toward new arrivals (prefill preference).**
+
+If the scheduler greedily admits new prefills at the expense of running decode sequences, active users experience ITL spikes while their sequences are de-prioritized.
+
+*Fix:* Set `--scheduling-policy priority` or tune `--max-num-prefill-seqs` to limit how many new prefills can enter the batch simultaneously, protecting decode sequences' share of the token budget.
+
+---
+
+### Solution 5 — Why can_allocate must be called before promoting waiting→running
+
+**What we need:** What breaks if this check is skipped.
+
+**Step 1 — What can_allocate checks.**
+
+Before promoting a waiting sequence to running, the block manager verifies:
+- Enough free physical blocks exist to hold the sequence's first prefill chunk
+- The system is not in a "block-starved" state where admitting another sequence would trigger immediate preemption
+
+**Step 2 — What breaks without the check.**
+
+**Scenario:** Block pool has 2 free blocks. A new 512-token sequence is promoted without checking. Prefill begins. After 2 blocks (32 tokens), the scheduler runs `can_append_slot` → fails immediately. The sequence must be preempted.
+
+This creates a **preemption loop**:
+1. Sequence admitted without block check
+2. Partial prefill consumes available blocks
+3. Preemption triggered after a few tokens
+4. Swap/recompute cost incurred
+5. Sequence returns to waiting queue
+6. Cycle repeats
+
+**Step 3 — The correct behavior.**
+
+`can_allocate` returns False when the pool cannot support the sequence. The scheduler leaves the sequence in `waiting` and serves existing running sequences until enough blocks are freed. This prevents wasteful partial-prefill-and-abort cycles and keeps the GPU doing useful work.
+

@@ -169,30 +169,30 @@ nav:
     - "Code 38 — Production Synthesis": code/chapter_38.md
     - "Code 39 — Evaluation Harness": code/chapter_39.md
     - "Code 40 — vLLM V1 Architecture": code/chapter_40.md
-    - "Code L — TurboQuant": code/appendix_l.md
+    - "Code V — TurboQuant": code/appendix_v.md
 
   - "Appendices":
     - "A — Mathematical Foundations": appendices/appendix-a.md
     - "B — Installation Guide": appendices/appendix-b.md
-    - "W — PyTorch for LLM Inference": appendices/appendix-w.md
-    - "C — vLLM EngineArgs Reference": appendices/appendix-c.md
-    - "D — llama.cpp CLI Reference": appendices/appendix-d.md
-    - "E — Production Templates": appendices/appendix-e.md
-    - "F — Benchmarking Reference": appendices/appendix-f.md
-    - "K — Operational Decision Tree": appendices/appendix-k.md
-    - "G — C++ Build Patterns": appendices/appendix-g.md
-    - "X — libtorch: The C++ API": appendices/appendix-x.md
-    - "S — std::mdspan for CPU Inference: Multidimensional Views in C++23": appendices/appendix-s.md
-    - "J — CUDA C++ Introduction": appendices/appendix-j.md
-    - "P — Introduction to Triton: Python-Embedded GPU Kernel Programming": appendices/appendix-p.md
-    - "Q — CUTLASS and Tensor Cores: The Compiled Performance Layer": appendices/appendix-q.md
-    - "R — Introduction to Mojo: Systems Performance in Python Syntax": appendices/appendix-r.md
-    - "U — ROCm and AMD GPU Inference": appendices/appendix-u.md
-    - "M — Mobile and Edge Deployment: Android and Apple Silicon": appendices/appendix-m.md
-    - "N — Edge Inference on Linux SBCs: Raspberry Pi and NVIDIA Jetson": appendices/appendix-n.md
-    - "O — CI/CD Pipelines for LLM Inference Systems": appendices/appendix-o.md
+    - "C — PyTorch for LLM Inference": appendices/appendix-c.md
+    - "D — vLLM EngineArgs Reference": appendices/appendix-d.md
+    - "E — llama.cpp CLI Reference": appendices/appendix-e.md
+    - "F — Production Templates": appendices/appendix-f.md
+    - "G — Benchmarking Reference": appendices/appendix-g.md
+    - "H — Operational Decision Tree": appendices/appendix-h.md
+    - "I — C++ Build Patterns": appendices/appendix-i.md
+    - "J — libtorch: The C++ API": appendices/appendix-j.md
+    - "K — std::mdspan for CPU Inference: Multidimensional Views in C++23": appendices/appendix-k.md
+    - "L — CUDA C++ Introduction": appendices/appendix-l.md
+    - "M — Introduction to Triton: Python-Embedded GPU Kernel Programming": appendices/appendix-m.md
+    - "N — CUTLASS and Tensor Cores: The Compiled Performance Layer": appendices/appendix-n.md
+    - "O — Introduction to Mojo: Systems Performance in Python Syntax": appendices/appendix-o.md
+    - "P — ROCm and AMD GPU Inference": appendices/appendix-p.md
+    - "Q — Mobile and Edge Deployment: Android and Apple Silicon": appendices/appendix-q.md
+    - "R — Edge Inference on Linux SBCs: Raspberry Pi and NVIDIA Jetson": appendices/appendix-r.md
+    - "S — CI/CD Pipelines for LLM Inference Systems": appendices/appendix-s.md
     - "T — Embedding and Reranker Model Serving": appendices/appendix-t.md
-    - "V — Quantization Calibration Workflow: AWQ, GPTQ, FP8, and GGUF": appendices/appendix-v.md
-    - "L — TurboQuant (Addendum)": appendices/appendix-l.md
-    - "H — Glossary": appendices/appendix-h.md
-    - "I — References": appendices/appendix-i.md
+    - "U — Quantization Calibration Workflow: AWQ, GPTQ, FP8, and GGUF": appendices/appendix-u.md
+    - "V — TurboQuant (Addendum)": appendices/appendix-v.md
+    - "W — Glossary": appendices/appendix-w.md
+    - "X — References": appendices/appendix-x.md

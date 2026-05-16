@@ -613,3 +613,117 @@ environment.
 4. What happens to in-flight requests when a prefill pod crashes mid-transfer? Describe the retry and recovery procedure in a production system. *(Section 18.4)*
 
 5. Disaggregated prefill adds network latency to TTFT. For the numbers in question 3, compute the fraction of TTFT attributable to KV transfer versus prefill compute (assume prefill compute takes 80 ms). *(Section 18.2)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**Why mixing prefill and decode on the same GPU is inefficient:**
+
+**Prefill is compute-bound.** It processes T tokens in a single forward pass, performing large matrix multiplications (GEMMs) where arithmetic intensity is high (T × d_model FLOPs per weight byte). The GPU's SM cores are the bottleneck; HBM bandwidth is secondary.
+
+**Decode is memory-bandwidth-bound.** It generates 1 token per step, requiring one full read of all model weights from HBM (140 GB for 70B BF16) per step. The arithmetic intensity is ~1 FLOP/byte — far below the hardware's ridge point (~591 FLOP/byte for A100). The GPU's HBM bandwidth is the bottleneck; compute cores are underutilized.
+
+**Mixing penalty:**
+1. **Compute-memory conflict:** When a large prefill GEMM runs, it saturates SM cores. Decode operations needing HBM bandwidth are starved because the memory bus is also servicing the prefill's input loads.
+2. **KV cache pressure:** A long-context prefill (e.g., 32K tokens) allocates thousands of KV blocks at once, potentially evicting KV blocks that decode sequences needed — forcing costly recomputation.
+3. **CUDA kernel serialization:** CUDA kernels from prefill and decode steps are serialized on the same stream; there is no natural pipeline overlap between them on a single GPU.
+
+Disaggregated prefill solves this by dedicating each GPU type to the workload it handles best.
+
+---
+
+### Question 2
+**Setup:** 4 prefill pods, 12 decode pods, 100 req/s, avg prompt = 1,024 tokens, decode ITL target = 40 ms.
+
+**Verify the pod ratio:**
+
+**Step 1 — Prefill capacity check.**
+Each prefill pod processes prompts at some throughput T_prefill (tokens/s). For a 70B BF16 model at compute-bound prefill on an A100:
+- ~1,979 TFLOPS × efficiency / FLOPs per token ≈ 10,000–15,000 tokens/s per pod (estimate).
+- At 100 req/s × 1,024 tokens/req = 102,400 tokens/s total prefill demand.
+- 4 pods × 12,800 tok/s ≈ 51,200 tok/s capacity — check if this matches actual measurement.
+
+**Step 2 — Decode capacity check.**
+Each decode pod serves N concurrent sequences. At ITL target = 40 ms:
+```
+max concurrent sequences per pod = HBM bandwidth × ITL / (model weight bytes)
+= 2,000 GB/s × 0.04 s / 140 GB ≈ 0.57 → batch ~1
+```
+This suggests decode pods are nearly bandwidth-saturated at batch=1. 12 pods are needed to handle 100 req/s if each pod can only handle ~8–10 concurrent sequences at 40 ms ITL.
+
+**Step 3 — Verify with metrics:**
+Monitor `vllm:num_requests_waiting` on decode pods. If decode pods have a backlog growing faster than they drain it, add more decode pods. Monitor prefill pod GPU utilization — if < 70%, consider removing a prefill pod.
+
+---
+
+### Question 3
+**KV transfer size for 1,024-token prefill, 32 layers, 32 KV heads, d_k=128, BF16:**
+
+```
+size = 1,024 tokens × 32 layers × 2 (K and V) × 32 heads × 128 dim × 2 bytes
+     = 1,024 × 32 × 2 × 32 × 128 × 2
+     = 1,024 × 32 × 4,096 × 2
+     = 1,024 × 262,144
+     = 268,435,456 bytes = 256 MB
+```
+
+**Transfer time over 400 Gb/s InfiniBand:**
+Convert bandwidth: 400 Gb/s = 50 GB/s = 50,000 MB/s
+```
+t_transfer = 256 MB / 50,000 MB/s = 0.00512 s ≈ 5.12 ms
+```
+
+---
+
+### Question 4
+**Crash recovery for in-flight requests during KV transfer:**
+
+**What happens at crash:**
+The prefill pod completes the forward pass and begins serializing KV blocks into the InfiniBand buffer. Mid-transfer, the pod crashes. The decode pod receives partial KV data.
+
+**The decode pod detects the failure via:**
+- Broken TCP/RDMA connection → OS-level signal to the receive side.
+- gRPC or ZMQ heartbeat timeout.
+- Incomplete transfer checksum verification.
+
+**Retry and recovery procedure:**
+
+1. **Detect:** The decode pod's KV receiver raises a `TransferError` exception within the timeout window (typically 5–10 s).
+
+2. **Discard partial KV:** Any partially written KV blocks for this request are freed and marked invalid in the block table.
+
+3. **Retry at the load balancer:** The load balancer (which tracks request state) sees the decode pod report a `PREFILL_TRANSFER_FAILED` status. It selects a new prefill pod (or the same pod if restarted) and re-dispatches the original prompt.
+
+4. **Re-prefill from scratch:** The new prefill pod runs the forward pass again on the full prompt, producing a fresh KV tensor.
+
+5. **Resume decode:** The KV cache is transferred to the decode pod (same or different), and decoding resumes from the first generated token.
+
+**Time cost:** One full re-prefill latency (e.g., 80 ms for a 1,024-token prompt) + one new KV transfer (5.12 ms). Total additional TTFT penalty ≈ 85 ms.
+
+**Production mitigation:** Use redundant prefill pods with active-active assignment. The load balancer sends the prompt to 2 prefill pods simultaneously; the first to complete transfer wins and the other is cancelled. This reduces retry latency to near-zero in most crash scenarios.
+
+---
+
+### Question 5
+**TTFT components from Q3:**
+- Prefill compute: 80 ms (given)
+- KV transfer: 5.12 ms
+
+**Total TTFT:**
+```
+TTFT = prefill_compute + KV_transfer = 80 + 5.12 = 85.12 ms
+```
+
+**Fraction attributable to KV transfer:**
+```
+fraction = 5.12 / 85.12 ≈ 6.0%
+```
+
+**Interpretation:**
+The KV transfer adds a ~6% TTFT overhead for a 1,024-token prompt over 400 Gb/s InfiniBand. This is acceptable for typical use. However, for very short prompts (128 tokens → transfer ≈ 0.64 ms, prefill ≈ 10 ms → TTFT = 10.64 ms, transfer fraction = 6%), the overhead is proportionally similar.
+
+For very long prompts (32K tokens → transfer ≈ 160 ms, prefill ≈ 2,500 ms → TTFT = 2,660 ms, fraction ≈ 6%), the absolute delay grows but fraction stays constant. InfiniBand at 400 Gb/s scales linearly with context length, maintaining the ~6% overhead across most practical context lengths.
+

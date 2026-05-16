@@ -531,3 +531,123 @@ Chapter 37 covers Nemotron — NVIDIA's model family optimized for TensorRT-LLM,
 4. At what context length does Moon-Cache's CPU tier become the bottleneck (when GPU is fully saturated)? Given CPU DRAM bandwidth of 200 GB/s, estimate the maximum context length that allows 10 ms decode steps. *(Section 36.2)*
 
 5. Compare the Kimi Moon-Cache approach to RAG (Retrieval-Augmented Generation) for a 1M-token document Q&A task. Under what conditions is each approach preferable? *(Section 36.5)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**Moon-Cache: GPU=4 GB, CPU=256 GB, SSD=8 TB. LLaMA-3 8B, 32 layers, 8 GQA KV heads, d_k=128, BF16, 1M tokens.**
+
+**KV per token:**
+```
+KV_per_token = 2 x 32 x 8 x 128 x 2 = 131,072 bytes = 128 KB
+Total for 1M tokens = 1,000,000 x 128 KB = 128 GB
+```
+
+**Tier capacities:**
+- GPU: 4 GB -> can hold 4 GB / 128 KB = ~31,250 tokens of KV
+- CPU: 256 GB -> can hold 256 GB / 128 KB = 2,000,000 tokens of KV (>1M -- sufficient!)
+- SSD: 8 TB -> far more than enough
+
+**Is CPU+SSD sufficient?**
+CPU alone (256 GB) is sufficient for the full 1M-token KV cache (128 GB << 256 GB). SSD is not needed for 1M tokens with LLaMA-3 8B. CPU tier can hold the entire KV cache.
+
+SSD would only be needed for: (a) longer sequences (>2M tokens at 8B scale), or (b) larger models (70B model at 1M tokens needs ~960 GB, exceeding the 256 GB CPU tier).
+
+---
+
+### Question 2
+**Decode step accesses positions [950K-1M] (GPU) and [100K-150K] (SSD). Prefetch=500 ms, decode step=50 ms.**
+
+**Does Moon-Cache deliver the SSD block in time?**
+The decode step takes 50 ms. The SSD prefetch takes 500 ms -- **10x longer than the decode step**. If the SSD block is not prefetched until the step starts, the step must wait 500 ms for the block, making ITL = 550 ms instead of 50 ms. This is unacceptable.
+
+**What latency strategy resolves this: Predictive prefetching.**
+
+Moon-Cache must predict which SSD blocks will be needed K steps in the future and issue prefetch I/O at least K decode steps early:
+
+```
+steps_ahead_needed = ceil(SSD_latency / decode_step_time) = ceil(500/50) = 10 steps
+```
+
+So Moon-Cache must begin prefetching the [100K-150K] blocks at least 10 decode steps before they are needed. For a sliding-window attention pattern (where the model attends to landmark tokens at fixed intervals), the access pattern is predictable: every 1,024 tokens of generation, the model needs landmark blocks from specific positions. Moon-Cache's prefetch scheduler issues SSD reads 10+ steps ahead for all predictable future accesses.
+
+This converts 500 ms SSD latency into 0 ms effective latency (hidden behind ongoing decode computation).
+
+---
+
+### Question 3
+**Sparse attention: W=4,096 window + landmark every L=1,024 positions. 1M tokens. Attention operations per token vs full.**
+
+**Full attention per token:**
+Each token at position t attends to all 1M prior tokens = 1,000,000 attention operations per token.
+
+**Sparse attention per token:**
+1. **Sliding window:** attends to the last W=4,096 tokens = 4,096 operations.
+2. **Landmark tokens:** landmarks appear every 1,024 positions. In 1M tokens: 1,000,000/1,024 = ~977 landmarks. Each token attends to all landmarks = 977 operations.
+
+**Total per token:**
+```
+sparse_ops = 4,096 (window) + 977 (landmarks) = 5,073 operations
+```
+
+**Ratio vs full attention:**
+```
+sparse_ops / full_ops = 5,073 / 1,000,000 = 0.507% of full attention
+```
+
+Sparse attention performs ~197x fewer attention operations per token at 1M context. This is the key scalability advantage -- instead of O(T^2) attention, sparse attention achieves O(T * (W + T/L)) ~= O(T * constant) for large T.
+
+---
+
+### Question 4
+**At what context length does CPU tier become the bottleneck? Given CPU DRAM bandwidth=200 GB/s.**
+
+For a decode step taking 10 ms, the CPU must supply KV blocks to GPU within that window.
+
+**Maximum KV data transfer per step:**
+If the decode step reads W=4,096 tokens of KV from the window (GPU-resident) + 977 landmark tokens from CPU:
+```
+landmark_KV = 977 x 128 KB = 122 MB (per step from CPU)
+```
+
+Transfer time at 200 GB/s:
+```
+t_transfer = 122 MB / 200,000 MB/s = 0.61 ms << 10 ms
+```
+
+CPU is not the bottleneck for landmark-only access. **CPU becomes the bottleneck** when the sliding window itself is in CPU DRAM (i.e., when the GPU tier (4 GB = 31,250 tokens) fills up and window tokens overflow to CPU):
+
+GPU holds last 31,250 tokens. If W=4,096 << 31,250, the window fits in GPU entirely. CPU is needed only for landmarks.
+
+**Maximum context length for 10 ms decode with full window from CPU:**
+If the window (4,096 tokens x 128 KB = 512 MB) must be transferred from CPU each step:
+```
+t = 512 MB / 200,000 MB/s = 2.56 ms << 10 ms
+```
+CPU is still fine. CPU only becomes the bottleneck when the total KV I/O per step approaches 200 GB/s x 10 ms = 2 GB per step, which would require a window of 2,000,000 / 128 KB = 15,625 tokens -- far larger than 4,096.
+
+**Practical answer:** For W=4,096 and 10 ms steps, CPU DRAM is not the bottleneck at any context length. SSD access (landmark blocks from very early positions) is the real bottleneck for contexts > 2M tokens.
+
+---
+
+### Question 5
+**Kimi Moon-Cache vs RAG for 1M-token document Q&A. When is each preferable?**
+
+**Moon-Cache (full context in memory):**
+
+Preferable when:
+1. **Multiple questions on the same document.** Moon-Cache loads the 1M-token KV cache once. Each subsequent question is a cheap decode-only operation (no re-prefill). Amortized across many questions, the loading cost becomes negligible.
+2. **Needle-in-a-haystack retrieval is complex.** Sparse attention with landmarks allows attending to any part of the document -- no retrieval error. RAG can miss the relevant passage if the retriever fails.
+3. **The document is a coherent narrative.** Long documents with cross-references, character arcs, or inter-chapter dependencies cannot be chunked for RAG without losing context.
+
+**RAG:**
+
+Preferable when:
+1. **Single question per document ingestion.** If each document is queried once, paying 1M-token KV cost is wasteful. RAG retrieves only the 2-4K most relevant tokens, costing 100-200x less.
+2. **Large document collections.** 1M tokens = one long document. A corpus of 10,000 documents would require 1 PB of KV storage for Moon-Cache. RAG uses a compact vector index (~4 GB for 10,000 documents).
+3. **Latency constraints.** Moon-Cache with 128 GB of KV needs 640 ms to load from CPU DRAM at 200 GB/s. RAG retrieval completes in <100 ms.
+4. **Dynamic document updates.** Adding new documents to RAG is a simple index update. Moon-Cache requires re-prefilling the entire updated document.
+

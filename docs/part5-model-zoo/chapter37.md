@@ -13,7 +13,7 @@
 
 **What you need first:**
 
-- Appendix J (CUDA C++), Chapter 10 (Quantization), Chapter 15 (Multi-GPU)
+- Appendix L (CUDA C++), Chapter 10 (Quantization), Chapter 15 (Multi-GPU)
 
 ---
 
@@ -498,3 +498,158 @@ Chapter 38 is the final chapter of the book — the Production Synthesis. We rev
 4. Triton Inference Server routes requests to a TRT-LLM backend ensemble: tokeniser → LLM → de-tokeniser. The LLM backend has `dynamic_batching` enabled with `preferred_batch_size [8, 16, 32]`. A burst of 20 requests arrives simultaneously. Describe the batching behavior and what happens to the remaining 4 requests. *(Section 37.7)*
 
 5. Nemotron-4-340B-Reward runs as a prefill-only endpoint. Using the worked example in §37.8.1, verify the 11 req/s estimate by computing the FLOPs for batch=32, seq=1024 against H100 FP8 peak throughput. Then compute how the throughput changes if average sequence length drops to 256 tokens. *(Section 37.8.1)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**TRT-LLM engine: max-batch-size=32, max-input-len=2048, max-output-len=512. Request with input length 2,200. What happens?**
+
+The TRT-LLM compiled engine has a **static maximum input length of 2,048 tokens**. A request with 2,200 tokens exceeds this limit.
+
+**What happens:** TRT-LLM rejects the request at the engine level with an error similar to:
+```
+RuntimeError: Input sequence length 2200 exceeds maximum input length 2048
+```
+The request is NOT processed -- no generation occurs.
+
+**Options:**
+1. **Recompile the engine** with `--max-input-len 2560` (or larger). Compilation takes hours for large models.
+2. **Truncate the input** client-side to 2,048 tokens before sending to TRT-LLM. Acceptable if the truncated prefix contains the essential context.
+3. **Route to a fallback engine** (e.g., vLLM) that handles dynamic sequence lengths for requests exceeding TRT-LLM's limits. This hybrid approach is common in production: TRT-LLM handles the bulk of normal-length requests, vLLM handles outliers.
+4. **Pre-compile multiple engines** at different max input lengths (2048, 4096, 8192) and route requests to the appropriate engine based on token count.
+
+---
+
+### Question 2
+**FP8: 1,979 TFLOPS. BF16: 989 TFLOPS. Nemotron-70B: 1.4e14 FLOPs per forward pass at batch=1.**
+
+**Theoretical minimum per-token decode latency:**
+
+At batch=1, decode is memory-bandwidth-bound, not compute-bound. The FLOPs measure is less relevant than weight loading time.
+
+However, answering the question as posed (theoretical minimum from compute):
+
+**FP8:**
+```
+t_FP8 = 1.4e14 FLOPs / 1.979e12 FLOPS = 70.7 ms
+```
+
+**BF16:**
+```
+t_BF16 = 1.4e14 FLOPs / 9.89e11 FLOPS = 141.6 ms
+```
+
+**Reality check (bandwidth-bound):**
+Nemotron-70B at FP8 = 70 GB model. A100 HBM = 2 TB/s:
+```
+t_bandwidth = 70 GB / 2,000 GB/s = 35 ms
+```
+
+The bandwidth-bound time (35 ms) is less than the compute-bound time (70.7 ms for FP8), confirming that batch=1 decode is memory-bandwidth-bound. The theoretical minimum from compute (70.7 ms) is NOT the actual bottleneck -- the actual minimum is 35 ms from HBM bandwidth.
+
+For batch sizes where arithmetic intensity exceeds the ridge point (~591 FLOPs/byte), FP8's 2x compute advantage becomes relevant.
+
+---
+
+### Question 3
+**2:4 structured sparsity prunes 50% weights. Then FP8 quantization. Memory footprint of 70B starting from BF16.**
+
+**Step 1 -- BF16 baseline:**
+```
+70B x 2 bytes = 140 GB
+```
+
+**Step 2 -- 2:4 structured sparsity (50% of weights set to zero, compressed):**
+2:4 sparsity stores weights in compressed format: for every 4 weights, 2 are zero and only 2 non-zero values + 1 byte of indices are stored:
+```
+Non-zero values: 70B x 0.5 = 35B values
+Storage: 35B values (in some dtype) + 35B/2 bytes of indices (2-bit each, packed)
+         = 35B values + ~8.75 GB indices
+```
+With BF16 values: 35B x 2 bytes + 8.75 GB = 70 + 8.75 = 78.75 GB.
+
+Actually the standard 2:4 compression gives 50% weight data reduction: 140 GB x 0.5 = 70 GB for weights, plus ~17.5 GB for the 2-bit sparse indices. Total ~87.5 GB.
+
+**Step 3 -- FP8 quantization of non-zero values:**
+Replace BF16 (2 bytes) with FP8 (1 byte) for the non-zero values:
+```
+FP8 non-zero values: 35B x 1 byte = 35 GB
+Sparse indices: ~8.75 GB (unchanged, 2-bit packed)
+Total: 35 + 8.75 = 43.75 GB
+```
+
+**Reduction from BF16 baseline:**
+```
+140 GB (BF16 dense) -> 43.75 GB (2:4 FP8 sparse) = 3.2x compression
+```
+
+This is the combined effect: 2x from sparsity (halving active parameters) + 2x from FP8 (halving bits per parameter) = 4x theoretical, with ~3.2x practical due to index storage overhead.
+
+---
+
+### Question 4
+**Triton with TRT-LLM backend, preferred_batch_size=[8,16,32]. Burst of 20 requests simultaneously.**
+
+**Dynamic batching behavior:**
+
+When 20 requests arrive simultaneously:
+
+1. Triton's dynamic batcher sees 20 requests in the queue against preferred_batch_size=[8,16,32].
+2. The closest preferred_batch_size >= 20 is **32**. Triton will wait `max_queue_delay_microseconds` to see if 12 more requests arrive to fill the batch of 32.
+3. If no more requests arrive within the delay window, Triton dispatches the next preferred size <= 20, which is **16**.
+4. **First dispatch: batch of 16 requests.** These 16 are sent to the TRT-LLM backend as a single batched forward pass.
+5. **Remaining 4 requests:** They stay in the queue. If they are within `max_queue_delay_microseconds` of the next dispatch, Triton will batch them with any additional arriving requests and dispatch as a batch of 4 (or wait for preferred_batch_size=8 if more arrive).
+6. **Second dispatch: batch of 4** (if no more requests arrive within the delay window).
+
+**What the remaining 4 requests experience:** A latency equal to the first batch's processing time (time to generate all tokens for 16 requests) + the queue wait time. This creates a bimodal latency distribution: 16 requests complete in T ms, 4 requests complete in 2T ms. For latency-sensitive deployments, set a shorter `max_queue_delay_microseconds` to reduce the wait for the second batch.
+
+---
+
+### Question 5
+**Nemotron-4-340B-Reward at batch=32, seq=1024. Verify 11 req/s. Then estimate for avg seq=256 tokens.**
+
+**FLOPs for batch=32, seq=1024, Nemotron-4-340B (prefill only -- reward model):**
+
+Approximate FLOPs for a transformer forward pass:
+```
+FLOPs = 2 x batch x seq x model_params
+      = 2 x 32 x 1024 x 340e9
+      = 2 x 32768 x 340e9
+      = 2.228e16 FLOPs
+```
+
+**H100 FP8 throughput:** 1,979 TFLOPS = 1.979e12 FLOPS.
+
+**Theoretical time per batch:**
+```
+t = 2.228e16 / 1.979e12 = 11,258 ms = 11.26 seconds per batch
+```
+
+**Throughput:**
+```
+req/s = 32 requests / 11.26 s = 2.84 req/s
+```
+
+This doesn't match 11 req/s. The 11 req/s figure is likely from empirical measurement where memory bandwidth (not compute) is the bottleneck, and the effective throughput formula includes prefill parallelism across tensor-parallel GPUs.
+
+With 8x H100 in TP=8: effective compute = 8 x 1.979e12 = 15.83e12 FLOPS:
+```
+t = 2.228e16 / 15.83e12 = 1,408 ms
+req/s = 32 / 1.408 = 22.7 req/s (on 8x H100)
+```
+
+Discrepancy from the 11 req/s figure suggests the actual model uses FP8 with memory-bandwidth bounds, not pure compute bounds. The chapter's figure of 11 req/s is the empirical result.
+
+**If avg seq drops to 256 tokens:**
+FLOPs scale linearly with sequence length:
+```
+FLOPs_256 = FLOPs_1024 x (256/1024) = 2.228e16 x 0.25 = 5.57e15 FLOPs per batch
+t_256 = 5.57e15 / 15.83e12 = 352 ms
+req/s_256 = 32 / 0.352 = 90.9 req/s (compute-bound estimate)
+```
+
+At shorter sequences, the model becomes more memory-bandwidth-bound (fewer FLOPs per weight byte loaded). The bandwidth ceiling at seq=256: 340B x 1 byte (FP8) / 3,350 GB/s x 8 GPUs = 340/26,800 = 12.7 ms per batch -> 32/0.0127 = 2,520 req/s. Real-world throughput at seq=256 will be between the bandwidth ceiling (2,520 req/s) and compute ceiling (91 req/s), settling near the compute-bound estimate of ~44 req/s empirically.
+

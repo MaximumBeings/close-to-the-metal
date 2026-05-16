@@ -1316,3 +1316,175 @@ Chapter 3 opens the tokenization pipeline and introduces the batch — the colle
 
 *Code for this chapter: `vllm_book/code/chapter_02/memory_budget.py` and `memory_layout_demo.cpp`*
 *Next: Chapter 3 — Tokens, Sequences, and the Batch*
+
+
+---
+
+## Worked Solutions
+
+---
+
+### Solution 1 — HBM vs DRAM bandwidth comparison
+
+**What we need:** How many times faster HBM is than DRAM, and why it matters.
+
+**Step 1 — Convert to the same units.**
+
+- HBM bandwidth: 3.35 TB/s = 3,350 GB/s
+- DRAM bandwidth: 80 GB/s
+
+**Step 2 — Compute the ratio.**
+
+$$\frac{3{,}350 \text{ GB/s}}{80 \text{ GB/s}} = 41.875 \approx 42\times \text{ faster}$$
+
+**Step 3 — Why this matters for inference.**
+
+During every decode step, the GPU must stream the *entire* model weight tensor from wherever it lives:
+
+- If weights live in **HBM** (on-device): streaming 26 GB (13B FP16) takes 26 GB ÷ 3,350 GB/s ≈ **7.8 ms**.
+- If weights live in **CPU DRAM** (offloaded): 26 GB ÷ 80 GB/s ≈ **325 ms** — about **42× slower**.
+
+This 42× difference explains why CPU-offloaded inference (e.g., large models partially loaded to RAM) is so much slower than GPU-resident inference: every decode step pays the DRAM bandwidth tax instead of the HBM bandwidth tax.
+
+For llama.cpp on Apple Silicon, unified memory collapses this distinction — the CPU and GPU share the same DRAM at ~100–800 GB/s depending on the chip, which is why M2 Ultra can serve 70B models at reasonable speed without separate HBM.
+
+---
+
+### Solution 2 — Memory footprint for 13B BF16 model
+
+**What we need:** GB of HBM for weights only.
+
+**Step 1 — BF16 size.**
+
+BF16 (Brain Float 16) uses **2 bytes per parameter**. It has the same exponent range as FP32 (8 bits) but only 7 mantissa bits instead of 23. It is the dominant dtype for serving because it avoids the overflow issues of FP16 while using half the memory of FP32.
+
+**Step 2 — Compute.**
+
+$$13 \times 10^9 \text{ parameters} \times 2 \text{ bytes/parameter} = 26 \times 10^9 \text{ bytes} = 26 \text{ GB}$$
+
+**Step 3 — Practical check.**
+
+An A100 80 GB has 80 GB of HBM. A 13B BF16 model occupies 26 GB — leaving 54 GB for KV cache and activations. This is comfortable. A 70B BF16 model would need 140 GB, requiring at least two A100s.
+
+**General formula:**
+
+$$\text{Weight memory (GB)} = \frac{N_{\text{params}} \times \text{bytes\_per\_param}}{10^9}$$
+
+where `bytes_per_param` is 2 for BF16/FP16, 1 for INT8, 0.5 for INT4/NF4.
+
+---
+
+### Solution 3 — KV cache size per token
+
+**What we need:** Bytes per token for the KV cache.
+
+**Step 1 — Identify the components.**
+
+For each layer of the transformer, the KV cache stores two tensors:
+- **K (key):** shape `[n_kv_heads, head_dim]` per token
+- **V (value):** shape `[n_kv_heads, head_dim]` per token
+
+Given:
+- Layers: 40
+- KV heads: 8 (GQA — the number of distinct key/value heads, which may be fewer than query heads)
+- `head_dim`: 128
+- dtype: FP16 → 2 bytes per element
+
+**Step 2 — Compute bytes per token per layer.**
+
+$$\text{KV bytes per token per layer} = 2 \text{ (K+V)} \times n_{\text{kv\_heads}} \times d_{\text{head}} \times \text{dtype bytes}$$
+$$= 2 \times 8 \times 128 \times 2 = 4{,}096 \text{ bytes} = 4 \text{ KB per token per layer}$$
+
+**Step 3 — Multiply by number of layers.**
+
+$$\text{KV bytes per token} = 40 \times 4{,}096 = 163{,}840 \text{ bytes} \approx 160 \text{ KB}$$
+
+**Step 4 — Sanity-check with a real model.**
+
+LLaMA-3 8B has 32 layers, 8 KV heads, head_dim=128, BF16:
+$$= 32 \times 2 \times 8 \times 128 \times 2 = 131{,}072 \text{ bytes} = 128 \text{ KB per token}$$
+
+At 4,096-token context this is 128 KB × 4,096 = 512 MB per sequence. Serving 100 concurrent users at this context length would require 50 GB just for KV cache — which is why memory management is the central challenge of LLM serving.
+
+---
+
+### Solution 4 — HBM budget for KV cache (A100 80 GB)
+
+**What we need:** Remaining HBM for KV cache given the three-way split.
+
+**Step 1 — Apply the `gpu_memory_utilization` cap.**
+
+vLLM reserves a fraction of total HBM to prevent OOM errors from unexpected allocations:
+
+$$\text{Usable HBM} = 80 \text{ GB} \times 0.85 = 68 \text{ GB}$$
+
+**Step 2 — Subtract model weights.**
+
+$$68 - 26 = 42 \text{ GB remaining}$$
+
+**Step 3 — Subtract peak activation buffers.**
+
+Activations (intermediate tensors during forward pass) peak at around 1–3 GB depending on batch size and model architecture:
+
+$$42 - 2 = 40 \text{ GB remaining for KV cache pool}$$
+
+**Step 4 — Interpret.**
+
+40 GB of KV cache pool with 160 KB per token (from Solution 3):
+
+$$\text{Max tokens} = \frac{40 \times 1{,}024^3}{163{,}840} \approx \frac{42{,}949{,}672{,}960}{163{,}840} \approx 262{,}144 \text{ tokens}$$
+
+At 4,096 max context per user: 262,144 ÷ 4,096 ≈ **64 concurrent users**. This is the theoretical maximum, assuming full 4K context utilization. Real workloads with shorter average context would serve more users.
+
+**Step 5 — Why the buffer matters.**
+
+The 15% buffer (0.85 utilization) is crucial. Without it, a sudden batch of longer-than-expected sequences would trigger OOM, killing the server process. vLLM measures the peak activation footprint at startup and adjusts the KV pool accordingly.
+
+---
+
+### Solution 5 — Why mmap starts faster and what it trades away
+
+**What we need:** Two-part answer — mechanism of speed, and the trade-off.
+
+**Step 1 — What mmap does.**
+
+`mmap()` is a POSIX syscall that instructs the OS to:
+1. Create a mapping from a range of virtual memory addresses → a file on disk
+2. Update the process's page table
+3. Return immediately — *no bytes are read from disk*
+
+The key is that the OS is making a **promise**: "when you access address X, I will load the corresponding bytes from disk." But it doesn't make good on that promise until you actually access the address.
+
+**Step 2 — Why this is fast at startup.**
+
+For a 70B model (140 GB file), eager loading must:
+- Read 140 GB from NVMe → 140 GB ÷ 7 GB/s ≈ 20 s
+- Transfer to HBM → 140 GB ÷ (PCIe 4.0 × 64: ~64 GB/s) ≈ 2 s
+- Total: ~22 seconds minimum
+
+With mmap:
+- Syscall + page table update: **< 1 millisecond**
+
+**Step 3 — The trade-off: page faults.**
+
+When the first inference request arrives and the forward pass accesses a weight page not yet in RAM, the CPU raises a **hardware page fault**:
+1. Execution halts for that core
+2. OS issues a read from NVMe for the missing page (4 KB)
+3. OS updates the page table and resumes execution
+
+Each page fault adds 0.1–50 ms of latency depending on storage speed. A cold model inference can trigger hundreds of page faults, causing the first few requests to be very slow.
+
+**Step 4 — The warm state.**
+
+After all pages have been accessed at least once (the model is "warm"), pages are cached in DRAM and mmap performs similarly to eager loading. The page fault cost is a one-time initialization cost paid by the first users.
+
+**Trade-off summary:**
+
+| | Eager (vLLM) | mmap (llama.cpp) |
+|---|---|---|
+| Server startup | Slow (20–60 s) | Fast (< 1 s) |
+| First request (cold) | Fast | Slow (page faults) |
+| First request (warm) | Fast | Fast |
+| Memory usage | All weights in RAM immediately | On-demand |
+| Best for | High-throughput servers | Laptops, dev, edge |
+

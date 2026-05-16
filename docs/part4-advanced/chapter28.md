@@ -2233,3 +2233,131 @@ projection layers into the language model's token space.*
 4. `--tensor-split 3,1` on a 2-GPU node allocates 75% of layers to GPU 0 and 25% to GPU 1. If GPU 0 has 24 GB and GPU 1 has 8 GB, is this split optimal for a 32 GB model? Show your working. *(Section 28.3)*
 
 5. llama.cpp's `/v1/embeddings` endpoint returns the mean-pooled hidden state at the last layer. For a RAG retrieval task, what are the trade-offs of using the same model for both generation and embedding versus a dedicated embedding model? *(Section 28.6)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**`llama-server --parallel 8 --ctx-size 4096` on 64 GB RAM, Q4_K_M LLaMA-3 8B (~4.5 GB).**
+
+**Memory breakdown:**
+Each parallel slot holds its own KV cache. KV cache per slot per token for LLaMA-3 8B (32 layers, 8 KV heads, d_k=128, BF16):
+```
+KV_per_token = 2 x 32 x 8 x 128 x 2 = 131,072 bytes = 128 KB
+KV_per_slot = 4096 tokens x 128 KB = 512 MB
+Total KV for 8 slots = 8 x 512 MB = 4,096 MB = 4 GB
+```
+
+**Total memory:**
+```
+Model weights (Q4_K_M): 4.5 GB
+KV cache (8 slots):     4.0 GB
+Runtime overhead:       ~0.5 GB (GGML tensors, buffers)
+Total:                  ~9.0 GB
+```
+
+9.0 GB << 64 GB RAM -- **fits comfortably**. The machine has 55 GB of headroom remaining for the OS and other processes.
+
+**Note on Q4_K_M:** The 4.5 GB figure already accounts for the quantization -- the original FP16 model would be 16 GB. Q4_K_M achieves ~3.5x compression while maintaining quality close to FP16 on most benchmarks.
+
+---
+
+### Question 2
+**GBNF grammar for JSON at state "age":`  -- valid next tokens:**
+
+After generating `"age":`, the JSON grammar expects one of:
+```
+- A number literal: digits [0-9], optionally preceded by - (negative)
+- null
+- whitespace followed by any of the above
+```
+
+So the valid next tokens are those whose text begins with:
+- `0`, `1`, `2`, ... `9` (digits)
+- `-` (negative number)
+- `null` (literal)
+- ` ` (whitespace, followed by number/null)
+
+**How the mask is applied:**
+1. The model produces a logit vector of shape (vocab_size,) -- one logit per token.
+2. The GBNF FSM (in its current state after `"age":`) has a set of valid next bytes.
+3. llama.cpp maps each vocabulary token to its byte sequence and checks if that byte sequence is consistent with the current FSM state.
+4. Tokens inconsistent with the grammar get their logits set to -infinity before sampling.
+5. Softmax is applied to the masked logits, normalizing only over valid tokens.
+
+For a typical 32K vocabulary, roughly 100-500 tokens start with digits or null -- the mask sets ~31,500+ tokens to -infinity.
+
+---
+
+### Question 3
+**Apple M3 Max 128 GB unified memory can run LLaMA-3 70B Q4_K_M (~40 GB). Why not on discrete 40 GB VRAM?**
+
+**Discrete GPU (40 GB VRAM):**
+GPU VRAM is a **fixed, isolated** memory pool. If the model requires 40 GB and the GPU has exactly 40 GB, there is zero space for:
+- The KV cache (even 1 token of context needs space)
+- CUDA context (~1 GB)
+- Activation tensors during forward pass (~2-4 GB)
+- Operating system reserved GPU memory (~0.5 GB)
+Total required = 40 + 1 + 3 + 0.5 = 44.5 GB > 40 GB available --> OOM at startup.
+
+**Apple Silicon (unified memory):**
+The M3 Max uses a **unified memory architecture** where CPU and GPU share the same 128 GB physical memory pool. There is no separate VRAM limit. The GPU can address any part of the 128 GB:
+- Model weights: 40 GB
+- KV cache: 4 GB (for 32K context)
+- System/OS: 8 GB
+- Remaining: 76 GB headroom
+
+llama.cpp exploits Metal (Apple's GPU API) to run the model on the integrated GPU while the CPU and GPU share the same memory pool, eliminating data transfer bottlenecks between CPU and GPU memory.
+
+---
+
+### Question 4
+**`--tensor-split 3,1` on 2-GPU node. GPU 0: 24 GB, GPU 1: 8 GB. Model: 32 GB. Is split optimal?**
+
+**What `--tensor-split 3,1` means:**
+75% of layers on GPU 0, 25% on GPU 1.
+```
+GPU 0 load = 0.75 x 32 GB = 24 GB
+GPU 1 load = 0.25 x 32 GB = 8 GB
+```
+
+**Is it optimal?**
+GPU 0 has 24 GB and is assigned exactly 24 GB of model weights -- **zero headroom** for:
+- KV cache (critical for inference)
+- Activation tensors during forward pass (~2-4 GB peak)
+- CUDA/Metal context
+
+GPU 0 will OOM at the first inference step with any non-trivial context length.
+
+**Optimal split:**
+Leave headroom on each GPU for KV cache and activations. Rule of thumb: use 85% of VRAM for model weights.
+```
+GPU 0 capacity for weights: 24 x 0.85 = 20.4 GB -> fraction = 20.4 / (20.4 + 6.8) = 75%
+GPU 1 capacity for weights:  8 x 0.85 =  6.8 GB -> fraction = 6.8 / 27.2 = 25%
+```
+Interestingly, the 3:1 split is proportionally correct for the GPU memory sizes. The problem is not the ratio but the **zero headroom** when the model exactly fills both GPUs.
+
+**Fix:** Use a slightly smaller model (Q3_K_M at ~27 GB) or the adjusted split `--tensor-split 2.7,0.9` (27 GB total, leaving 3.3 GB headroom on GPU 0 and 1.1 GB on GPU 1 for KV cache).
+
+---
+
+### Question 5
+**llama.cpp `/v1/embeddings` returns mean-pooled last-layer hidden state. RAG trade-offs vs dedicated embedding model:**
+
+**Using same model for generation and embedding:**
+
+Pros:
+- Single model in memory (no additional 500 MB-4 GB for a dedicated embedder)
+- Consistent tokenization (same vocabulary for both retrieval and generation)
+- Simple deployment (one binary, one process)
+
+Cons:
+- Decoder-only LLMs are not optimized for embedding. Their last-layer representations encode "what token comes next" -- a causal prediction objective -- not "how semantically similar are these passages" -- a contrastive objective. Embedding quality for retrieval is significantly worse than dedicated bi-encoder models (BGE, E5, Nomic-embed).
+- Mean pooling of causal LLM states gives asymmetric embeddings: the last token has attended to all prior tokens, while the first token has attended only to itself. This asymmetry makes cosine similarity unreliable.
+- Embedding via a 70B LLM is 100-1000x slower than a dedicated 137M-560M parameter embedding model.
+
+**When to use the dedicated model:**
+Virtually always for production RAG. A dedicated embedding model (BGE-M3, E5-mistral-7b) outperforms LLM mean-pooling on MTEB benchmarks by 5-15 nDCG@10 points. The speed difference (1,000 embeddings/s on a GPU for BGE-base vs ~10 embeddings/s for LLaMA-3 70B) makes dedicated models the correct choice for any non-trivial retrieval workload.
+

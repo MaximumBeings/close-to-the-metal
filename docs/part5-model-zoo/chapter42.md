@@ -419,7 +419,7 @@ for a globally distributed app.
 
 For a performance-critical deployment (< 12s hard budget): Llama 3.2 3B Q4_K_M
 at ~20 seconds generation. Tight but achievable with speculative decoding
-(Appendix M covers llama.cpp on Apple Silicon).
+(Appendix Q covers llama.cpp on Apple Silicon).
 
 ---
 
@@ -839,3 +839,124 @@ support, Llama 3.
    inference engineering perspective, what are the practical implications for
    a business currently running Llama 3.1 70B? List three specific changes
    (configuration, hardware, cost) they would need to make to switch.
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**Phi-4: 40 layers, 10 KV heads, d_head=128. Gemma 3 27B: 62 layers (read from question context).**
+
+From the chapter's question text: "Phi-4 has 40 layers and 10 KV heads (d_head=128). Gemma 3 27B has 62 layers..."
+
+**KV cache per token for Phi-4 (14B):**
+```
+KV_per_token = 2 x 40 x 10 x 128 x 2 = 204,800 bytes = 200 KB/token
+```
+
+**KV cache per token for Gemma 3 27B (estimated 16 KV heads, d_k=128, 62 layers):**
+```
+KV_per_token = 2 x 62 x 16 x 128 x 2 = 507,904 bytes = 496 KB/token
+```
+
+**Comparison at 32K context:**
+```
+Phi-4:      32,000 x 200 KB = 6.4 GB
+Gemma 3 27B: 32,000 x 496 KB = 15.9 GB
+```
+
+Phi-4 uses 2.5x less KV cache than Gemma 3 27B at 32K context, despite having similar parameter counts. This makes Phi-4 preferable for long-context deployments on memory-constrained hardware.
+
+---
+
+### Question 2
+**Gemma 3 local attention (window=1024) in 4 of 5 layers. Relevant passage at position 45K in 50K context.**
+
+**Attention coverage analysis:**
+- Local attention layers (4 of 5): only attend to the last 1,024 tokens.
+- Global attention layer (1 of 5): attends to ALL 50K tokens.
+
+**Can the global layer find position 45K?**
+The query at position 49,999 (near the end) can attend to position 45,000 in the **global attention layer** (distance = 4,999 << 50,000). **Yes** -- the global attention layer covers the full context.
+
+**Performance caveat:** Global attention at 50K tokens requires computing 50,000 attention weights, which is 50,000/1,024 = 48.8x more compute than local attention. But this only happens in 1 of 5 layers, so total attention FLOPs are: 4/5 x 1,024 + 1/5 x 50,000 = 819.2 + 10,000 = 10,819 effective attention span per token (vs 50,000 for full attention). Overall FLOPs reduction: 10,819/50,000 = 21.6% of full attention cost -- an 80% FLOPs savings while maintaining global retrieval capability.
+
+---
+
+### Question 3
+**Tied embeddings in Gemma 3: embedding matrix and lm_head share weights.**
+
+**Memory saving:**
+Without tying: embedding matrix (vocab_size x d_model) + lm_head (d_model x vocab_size) = 2 matrices.
+With tying: one matrix serves both roles = 1 matrix.
+
+For Gemma 3 27B (d_model=4,608, vocab_size=256,000):
+```
+single_matrix = 256,000 x 4,608 = 1.18B parameters
+memory = 1.18B x 2 bytes (BF16) = 2.36 GB
+without_tying = 2 x 2.36 = 4.72 GB
+saving = 2.36 GB per deployment
+```
+
+**Why this is non-trivial for inference:** The lm_head is read from HBM at every decode step (to compute logits over 256K vocab). A 2.36 GB matrix is loaded every step; at A100 bandwidth (2 TB/s): 2.36/2000 = 1.18 ms overhead per token just for lm_head. Tied embeddings eliminate the duplicate storage while providing identical inference latency -- the matrix is loaded once regardless.
+
+**Training note:** Tied embeddings constrain the gradient updates -- the same delta applies to both the input representation and output scoring roles. This can limit model expressiveness for very large vocabularies but is standard practice for efficiency.
+
+---
+
+### Question 4
+**Gemma 3 12B, max_model_len=65536, A100 80 GB. Memory and concurrency.**
+
+**Model weights (12B BF16):**
+```
+weights = 12B x 2 = 24 GB
+```
+
+**KV cache per token (Gemma 3 12B: estimated 8 KV heads, d_k=256, 28 layers):**
+```
+KV_per_token = 2 x 28 x 8 x 256 x 2 = 229,376 bytes = 224 KB/token
+```
+
+**Available HBM for KV:**
+```
+available = 80 x 0.90 - 24 = 72 - 24 = 48 GB (with gpu_memory_utilization=0.90)
+```
+
+**Maximum KV per sequence at 65,536 tokens:**
+```
+KV_per_seq = 65,536 x 224 KB = 14.68 GB
+```
+
+**Maximum concurrent sequences:**
+```
+max_seqs = floor(48 / 14.68) = 3 sequences
+```
+
+At 64K context, only 3 concurrent requests can run simultaneously on a single A100 80 GB. To increase concurrency: (a) use INT8 KV cache quantization (halves KV to 7.34 GB/seq, enabling 6 concurrent requests), or (b) use multiple A100s with pipeline parallelism.
+
+---
+
+### Question 5
+**Phi-4 outperforms Llama 3.1 70B at 14B parameters. Inference cost implications:**
+
+**If Phi-4 14B matches or exceeds Llama 3.1 70B quality:**
+
+**Cost comparison (BF16, A100):**
+- Phi-4 14B: 28 GB weights. Fits on 1x A100 with KV budget. Decode: 28/2000 = 14 ms/token.
+- Llama 3.1 70B: 140 GB weights. Requires 2x A100. Decode: 70 ms/token per GPU step.
+
+**Throughput advantage:**
+Phi-4 generates tokens 5x faster at batch=1. At the same hardware cost (1 A100 vs 2 A100), Phi-4 achieves ~10x better cost efficiency if quality is equivalent.
+
+**Serving cost reduction:**
+A deployment currently using 8x A100 to run Llama 3.1 70B at scale could switch to 2x A100 running Phi-4 14B for the same quality output, reducing GPU costs by 75%.
+
+**Where the advantage holds and where it doesn't:**
+Phi-4's performance advantage (if confirmed) likely holds on reasoning benchmarks and structured tasks (the focus of its synthetic training data). It may underperform Llama 3.1 70B on:
+- Open-domain knowledge breadth (70B sees more diverse training data)
+- Languages other than English (Phi-4 training is English-focused)
+- Very long contexts where Llama's rope scaling has been extensively tested
+
+**Production recommendation:** A/B test Phi-4 vs Llama 70B on your specific task distribution before migrating. If the benchmark advantage (higher MMLU, coding scores) translates to your production traffic, the 75% cost reduction makes migration highly compelling.
+

@@ -967,3 +967,174 @@ practical mechanics of launching a multi-GPU deployment.
 4. You enable `--enable-prefix-caching` and `--speculative-model ngram`. Name the two configuration interactions that could cause this combination to break or underperform. *(Sections 14.7, 14.8)*
 
 5. llama.cpp's `-ngl 35` parameter offloads 35 transformer layers to the GPU. For a 32-layer model, what does this value mean in practice? What happens with `-ngl 0`? *(Section 14.9)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**Setup:** LLaMA 3 70B BF16, TP=4, 4× A100-80GB, `gpu_memory_utilization=0.90`, peak activations=3 GB/GPU, `max_model_len=8192`. KV bytes per token = 327 KB.
+
+**Step 1 — HBM budget per GPU.**
+Each A100 has 80 GB total. With `gpu_memory_utilization=0.90`, the engine claims:
+```
+HBM per GPU = 80 × 0.90 = 72 GB
+```
+
+**Step 2 — Subtract model weights.**
+70B parameters × 2 bytes (BF16) = 140 GB total. Across TP=4:
+```
+weights per GPU = 140 / 4 = 35 GB
+```
+
+**Step 3 — Subtract peak activations.**
+```
+remaining = 72 − 35 − 3 = 34 GB per GPU
+```
+
+**Step 4 — KV cache pool.**
+With TP=4 the KV heads are also sharded. Given 327 KB/token total, per-GPU KV cost per token:
+```
+KV per token per GPU = 327 KB / 4 ≈ 81.75 KB  (roughly; assumes GQA heads are evenly split)
+```
+But the 34 GB is the total KV pool available per GPU. Total KV pool across 4 GPUs:
+```
+total KV pool = 34 × 4 = 136 GB
+```
+
+**Step 5 — Max sequences.**
+Total KV bytes needed for one sequence at `max_model_len=8192`:
+```
+KV per sequence = 327 KB × 8192 ≈ 2.68 GB
+```
+Maximum safe concurrent sequences:
+```
+max_num_seqs = floor(136 / 2.68) ≈ 50 sequences
+```
+
+**Common mistake:** forgetting to subtract activation headroom leads to OOM during prefill spikes when activations peak above the assumed 3 GB/GPU.
+
+---
+
+### Question 2
+**Setup:** `max_num_seqs=128`, `max_num_batched_tokens=256`. 128 decode sequences at step T.
+
+**Part A — Decode-only step:**
+Each of the 128 sequences contributes exactly 1 new token → 128 tokens total.
+```
+128 ≤ 256   →   the batch fits ✓
+```
+
+**Part B — Mixed step with 4 prefill sequences (400 tokens each):**
+Decode tokens: 124 × 1 = 124
+Prefill tokens: 4 × 400 = 1,600
+Total: 124 + 1,600 = **1,724 tokens**
+```
+1,724 > 256   →   the batch does NOT fit ✗
+```
+
+**Resolution:** The scheduler respects `max_num_batched_tokens`. It will either:
+1. Chunk the prefill requests into 256-token chunks (if `--enable-chunked-prefill`), or
+2. Defer the prefill requests to a future step, admitting only decode traffic now.
+
+Takeaway: `max_num_batched_tokens` is the primary lever for bounding TTFT under mixed workloads. Set it to at least the p95 prompt length to avoid prefill starvation.
+
+---
+
+### Question 3
+**Setup:** `gpu_memory_utilization=0.95`, A100 80 GB, model weights = 16 GB.
+
+**Step 1 — HBM claimed:**
+```
+HBM = 80 × 0.95 = 76 GB
+```
+
+**Step 2 — Available for KV blocks:**
+```
+KV pool = 76 − 16 = 60 GB = 60 × 1024 MiB = 61,440 MiB
+```
+
+**Step 3 — Risk of 0.05 headroom.**
+The 4 GB headroom must absorb:
+- Peak activation tensors during prefill (can spike 2–6 GB for large batches)
+- CUDA context memory (~1 GB)
+- Fragmentation in the allocator
+
+If a large prefill batch hits the GPU while the activation spike is 5 GB, the 4 GB headroom is **insufficient** → CUDA OOM. The server crashes mid-request.
+
+**Recommendation:** Use `gpu_memory_utilization=0.90` (8 GB headroom) as the default. Only push to 0.95 if you have measured activation peaks and confirmed they stay under 4 GB.
+
+---
+
+### Question 4
+**Setup:** `max_model_len=4096`, user requests generation up to 8,192 tokens.
+
+**What happens:**
+At request admission time, the scheduler checks:
+```python
+if prompt_len + max_new_tokens > max_model_len:
+    raise ValueError(...)
+```
+The check is performed in `vllm/engine/llm_engine.py` inside `_validate_inputs()` before the request enters the scheduler queue.
+
+The error returned to the API caller is:
+```
+400 Bad Request
+{"error": {"message": "This model's maximum context length is 4096 tokens. However, you requested 8192 tokens (512 in the messages, 7680 in the completion). Please reduce the length of the messages or completion."}}
+```
+
+There is **no silent truncation** in vLLM's default configuration — the request is rejected. In contrast, some frameworks truncate the prompt silently, which can cause unexpected behavior for users who don't monitor the `finish_reason`.
+
+**Fix options:** (a) raise `max_model_len`, (b) reduce `max_tokens` in the request, (c) implement client-side truncation before sending.
+
+---
+
+### Question 5
+**Config:** `--enable-prefix-caching` + `--speculative-model ngram`.
+
+**Interaction 1 — Speculative decoding invalidates prefix cache blocks.**
+Speculative decoding proposes draft tokens that may be rejected. When a draft is rejected and the sequence backtracks, the KV blocks that were provisionally allocated for draft tokens must be discarded. This makes the block addresses unstable, breaking the assumption prefix caching relies on (stable, hash-consistent blocks). Result: cache hit rate drops dramatically on speculative decode steps.
+
+**Interaction 2 — N-gram draft model uses a sliding context window, not a prefix.**
+The n-gram model predicts the next token by looking at the last N tokens. Its speculation window moves as tokens are generated. But prefix caching is beneficial only when the *beginning* of a sequence matches a cached prefix. After the shared system prompt, the n-gram model's window has no relationship to cached prefixes, so any cache benefit is confined to the system-prompt portion. For short system prompts or diverse user messages, combined gain is negligible.
+
+**Combined result:** The two features interfere. Disable speculative decoding for workloads where prefix cache hit rate is the primary optimization goal. Use n-gram speculation only for batch=1 latency-critical workloads where prefix sharing is not a priority.
+
+---
+
+### Question 6 (End-of-chapter set)
+**Part A — 128 seqs × 1 decode token = 128 tokens ≤ 2048. Fits.✓**
+
+**Part B — 4 prefill (400 tokens each) + 124 decode (1 token each):**
+4 × 400 + 124 = 1,724 tokens > 2,048? No: 1,724 < 2,048. **Fits.✓**
+*(Common trap: assuming prefill + decode combined exceeds the limit when it doesn't.)*
+
+---
+
+### Question 7
+**Step 1:** `gpu_memory_utilization=0.95` → 80 × 0.95 = 76 GiB claimed.
+**Step 2:** KV pool = 76 − 16 = 60 GiB.
+**Risk:** 4 GiB headroom must cover peak activation tensors. For large prefill batches (e.g., 128 sequences × 512 tokens), activation peaks can exceed 4 GiB → OOM crash. Keep headroom ≥ 8 GiB (use 0.90) unless activations are measured to be small.
+
+---
+
+### Question 8
+**What happens with `max_model_len=4096` and 8,192-token request:**
+vLLM validates at admission in `_validate_inputs()`. It raises a 400-class error immediately — no truncation, no generation. The check compares `prompt_tokens + requested_max_new_tokens > max_model_len`.
+
+---
+
+### Question 9
+**Two interactions that break `--enable-prefix-caching` + `--speculative-model ngram`:**
+1. Draft token rejection causes block revocation, destroying prefix-cache consistency.
+2. N-gram speculation is incompatible with chunked-prefill scheduling that prefix caching relies on — the draft model needs the *last* N tokens, not a prefix, so its window conflicts with the prefix-cache block alignment.
+
+---
+
+### Question 10
+**`-ngl 35` for a 32-layer model:**
+llama.cpp treats any `-ngl` value ≥ the model's total layer count as "offload all layers." For a 32-layer model, `-ngl 35` is effectively `-ngl 32` — all transformer layers go to the GPU. The embedding and output layers may stay on CPU depending on the build.
+
+**`-ngl 0`:** Zero layers offloaded. All compute runs on CPU. GPU is unused entirely. Inference is CPU-only and typically 5–20× slower than GPU inference for large models.
+

@@ -1,1239 +1,367 @@
-# Appendix W — PyTorch for LLM Inference: From Tensors to Production
+# Appendix W: Glossary
 
-> *"PyTorch is not just a training framework. Every vLLM, SGLang, and llama.cpp
-> Python backend ultimately speaks PyTorch at its lowest layer."*
-
----
-
-## W.1 PyTorch's Role in the Inference Stack
-
-PyTorch is the dominant deep learning framework for LLM inference — not because
-it was designed for inference, but because it was designed for flexibility. The
-same properties that make PyTorch excellent for research (eager execution,
-dynamic shapes, Python-native extensibility) also make it possible to build the
-complex, adaptive inference engines this book describes.
-
-In a typical LLM serving stack, PyTorch appears at multiple layers:
-
-```
-┌─────────────────────────────────────────────────────┐
-│  Serving layer    (vLLM, SGLang, TGI, LiteLLM)      │
-├─────────────────────────────────────────────────────┤
-│  Scheduler        (Python: batch management)         │
-├─────────────────────────────────────────────────────┤
-│  PyTorch          (eager/compiled model forward)     │
-├─────────────────────────────────────────────────────┤
-│  ATen / CUDA kernels  (C++/CUDA, FlashAttention)    │
-├─────────────────────────────────────────────────────┤
-│  cuBLAS / cuDNN   (vendor libraries)                 │
-└─────────────────────────────────────────────────────┘
-```
-
-Understanding how PyTorch works at each layer gives you the mental model
-needed to diagnose performance bottlenecks, write custom kernels, and
-optimise memory usage.
+Terms are defined in the context of LLM inference engineering. Chapter references indicate where each concept is explained in depth.
 
 ---
 
-## W.2 Tensor Fundamentals for Inference Engineers
+## A
 
-### W.2.1 The dtype landscape
+**Activation Quantization**
+Quantizing not just model weights but the intermediate activation tensors during forward passes. Required for FP8 inference since activations also need to fit in the narrower FP8 range. Contrast with weight-only quantization.
 
-Every tensor has a **dtype** that determines its precision and memory cost.
-For LLM inference the relevant dtypes are:
+**Arithmetic Intensity**
+FLOPs divided by bytes accessed from memory for a given operation. The ratio determines whether an operation is compute-bound (high intensity, bottlenecked by FLOPS) or memory-bandwidth-bound (low intensity, bottlenecked by memory reads/writes). Decode attention has intensity ~1 FLOP/byte; large GEMM has intensity ~100+ FLOP/byte. → Chapter 2, Appendix L
 
-| dtype | Bits | Range | Notes |
-|---|---|---|---|
-| `torch.float32` (FP32) | 32 | ±3.4×10³⁸ | Training default; rarely used for inference |
-| `torch.bfloat16` (BF16) | 16 | ±3.4×10³⁸ | 8-bit exp; preferred for inference on Ampere+ |
-| `torch.float16` (FP16) | 16 | ±6.5×10⁴ | 5-bit exp; overflow risk for long generation |
-| `torch.float8_e4m3fn` (FP8) | 8 | ±448 | H100 native; W8A8 quantization |
-| `torch.float8_e5m2` (FP8) | 8 | ±57,344 | Wider range variant; used for gradients |
-| `torch.int8` (INT8) | 8 | −128…127 | Weight quantization; needs dequantize |
-| `torch.int4` (INT4) | 4 | −8…7 | Via bitsandbytes / torchao packing |
-| `torch.int32` (INT32) | 32 | ±2.1×10⁹ | Token IDs, indices |
-| `torch.bool` | 8 | 0/1 | Attention masks |
+**Attention Head**
+One of $n_{heads}$ parallel attention mechanisms in a multi-head attention layer. Each head learns to attend to different aspects of the input. Heads are computed in parallel and concatenated. → Chapter 5
 
-```python
-import torch
+**Attention Sink**
+The phenomenon (StreamingLLM, 2023) where the first few tokens of a sequence accumulate disproportionately high attention weights regardless of content; these tokens must be kept in the KV cache even during eviction. Exploited by StreamingLLM to enable infinite-length generation by always retaining sink tokens plus a sliding window of recent tokens. → Chapter 11.5
 
-# Dtype inspection
-x = torch.randn(4, 4)
-print(x.dtype)            # torch.float32
-print(x.element_size())   # 4 bytes
+**Automatic Prefix Caching (APC)**
+vLLM's default-on feature that deduplicates KV cache blocks with identical token sequences using a hash-based trie, eliminating redundant prefill computation. APC is enabled by default in vLLM V1; requests sharing a common prefix (e.g., a system prompt) reuse the cached KV blocks without re-running the prefill. → Chapter 11
 
-# Conversion
-x_bf16 = x.to(torch.bfloat16)
-print(x_bf16.dtype)       # torch.bfloat16
-print(x_bf16.element_size())  # 2 bytes
+**Auto-scaling**
+Dynamically adjusting the number of serving replicas based on load. vLLM integrates with KubeRay for autoscaling. Key metric: queue depth or GPU utilization. → Chapter 19
 
-# Memory cost
-def tensor_memory_mb(shape, dtype):
-    t = torch.empty(shape, dtype=dtype)
-    return t.element_size() * t.numel() / 1e6
-
-# KV cache block: (2, n_heads, block_size, head_dim) for K and V
-print(tensor_memory_mb((2, 8, 16, 128), torch.float16))   # 0.032 MB per block
-print(tensor_memory_mb((2, 8, 16, 128), torch.bfloat16))  # 0.032 MB (same size)
-```
-
-### W.2.2 BF16 vs FP16 for inference
-
-BF16 is preferred for LLM inference because its 8-bit exponent matches FP32,
-preventing the overflow and underflow that FP16's 5-bit exponent causes in
-very large or very small activations:
-
-```python
-import torch
-
-large_val = torch.tensor(70_000.0)
-print(large_val.to(torch.float16))   # tensor(inf) — OVERFLOW!
-print(large_val.to(torch.bfloat16))  # tensor(70016.) — OK (slight rounding)
-
-small_val = torch.tensor(1e-7)
-print(small_val.to(torch.float16))   # tensor(9.9999e-08) — OK here
-print(small_val.to(torch.bfloat16))  # tensor(1.0014e-07) — OK
-```
-
-Use FP16 only when hardware lacks BF16 support (V100, older GPUs). On Ampere,
-Ada, and Hopper, always prefer BF16.
-
-### W.2.3 Strides, contiguity, and memory layout
-
-A PyTorch tensor is a view over a 1-D storage buffer. **Strides** describe
-how many elements to skip along each dimension:
-
-```python
-x = torch.randn(4, 8)       # 4 rows, 8 columns — row-major
-print(x.stride())            # (8, 1): next row = +8 elements, next col = +1
-print(x.is_contiguous())     # True — elements are sequential in memory
-
-# Transposing creates a non-contiguous view — no data copy!
-xt = x.t()
-print(xt.shape)              # (8, 4)
-print(xt.stride())           # (1, 8) — column-major (non-contiguous)
-print(xt.is_contiguous())    # False
-
-# Making it contiguous (copies data into new layout)
-xt_c = xt.contiguous()
-print(xt_c.is_contiguous())  # True
-print(xt_c.data_ptr() != xt.data_ptr())  # True — new allocation
-```
-
-**Why this matters for inference**: many CUDA kernels require contiguous
-tensors. Passing a non-contiguous tensor to a GEMM kernel (e.g., inside
-FlashAttention) triggers an implicit `.contiguous()` copy that wastes memory
-and time. Always ensure KV cache tensors are stored in the correct layout.
-
-### W.2.4 Views vs copies — the golden rule
-
-```python
-# Views: same storage, no copy
-a = torch.randn(16)
-b = a.view(4, 4)       # reshape — view if contiguous
-c = a[::2]             # stride-2 slice — view
-d = a.unsqueeze(0)     # add dim — view
-
-# Copies: new storage
-e = a.clone()           # explicit copy
-f = a.contiguous()      # copy only if non-contiguous (else returns self)
-g = torch.cat([a, a])  # always new allocation
-
-# Check if two tensors share storage
-print(a.storage().data_ptr() == b.storage().data_ptr())  # True (view)
-print(a.storage().data_ptr() == e.storage().data_ptr())  # False (copy)
-```
-
-Minimising copies in the decode loop is critical. vLLM's paged attention
-avoids copies by using views into pre-allocated KV cache blocks.
+**AWQ (Activation-aware Weight Quantization)**
+A post-training INT4 quantization method that uses per-channel scale factors chosen to minimize quantization error for the most important (highest-activation) weight channels. Typically higher quality than GPTQ at the same bit width. → Chapter 10
 
 ---
 
-## W.3 Device Management
+## B
 
-### W.3.1 CUDA device selection and properties
+**Batch Size**
+Number of sequences processed simultaneously. Larger batches improve GPU utilization (more FLOPs per memory access) but increase KV cache memory usage. vLLM uses continuous batching where "batch size" varies per step. → Chapter 3
 
-```python
-import torch
+**BF16 (Brain Float 16)**
+A 16-bit floating point format with 8 exponent bits and 7 mantissa bits. Preferred over FP16 for training and inference because its larger dynamic range (same as FP32) avoids overflow. H100/A100 natively support BF16 Tensor Cores. → Chapter 2
 
-# Device enumeration
-n_gpus = torch.cuda.device_count()
-for i in range(n_gpus):
-    props = torch.cuda.get_device_properties(i)
-    print(f"GPU {i}: {props.name}, "
-          f"{props.total_memory // 1024**3} GB, "
-          f"SM {props.major}.{props.minor}, "
-          f"{props.multi_processor_count} SMs")
+**Block Manager**
+vLLM component that manages allocation and deallocation of KV cache blocks. Implements the virtual-to-physical block table mapping analogous to virtual memory paging. → Chapter 6
 
-# Set the active device
-torch.cuda.set_device(0)    # or: device = torch.device("cuda:0")
+**Block Size**
+In PagedAttention, the number of tokens stored per KV cache block (vLLM default: 16). Smaller blocks reduce internal fragmentation but increase block table size. → Chapter 6
 
-# Move tensors between devices
-x = torch.randn(1024, 1024)         # CPU
-x_gpu = x.to("cuda:0")              # GPU 0
-x_gpu1 = x_gpu.to("cuda:1")        # GPU 1 — cross-device copy via PCIe/NVLink
-
-# Create directly on device
-w = torch.empty(4096, 4096, dtype=torch.bfloat16, device="cuda:0")
-torch.nn.init.normal_(w, mean=0.0, std=0.02)
-```
-
-### W.3.2 CUDA streams
-
-CUDA operations within a stream execute in order. Operations in different
-streams can execute concurrently if hardware resources allow.
-
-```python
-# Default stream (stream 0): all operations serialised
-x = torch.randn(1024, 1024, device="cuda")
-y = x.mm(x.t())   # blocking
-
-# Custom streams: overlap memory transfers with compute
-s1 = torch.cuda.Stream()
-s2 = torch.cuda.Stream()
-
-with torch.cuda.stream(s1):
-    a = torch.randn(1024, 1024, device="cuda")  # compute in stream 1
-
-with torch.cuda.stream(s2):
-    b = torch.randn(1024, 1024, device="cuda")  # concurrent in stream 2
-
-# Synchronise before combining results
-torch.cuda.synchronize()
-c = a + b
-
-# Prefetch next batch while processing current (vLLM pattern)
-prefetch_stream = torch.cuda.Stream()
-compute_stream  = torch.cuda.current_stream()
-
-with torch.cuda.stream(prefetch_stream):
-    next_tokens = next_batch.to("cuda", non_blocking=True)  # async H2D
-
-with torch.cuda.stream(compute_stream):
-    output = model(current_tokens)  # compute on current batch
-
-# Wait for prefetch before next step
-compute_stream.wait_stream(prefetch_stream)
-```
-
-### W.3.3 Pinned (page-locked) memory for fast host→device transfers
-
-```python
-# Regular host tensor: pageable — slow H2D copy
-cpu_tensor = torch.randn(1024, 1024)
-
-# Pinned host tensor: page-locked — 2–3× faster H2D copy
-pinned_tensor = torch.randn(1024, 1024).pin_memory()
-
-# Async (non-blocking) transfer to GPU
-gpu_tensor = pinned_tensor.to("cuda", non_blocking=True)
-# Returns immediately; use CUDA events to check completion
-
-# Check if pinned
-print(pinned_tensor.is_pinned())  # True
-```
-
-In production, the tokenised input (token ID tensors) should be transferred
-as pinned memory to avoid blocking the decode loop during H2D copies.
-
-### W.3.4 Multi-GPU with device guards
-
-```python
-# DeviceGuard: temporarily switch active device
-for gpu_id in range(4):
-    with torch.cuda.device(gpu_id):
-        shard = compute_shard(gpu_id)   # runs on gpu_id
-
-# Peer access: tensor on GPU 0 can be directly read by GPU 1 over NVLink
-torch.cuda.can_device_access_peer(0, 1)  # True on NVLink systems
-torch.cuda.enable_peer_access(1)         # enable from current device (0) to device 1
-```
+**Bursty Traffic**
+Workload pattern with periods of high request arrival rate followed by low arrival rate. Production systems must handle bursts without queue overflow or timeout.
 
 ---
 
-## W.4 Inference Mode and Memory Efficiency
+## C
 
-### W.4.1 `torch.no_grad()` vs `torch.inference_mode()`
+**Causal Mask**
+A mask applied during attention computation that prevents tokens from attending to future tokens. Ensures autoregressive generation: token $i$ can only attend to tokens $0, 1, ..., i$. Implemented by setting future positions to $-\infty$ before softmax. → Appendix A
 
-Both disable gradient tracking. `inference_mode` is stricter and faster:
+**Chunked Prefill**
+Splitting long prompt processing (prefill) into smaller chunks processed over multiple steps. Benefits: prevents long prefills from blocking decode operations for other sequences; reduces TTFT variance. → Chapter 11
 
-```python
-import torch
+**Continuous Batching**
+Serving strategy where new requests are added to the batch as soon as slots become available, rather than waiting for the entire batch to finish. Eliminates the "padding waste" of static batching. vLLM's default mode. → Chapter 7
 
-x = torch.randn(1024, requires_grad=True)
+**Context Length**
+Maximum number of tokens (input + output) a model can process. Limited by RoPE maximum position, KV cache memory, and Flash Attention implementation. Extended via YaRN or other techniques. → Chapter 27
 
-# no_grad: disables gradient computation but tensors can still be viewed by autograd
-with torch.no_grad():
-    y = x * 2
-    print(y.requires_grad)   # False — but autograd graph not fully disabled
+**Context Parallelism (CP)**
+A parallelism strategy that splits a single long sequence across multiple GPUs along the sequence dimension, using ring attention to communicate KV blocks between devices. Each GPU attends over its local query slice against the full KV sequence, which is passed ring-style between peers. Enables processing sequences longer than any single GPU's HBM. → Chapter 15
 
-# inference_mode: FASTER — prevents any autograd interaction
-# Tensors created inside cannot be used in autograd computations after leaving the block
-with torch.inference_mode():
-    y = x * 2
-    print(y.requires_grad)   # False
-    print(y.is_inference())  # True — stronger guarantee
-
-# For production inference, ALWAYS use inference_mode
-@torch.inference_mode()
-def generate(model, tokens):
-    return model(tokens)
-```
-
-`inference_mode` avoids recording operations in the autograd graph entirely,
-saving ~10–15% memory and 3–5% compute vs `no_grad` for large models.
-
-### W.4.2 Autocast: mixed-precision inference
-
-```python
-import torch
-from torch.amp import autocast
-
-model = MyLLM().cuda().to(torch.float32)  # weights in FP32
-
-# Run forward pass in BF16 — weights and activations cast automatically
-with autocast(device_type="cuda", dtype=torch.bfloat16):
-    logits = model(input_ids)
-
-# The recommended pattern for inference (combines both):
-@torch.inference_mode()
-def forward_bf16(model, input_ids):
-    with autocast(device_type="cuda", dtype=torch.bfloat16):
-        return model(input_ids)
-```
-
-### W.4.3 Memory caching allocator
-
-PyTorch's CUDA memory allocator caches freed GPU memory rather than returning
-it to the OS. This prevents costly `cudaMalloc`/`cudaFree` calls:
-
-```python
-# Current memory state
-print(torch.cuda.memory_allocated() / 1e9, "GB allocated")
-print(torch.cuda.memory_reserved()  / 1e9, "GB reserved (cached)")
-
-# Free memory: clear cache between unrelated workloads
-torch.cuda.empty_cache()   # returns unused cached memory to driver
-
-# Memory snapshot for debugging OOM
-torch.cuda.memory._record_memory_history(max_entries=100_000)
-# ... run workload ...
-snapshot = torch.cuda.memory._snapshot()
-torch.cuda.memory._dump_snapshot("memory_snapshot.pkl")
-# Analyse with: python -m torch.cuda._memory_viz trace_plot memory_snapshot.pkl -o plot.html
-
-# Find memory leaks: tensors holding GPU memory unexpectedly
-def report_gpu_tensors(threshold_mb=100):
-    import gc
-    gc.collect()
-    torch.cuda.synchronize()
-    for obj in gc.get_objects():
-        if isinstance(obj, torch.Tensor) and obj.is_cuda:
-            mb = obj.element_size() * obj.nelement() / 1e6
-            if mb >= threshold_mb:
-                print(f"{mb:.1f} MB: {obj.dtype} {list(obj.shape)}")
-```
-
-### W.4.4 Avoiding common memory mistakes
-
-```python
-# MISTAKE 1: accumulating tensors in a list without .detach()
-outputs = []
-for step in range(1000):
-    out = model(tokens)
-    outputs.append(out)           # keeps entire autograd graph alive!
-
-# FIX: detach or use inference_mode
-outputs = []
-with torch.inference_mode():
-    for step in range(1000):
-        out = model(tokens)
-        outputs.append(out.cpu())  # move to CPU immediately if not needed on GPU
-
-# MISTAKE 2: .item() inside a loop — forces GPU sync every step
-losses = [loss.item() for loss in loss_list]  # 1000 CPU-GPU syncs
-
-# FIX: batch the item() call
-gpu_losses = torch.stack(loss_list)
-cpu_losses = gpu_losses.cpu().tolist()         # single sync
-
-# MISTAKE 3: not deleting intermediate tensors
-def bad_forward(x, W1, W2):
-    h = x @ W1   # 1 GB
-    o = h @ W2   # 1 GB  — both alive at peak!
-    return o
-
-def good_forward(x, W1, W2):
-    h = x @ W1
-    o = h @ W2
-    del h        # release h immediately
-    return o
-```
+**Copy-on-Write (CoW)**
+KV cache optimization where multiple sequences sharing a common prefix point to the same physical KV blocks. When one sequence diverges (decodes a different token), only then is the block copied. Used in beam search and prefix caching. → Chapter 6
 
 ---
 
-## W.5 `torch.compile`: JIT Compilation Layer
+## D
 
-`torch.compile` (introduced in PyTorch 2.0) uses **TorchDynamo** to trace
-Python bytecode and **TorchInductor** to generate optimised CUDA/Triton kernels.
+**Decode Phase**
+The autoregressive generation phase where one token is produced per forward pass. Memory-bandwidth-bound (loads all model weights per step). Also called "generation" phase. Contrast with Prefill Phase. → Chapter 3
 
-### W.5.1 Basic usage
+**Decode Throughput**
+Number of output tokens generated per second across all active sequences. Limited by memory bandwidth (bandwidth / model_bytes_per_token). → Chapter 2
 
-```python
-import torch
+**Disaggregated Serving**
+Architecture separating prefill computation and decode computation onto different hardware pools. Prefill nodes are compute-optimized (large batch prefill); decode nodes are bandwidth-optimized (large decode batch). → Chapter 18
 
-# Compile a model once — applies graph captures and kernel fusion
-model = MyLLM().cuda().bfloat16()
-compiled_model = torch.compile(model, mode="reduce-overhead")
-
-# First call: compilation (~30–120s for large models)
-# Subsequent calls: compiled kernel execution
-output = compiled_model(input_ids)
-```
-
-### W.5.2 Compilation modes
-
-| Mode | Compilation time | Speedup | Use case |
-|---|---|---|---|
-| `"default"` | Moderate | Moderate | General-purpose |
-| `"reduce-overhead"` | Fast | Good | Low-latency inference, variable shapes |
-| `"max-autotune"` | Slow (minutes) | Best | Fixed shapes, throughput-maximised serving |
-| `"max-autotune-no-cudagraphs"` | Slow | Near-best | When CUDA graphs conflict with dynamic ops |
-
-```python
-# For LLM inference with variable batch sizes and sequence lengths:
-compiled = torch.compile(model, mode="reduce-overhead", dynamic=True)
-# dynamic=True: uses symbolic shapes to avoid recompilation per new shape
-
-# For fixed-shape offline batch processing:
-compiled = torch.compile(model, mode="max-autotune", dynamic=False)
-```
-
-### W.5.3 CUDA Graphs integration
-
-CUDA Graphs (Chapter 8.5) capture the entire GPU command stream and replay it
-without CPU overhead. `torch.compile` can integrate with CUDA Graphs:
-
-```python
-# torch.compile with CUDA graphs (mode="reduce-overhead" enables this)
-model = torch.compile(model, mode="reduce-overhead")
-
-# Manual CUDA Graph capture for fixed shapes
-g = torch.cuda.CUDAGraph()
-static_input = torch.randn(1, 512, device="cuda")   # fixed shape
-
-# Warm-up (build the graph)
-for _ in range(3):
-    with torch.cuda.graph(g):
-        static_output = model(static_input)
-
-# Replay without Python overhead
-new_input = static_input   # must be SAME storage (in-place update)
-new_input.copy_(actual_input)
-g.replay()
-result = static_output
-```
-
-### W.5.4 Inspecting compilation
-
-```python
-# View what TorchDynamo captured
-import torch._dynamo
-torch._dynamo.explain(model)(input_ids)   # shows captured graph
-
-# Disable compilation for debugging
-torch._dynamo.disable()   # falls back to eager
-
-# Log compilation events
-import logging
-logging.getLogger("torch._inductor").setLevel(logging.DEBUG)
-
-# Count recompilations (should be ~0 after warm-up)
-torch._dynamo.reset()   # clear compilation cache for fresh measurement
-```
-
-### W.5.5 Common failures and fixes
-
-| Failure | Cause | Fix |
-|---|---|---|
-| `TorchDynamoError: Dynamic shapes` | Shape changes between calls | Use `dynamic=True` |
-| `Recompilation triggered` | Python control flow inside model | Use `torch.cond` or refactor |
-| `Graph break at` | Unsupported Python construct | Refactor to avoid (e.g., no `print` inside model) |
-| `Segfault in compiled kernel` | CUDA version mismatch | Match PyTorch CUDA version to driver |
-| Slow first call | Compilation time | Pre-compile with dummy inputs at startup |
+**Draft Model**
+In speculative decoding, a small fast model used to speculatively generate $\gamma$ candidate tokens which are verified by the larger target model in parallel. Must share the same tokenizer vocabulary as the target. → Chapter 23
 
 ---
 
-## W.6 Quantization APIs in PyTorch
+## E
 
-### W.6.1 torchao: the modern quantization toolkit
+**EAGLE**
+An efficient speculative decoding method (Li et al., 2024) that trains a lightweight autoregressive draft model on the base model's feature space rather than output tokens, achieving higher acceptance rates than Medusa with similar overhead. EAGLE's draft model consumes the target model's hidden states as additional input, making its predictions contextually richer than token-level draft models. → Chapter 23
 
-`torchao` (torch-ao) is the current recommended quantization API:
+**Expert Parallelism (EP)**
+A parallelism strategy for Mixture-of-Experts models that distributes expert FFN blocks across GPUs, using all-to-all communication to route tokens to the appropriate expert device. Each GPU holds a subset of experts; the router dispatches tokens across the cluster, and results are gathered back after expert computation. Requires all-to-all communication when routing tokens to remote experts. → Chapter 15
 
-```python
-# pip install torchao
-from torchao.quantization import (
-    quantize_,
-    Int8WeightOnlyConfig,
-    Int4WeightOnlyConfig,
-    Float8WeightOnlyConfig,
-    Float8DynamicActivationFloat8WeightConfig,
-)
-import torch
-
-model = MyLLM().cuda().bfloat16()
-
-# INT8 weight-only (good for CPU/GPU)
-quantize_(model, Int8WeightOnlyConfig())
-
-# INT4 weight-only (maximum compression)
-quantize_(model, Int4WeightOnlyConfig(group_size=128))
-
-# FP8 W8A8 dynamic (H100 recommended)
-quantize_(model, Float8DynamicActivationFloat8WeightConfig())
-
-# Use the quantized model normally — no API change
-with torch.inference_mode():
-    out = model(input_ids)
-```
-
-### W.6.2 bitsandbytes integration
-
-`bitsandbytes` provides 4-bit (NF4) and 8-bit quantization via a patched
-`Linear` layer:
-
-```python
-from transformers import AutoModelForCausalLM, BitsAndBytesConfig
-
-# 4-bit NF4 with double quantization (QLoRA)
-bnb_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_quant_type="nf4",         # Normal Float 4
-    bnb_4bit_compute_dtype=torch.bfloat16,
-    bnb_4bit_use_double_quant=True,    # quantize the scale factors too
-)
-
-model = AutoModelForCausalLM.from_pretrained(
-    "meta-llama/Llama-3.1-70B-Instruct",
-    quantization_config=bnb_config,
-    device_map="auto",
-)
-
-# Inspect quantized layers
-for name, module in model.named_modules():
-    if "bnb" in type(module).__name__.lower():
-        print(f"Quantized: {name} — {type(module).__name__}")
-```
-
-### W.6.3 Per-layer dtype inspection and manipulation
-
-```python
-def model_dtype_report(model: torch.nn.Module) -> dict:
-    """Show parameter dtype distribution and total memory by dtype."""
-    from collections import defaultdict
-    stats = defaultdict(lambda: {"params": 0, "bytes": 0})
-    for name, param in model.named_parameters():
-        dt = str(param.dtype)
-        stats[dt]["params"] += param.numel()
-        stats[dt]["bytes"]  += param.numel() * param.element_size()
-    for dt, s in stats.items():
-        print(f"{dt:30s}: {s['params']:>12,} params  "
-              f"{s['bytes']/1e9:>7.2f} GB")
-    return dict(stats)
-
-# Example output for a BF16 + INT4 mixed model:
-# torch.bfloat16:  4,194,304 params     0.01 GB  (embeddings kept BF16)
-# torch.int8:   69,000,000,000 params   34.50 GB  (linear weights quantized)
-```
+**Expert Utilization**
+In MoE models, the fraction of tokens routed to each expert. Ideally uniform (balanced); in practice, without load balancing, a small fraction of experts receive most tokens (expert collapse). → Appendix A
 
 ---
 
-## W.7 Distributed Inference with `torch.distributed`
+## F
 
-### W.7.1 Process group initialisation
+**Flash Attention**
+Attention algorithm that fuses the softmax and weighted average into a single GPU kernel, computing attention in tiles to avoid materializing the $O(L^2)$ attention score matrix in HBM. Reduces memory complexity from $O(L^2)$ to $O(L)$. → Chapter 5
 
-```python
-import torch
-import torch.distributed as dist
-import os
+**Flash Decoding**
+A technique (Dao et al., 2023) that parallelizes the attention reduction over the key-value sequence dimension by splitting KV into partitions, computing partial log-sum-exp normalizers independently, and merging results. Particularly effective for single-query decode over long contexts because it exposes more parallelism than standard Flash Attention, which is limited by the query dimension. → Chapter 15.5
 
-def init_distributed():
-    """Initialise the process group for tensor-parallel inference."""
-    dist.init_process_group(
-        backend="nccl",         # NCCL for GPU-to-GPU communication
-        init_method="env://",   # reads MASTER_ADDR, MASTER_PORT, RANK, WORLD_SIZE
-    )
-    rank       = dist.get_rank()
-    world_size = dist.get_world_size()
-    torch.cuda.set_device(rank)
-    return rank, world_size
+**FlashInfer**
+A high-performance attention kernel library that serves as vLLM's default attention backend (2025+), implementing Flash Decoding, paged attention, and CUDA graph-compatible interfaces. FlashInfer provides optimized kernels for both prefill and decode phases, with automatic dispatch based on batch shape and context length. → Chapter 5
 
-# Launch: torchrun --nproc_per_node=4 inference_server.py
-```
+**FLOPs (Floating Point Operations)**
+Count of floating point multiply-add operations. Used to measure model complexity and compare hardware performance. Common in roofline analysis. Note: FLOPs ≠ FLOPS (the latter is per second). → Appendix A
 
-### W.7.2 Tensor parallelism: column and row splits
+**FLOPS (Floating Point Operations Per Second)**
+Hardware throughput metric. H100 SXM: 989 TFLOPS BF16, 1,979 TFLOPS FP8. → Appendix L
 
-Tensor parallelism (Chapter 15) splits weight matrices across GPUs. The
-PyTorch primitives that implement this are `all_reduce` and `all_gather`:
+**FP8**
+8-bit floating point format. Two variants: E4M3 (4 exponent bits, 3 mantissa bits, range ±448) and E5M2 (5 exponent bits, 2 mantissa bits, wider range). H100 Tensor Cores natively execute FP8 GEMMs at 2× the FLOPS of BF16. Requires calibration. → Chapter 10, Chapter 37
 
-```python
-import torch.distributed as dist
-
-class ColumnParallelLinear(torch.nn.Module):
-    """Split output columns across world_size GPUs."""
-    def __init__(self, in_features, out_features, world_size, rank):
-        super().__init__()
-        assert out_features % world_size == 0
-        local_out = out_features // world_size
-        self.weight = torch.nn.Parameter(
-            torch.empty(local_out, in_features, device=f"cuda:{rank}",
-                        dtype=torch.bfloat16)
-        )
-        torch.nn.init.normal_(self.weight, std=0.02)
-
-    def forward(self, x):
-        return torch.nn.functional.linear(x, self.weight)  # local shard output
-
-class RowParallelLinear(torch.nn.Module):
-    """Split input rows across world_size GPUs; all_reduce at the end."""
-    def __init__(self, in_features, out_features, world_size, rank):
-        super().__init__()
-        assert in_features % world_size == 0
-        local_in = in_features // world_size
-        self.weight = torch.nn.Parameter(
-            torch.empty(out_features, local_in, device=f"cuda:{rank}",
-                        dtype=torch.bfloat16)
-        )
-        torch.nn.init.normal_(self.weight, std=0.02)
-
-    def forward(self, x):
-        local_out = torch.nn.functional.linear(x, self.weight)
-        dist.all_reduce(local_out, op=dist.ReduceOp.SUM)  # gather partial sums
-        return local_out
-```
-
-### W.7.3 Communication primitives for inference
-
-```python
-# All-reduce: sum tensor shards from all ranks → all ranks get the sum
-# Used in: RowParallelLinear (output aggregation)
-dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
-
-# All-gather: collect shards from all ranks → each rank gets the full tensor
-# Used in: Sequence parallelism (gathering KV cache)
-gathered = [torch.empty_like(shard) for _ in range(world_size)]
-dist.all_gather(gathered, shard)
-full_tensor = torch.cat(gathered, dim=-1)
-
-# Broadcast: send tensor from rank 0 to all ranks
-# Used in: distributing new input tokens
-dist.broadcast(tensor, src=0)
-
-# Measuring communication overhead
-import time
-dist.barrier()
-t0 = time.perf_counter()
-dist.all_reduce(torch.ones(1024, 1024, device="cuda"))
-torch.cuda.synchronize()
-elapsed_ms = (time.perf_counter() - t0) * 1000
-print(f"All-reduce 4MB: {elapsed_ms:.2f}ms")
-```
+**Fragmentation (KV Cache)**
+Wasted KV cache memory due to misalignment between sequence lengths and block boundaries (internal fragmentation) or blocks reserved for sequences that could be interleaved (external fragmentation). PagedAttention reduces both. → Chapter 6
 
 ---
 
-## W.8 Custom Operations and Extensions
+## G
 
-### W.8.1 Registering a custom operator with `torch.library`
+**GEMM (General Matrix-Matrix Multiplication)**
+Core operation in transformer layers. Weight projection layers are large GEMMs. Throughput is compute-bound at large batch sizes.
 
-```python
-import torch
-from torch import Tensor
+**GEMV (General Matrix-Vector Multiplication)**
+A GEMM where one operand is a vector (batch size = 1). Dominant during single-sequence decode. Memory-bandwidth-bound. → Chapter 9, Appendix L
 
-# Define a custom operator (Python side)
-# The "mylib::flash_attn" namespace separates from built-in ops
-@torch.library.custom_op("mylib::scaled_dot_product", mutates_args=())
-def scaled_dot_product(q: Tensor, k: Tensor, v: Tensor, scale: float) -> Tensor:
-    """Pure-Python reference implementation."""
-    scores = torch.matmul(q, k.transpose(-2, -1)) * scale
-    probs  = torch.softmax(scores, dim=-1)
-    return torch.matmul(probs, v)
+**GGUF (GGML Universal Format)**
+Binary file format used by llama.cpp to store quantized model weights, tokenizer, and metadata in a single file. Supports multiple quantization types (Q4_K_M, Q8_0, etc.). → Chapter 10
 
-# Register a CUDA-optimised implementation
-@scaled_dot_product.register_kernel("cuda")
-def scaled_dot_product_cuda(q, k, v, scale):
-    # In production: call into FlashAttention or a custom CUDA kernel
-    # Here: fallback to torch (would be replaced with actual CUDA impl)
-    return torch.nn.functional.scaled_dot_product_attention(q, k, v, scale=scale)
+**GPTQ**
+Post-training quantization method using second-order gradient information (Hessian) to minimize quantization error layer by layer. Supports INT4 and INT8. → Chapter 10
 
-# Use it like any built-in op
-q = torch.randn(2, 8, 64, 128, device="cuda", dtype=torch.bfloat16)
-k = torch.randn(2, 8, 64, 128, device="cuda", dtype=torch.bfloat16)
-v = torch.randn(2, 8, 64, 128, device="cuda", dtype=torch.bfloat16)
-out = torch.ops.mylib.scaled_dot_product(q, k, v, scale=128**-0.5)
-```
+**GPU Utilization**
+Percentage of time the GPU's compute units are active. Low utilization (< 50%) indicates memory-bandwidth bottleneck or scheduling inefficiency. High utilization (> 80%) indicates compute bottleneck or good batching. → Chapter 16
 
-### W.8.2 Calling CUDA extensions from Python
-
-```python
-# Build a CUDA extension with torch.utils.cpp_extension
-from torch.utils.cpp_extension import load_inline
-
-# Inline CUDA kernel (for rapid prototyping)
-cuda_src = """
-__global__ void rms_norm_kernel(
-    const float* __restrict__ x,
-    const float* __restrict__ weight,
-    float* __restrict__ out,
-    int hidden_size, float eps
-) {
-    int batch = blockIdx.x;
-    const float* row = x + batch * hidden_size;
-    float* out_row   = out + batch * hidden_size;
-
-    // Compute variance
-    float variance = 0.0f;
-    for (int i = threadIdx.x; i < hidden_size; i += blockDim.x) {
-        variance += row[i] * row[i];
-    }
-    // Block reduce (simplified — use warp shuffle for production)
-    __shared__ float shared_var;
-    if (threadIdx.x == 0) shared_var = 0.0f;
-    __syncthreads();
-    atomicAdd(&shared_var, variance);
-    __syncthreads();
-    float scale = rsqrtf(shared_var / hidden_size + eps);
-
-    for (int i = threadIdx.x; i < hidden_size; i += blockDim.x) {
-        out_row[i] = row[i] * scale * weight[i];
-    }
-}
-
-torch::Tensor rms_norm(torch::Tensor x, torch::Tensor weight, float eps) {
-    auto out = torch::empty_like(x);
-    int batch = x.size(0);
-    int hidden = x.size(1);
-    rms_norm_kernel<<<batch, 256>>>(
-        x.data_ptr<float>(), weight.data_ptr<float>(),
-        out.data_ptr<float>(), hidden, eps
-    );
-    return out;
-}
-"""
-
-cpp_src = 'torch::Tensor rms_norm(torch::Tensor x, torch::Tensor weight, float eps);'
-
-rms_norm_ext = load_inline(
-    name="rms_norm",
-    cpp_sources=cpp_src,
-    cuda_sources=cuda_src,
-    functions=["rms_norm"],
-    verbose=False,
-)
-
-x = torch.randn(4, 4096, device="cuda")
-w = torch.ones(4096, device="cuda")
-out = rms_norm_ext.rms_norm(x, w, 1e-5)
-print(out.shape)   # (4, 4096)
-```
+**GQA (Grouped Query Attention)**
+Attention variant where multiple query heads share the same key/value heads. Reduces KV cache memory by a factor of $n_{heads}/n_{kv}$. Used by Llama 3.1, Qwen2.5, Mistral. → Chapter 6, Appendix A
 
 ---
 
-## W.9 Profiling and Debugging
+## H
 
-### W.9.1 `torch.profiler` — the primary tool
+**H2O (Heavy Hitter Oracle)**
+A KV cache eviction policy that retains tokens with the highest cumulative attention scores ("heavy hitters") plus a fixed set of recent tokens, evicting all others when the cache is full. Heavy hitters are identified by accumulating attention weight statistics during generation; tokens that have been attended to most across all past steps are deemed most important. → Chapter 11.5
 
-```python
-import torch
-from torch.profiler import profile, record_function, ProfilerActivity
+**H100**
+NVIDIA Hopper architecture GPU with 80GB HBM3 memory, 3.35 TB/s bandwidth, 989 TFLOPS BF16, 1,979 TFLOPS FP8. The primary GPU for LLM serving as of 2024-2025. → Chapter 2
 
-model = MyLLM().cuda().bfloat16()
-tokens = torch.randint(0, 50000, (1, 512), device="cuda")
+**HBM (High Bandwidth Memory)**
+Memory technology used in data center GPUs. Stacked DRAM dies with very wide memory bus. H100 HBM3: 3.35 TB/s. H200 HBM3e: 4.8 TB/s. Model weights and KV cache are stored in HBM during inference. → Chapter 2
 
-with profile(
-    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-    record_shapes=True,
-    profile_memory=True,
-    with_stack=True,
-) as prof:
-    with record_function("model_forward"):
-        with torch.inference_mode():
-            output = model(tokens)
-
-# Print top kernels by CUDA time
-print(prof.key_averages().table(
-    sort_by="cuda_time_total", row_limit=20
-))
-
-# Export to Chrome trace
-prof.export_chrome_trace("llm_trace.json")
-# Open in chrome://tracing or Perfetto UI
-```
-
-### W.9.2 CUDA events for precise timing
-
-```python
-import torch
-
-def cuda_timed(fn, *args, warmup=5, repeats=20, **kwargs):
-    """Time a CUDA function with proper warm-up and event synchronisation."""
-    # Warm up (avoids JIT and cache effects in the measurement)
-    for _ in range(warmup):
-        fn(*args, **kwargs)
-    torch.cuda.synchronize()
-
-    start = torch.cuda.Event(enable_timing=True)
-    end   = torch.cuda.Event(enable_timing=True)
-    times = []
-
-    for _ in range(repeats):
-        start.record()
-        fn(*args, **kwargs)
-        end.record()
-        torch.cuda.synchronize()
-        times.append(start.elapsed_time(end))  # ms
-
-    import statistics
-    return {
-        "mean_ms":   statistics.mean(times),
-        "median_ms": statistics.median(times),
-        "p95_ms":    sorted(times)[int(0.95 * len(times))],
-        "min_ms":    min(times),
-        "max_ms":    max(times),
-    }
-
-# Usage
-q = torch.randn(1, 32, 1024, 128, device="cuda", dtype=torch.bfloat16)
-k = torch.randn(1, 32, 1024, 128, device="cuda", dtype=torch.bfloat16)
-v = torch.randn(1, 32, 1024, 128, device="cuda", dtype=torch.bfloat16)
-
-times = cuda_timed(
-    torch.nn.functional.scaled_dot_product_attention,
-    q, k, v
-)
-print(f"SDPA: {times['median_ms']:.3f}ms median, {times['p95_ms']:.3f}ms P95")
-```
-
-### W.9.3 Memory debugging
-
-```python
-# Track memory high-water mark
-torch.cuda.reset_peak_memory_stats()
-output = model(tokens)
-peak_mb = torch.cuda.max_memory_allocated() / 1e6
-print(f"Peak memory: {peak_mb:.1f} MB")
-
-# Detailed memory breakdown
-print(torch.cuda.memory_summary(abbreviated=True))
-
-# Find the source of large allocations
-torch.cuda.memory._record_memory_history(stacks="all")
-# ... run workload ...
-snap = torch.cuda.memory._snapshot()
-# Visualise: python -m torch.cuda._memory_viz trace_plot snap.pkl -o mem.html
-```
+**HBM Bandwidth**
+Rate at which data can be read from/written to GPU HBM. The primary bottleneck for memory-bound operations (decode attention, GEMV). Determines maximum decode token throughput. → Chapter 2
 
 ---
 
-## W.10 `torch.export` and Deployment Targets
+## I
 
-### W.10.1 ExportedProgram
+**In-flight Batching**
+See Continuous Batching.
 
-`torch.export` produces a fully-captured, serialisable computation graph —
-the modern successor to TorchScript:
+**INT4 / INT8**
+Integer quantization formats. INT4 stores weights in 4 bits (16 distinct values), INT8 in 8 bits (256 distinct values). Model weights are dequantized to FP16/BF16 before arithmetic (weight-only quantization). → Chapter 10
 
-```python
-import torch
-from torch.export import export, Dim
-
-model = MyLLM().cuda().bfloat16()
-model.eval()
-
-# Define dynamic dimensions (batch and sequence length can vary)
-batch  = Dim("batch",  min=1, max=64)
-seq    = Dim("seq",    min=1, max=4096)
-
-# Export with sample inputs
-sample_input = torch.randint(0, 50000, (1, 128), device="cuda")
-exported = export(
-    model,
-    (sample_input,),
-    dynamic_shapes={"x": {0: batch, 1: seq}},
-)
-
-# Inspect the exported graph
-print(exported.graph)
-
-# Save and load
-torch.export.save(exported, "llm_exported.pt2")
-loaded = torch.export.load("llm_exported.pt2")
-result = loaded.module()(sample_input)
-```
-
-### W.10.2 ONNX export
-
-```python
-import torch
-import torch.onnx
-
-model = MyLLM().cuda().bfloat16()
-sample = torch.randint(0, 50000, (1, 128), device="cuda")
-
-torch.onnx.export(
-    model,
-    (sample,),
-    "llm.onnx",
-    opset_version=20,                      # use latest for FP8/BF16 support
-    input_names=["input_ids"],
-    output_names=["logits"],
-    dynamic_axes={
-        "input_ids": {0: "batch", 1: "seq"},
-        "logits":    {0: "batch", 1: "seq"},
-    },
-    do_constant_folding=True,
-)
-
-# Validate with onnxruntime
-import onnxruntime as ort
-import numpy as np
-
-sess = ort.InferenceSession("llm.onnx", providers=["CUDAExecutionProvider"])
-inputs = {"input_ids": sample.cpu().numpy()}
-out = sess.run(None, inputs)
-print(out[0].shape)
-```
-
-### W.10.3 TorchScript (legacy but still relevant for libtorch)
-
-```python
-# scripting: works for simple models
-scripted = torch.jit.script(model)
-scripted.save("llm_scripted.pt")
-
-# tracing: captures one execution path — use for fixed-shape models
-traced = torch.jit.trace(model, (sample,))
-traced.save("llm_traced.pt")
-
-# Reload in Python or C++ (see Appendix X)
-loaded = torch.jit.load("llm_scripted.pt")
-```
+**ITL (Inter-Token Latency)**
+Time between successive output tokens after the first. Determined by decode speed. For streaming applications, target ITL < 20ms for smooth text display. → Chapter 16
 
 ---
 
-## W.11 PyTorch Internals: ATen and the Dispatcher
+## K
 
-Understanding the ATen layer helps diagnose performance issues and write
-kernel extensions correctly.
+**KV Cache**
+Memory storing key and value tensors from past attention computations. Enables incremental decoding without recomputing all previous tokens. Memory grows linearly with sequence length × batch size × layers × KV heads. → Chapter 6
 
-### W.11.1 ATen: the C++ tensor library
+**KV Cache Eviction**
+The process of removing KV blocks from the cache when it is full, to make room for new tokens in long-context generation. Policies include H2O (heavy hitter oracle), SnapKV (cluster-based compression), and StreamingLLM's attention-sink approach (keep sink tokens + sliding window). Eviction introduces approximation error; its impact on output quality depends on which tokens are dropped. → Chapter 11.5
 
-ATen (A Tensor Library) is the C++ backbone of PyTorch. Every Python
-tensor operation (e.g., `torch.mm()`) dispatches to an ATen implementation:
-
-```
-Python:   torch.mm(x, y)
-          ↓
-C++:      at::mm(x, y)         (ATen dispatcher)
-          ↓
-CUDA:     at::native::mm_cuda() → cublasSgemm / cublasGemmEx
-```
-
-You can call ATen directly from Python for profiling:
-```python
-import torch._C._VariableFunctions as _VF
-
-# Call ATen's mm directly (bypasses Python overhead)
-x = torch.randn(1024, 1024, device="cuda", dtype=torch.bfloat16)
-y = torch.randn(1024, 1024, device="cuda", dtype=torch.bfloat16)
-out = torch.mm(x, y)
-```
-
-### W.11.2 Operator dispatch keys
-
-Every tensor has a **dispatch key** (e.g., `CUDA`, `CPU`, `AutogradCUDA`)
-that controls which backend handles it. This is how PyTorch routes operations:
-
-```python
-# Inspect dispatch key
-x = torch.randn(4)
-print(torch._C._dispatch_key_set(x))  # DispatchKeySet(CPU, AutogradCPU)
-
-x_cuda = x.cuda()
-print(torch._C._dispatch_key_set(x_cuda))  # DispatchKeySet(CUDA, AutogradCUDA)
-
-# Inspect all registered kernels for an op
-print(torch._C._dispatch_dump("aten::mm"))
-```
+**KV Compression**
+Techniques to reduce KV cache memory: GQA (fewer KV heads), quantization (FP8/INT8 KV), MLA (low-rank projection), offloading to DRAM/NVMe. → Chapters 6, 34, 36
 
 ---
 
-## W.12 Key PyTorch Patterns in vLLM
+## L
 
-The vLLM source code uses several PyTorch patterns repeatedly. Understanding
-them helps when extending or debugging vLLM.
+**LoRA (Low-Rank Adaptation)**
+Parameter-efficient fine-tuning technique adding low-rank update matrices $\Delta W = A \cdot B$ to frozen pretrained weights. Small in memory (rank × d_model × 2 parameters). vLLM supports serving multiple LoRA adapters simultaneously. → Chapter 22
 
-```python
-# Pattern 1: Fused operations with torch.ops.vllm (registered custom ops)
-# vLLM registers its PagedAttention, RoPE, and RMSNorm as custom ops
-from vllm._custom_ops import paged_attention_v1
-
-# Pattern 2: In-place KV cache updates (no allocation per step)
-# key_cache shape: [num_blocks, num_heads, head_size, block_size]
-key_cache = torch.zeros(1024, 32, 128, 16, dtype=torch.float16, device="cuda")
-# Update block 5, positions 0-15:
-key_cache[5].copy_(new_keys)  # in-place, no allocation
-
-# Pattern 3: Gather for paged attention (reading scattered cache blocks)
-block_tables = torch.tensor([[5, 3, 7, 2]], device="cuda")  # request 0: blocks
-# Index into cache using block_tables — vLLM's paged_attention kernel does this
-
-# Pattern 4: Sampling with top-p / top-k (post-forward pass)
-logits = torch.randn(1, 128_000, device="cuda")  # vocab logits
-probs  = torch.softmax(logits / temperature, dim=-1)
-top_k_probs, top_k_ids = torch.topk(probs, k=50)
-# Sample from top-k
-next_token = torch.multinomial(top_k_probs, num_samples=1)
-token_id   = top_k_ids.gather(-1, next_token)
-```
+**Long-Range Dependency**
+Token relationships spanning many positions in the context window. Transformer self-attention theoretically handles unlimited range, but in practice limited by context length and positional encoding. → Chapter 27
 
 ---
 
-## W.13 Worked Example W.1 — Profiling and Optimising a Transformer Block
+## M
 
-**Goal**: profile a single transformer decoder layer and identify bottlenecks.
+**Medusa**
+A speculative decoding variant (Cai et al., 2024) that adds multiple lightweight MLP heads to the base model's final hidden state, each predicting a future token position, enabling K draft tokens per forward pass without a separate model. Unlike standard speculative decoding, Medusa requires a fine-tuning step to train the additional heads. Acceptance rates are typically lower than EAGLE but the implementation is simpler (no separate draft model). → Chapter 23
 
-```python
-import torch
-import torch.nn as nn
-from torch.profiler import profile, record_function, ProfilerActivity
+**Memory Bandwidth**
+See HBM Bandwidth.
 
-# Minimal transformer block for profiling
-class TransformerBlock(nn.Module):
-    def __init__(self, d_model=4096, n_heads=32, ffn_mult=4):
-        super().__init__()
-        self.norm1 = nn.RMSNorm(d_model)
-        self.q_proj = nn.Linear(d_model, d_model, bias=False)
-        self.k_proj = nn.Linear(d_model, d_model, bias=False)
-        self.v_proj = nn.Linear(d_model, d_model, bias=False)
-        self.o_proj = nn.Linear(d_model, d_model, bias=False)
-        self.norm2  = nn.RMSNorm(d_model)
-        self.gate   = nn.Linear(d_model, d_model * ffn_mult, bias=False)
-        self.up     = nn.Linear(d_model, d_model * ffn_mult, bias=False)
-        self.down   = nn.Linear(d_model * ffn_mult, d_model, bias=False)
+**MHA (Multi-Head Attention)**
+Original attention mechanism with $n_{heads}$ independent attention heads, each with their own Q, K, V projections. Replaced by GQA in modern models for reduced KV cache. → Appendix A
 
-    def forward(self, x):
-        with record_function("attention"):
-            h = self.norm1(x)
-            q, k, v = self.q_proj(h), self.k_proj(h), self.v_proj(h)
-            B, T, C = q.shape
-            n, d = 32, C // 32
-            q = q.view(B, T, n, d).transpose(1, 2)
-            k = k.view(B, T, n, d).transpose(1, 2)
-            v = v.view(B, T, n, d).transpose(1, 2)
-            attn = nn.functional.scaled_dot_product_attention(q, k, v)
-            attn = attn.transpose(1, 2).contiguous().view(B, T, C)
-            x = x + self.o_proj(attn)
+**MLA (Multi-head Latent Attention)**
+DeepSeek's KV cache compression technique that projects keys and values to a low-rank latent space before caching, reducing KV memory by ~4.7× vs standard MHA. During prefill, MLA computes full-rank KV for attention; only the compressed latent vectors are stored. During decode, latent vectors are up-projected on the fly. Used in DeepSeek-V2 and DeepSeek-V3. → Chapter 34
 
-        with record_function("ffn"):
-            h = self.norm2(x)
-            x = x + self.down(nn.functional.silu(self.gate(h)) * self.up(h))
-        return x
+**MoE (Mixture of Experts)**
+Architecture where the FFN layer is replaced by N expert FFNs with a router that selects top-K experts per token. Increases model capacity without proportional compute cost. → Chapter 15, Chapter 34
 
-model = TransformerBlock(4096, 32).cuda().bfloat16()
-model = torch.compile(model, mode="reduce-overhead")
+**Moon-Cache**
+Kimi's three-tier KV cache hierarchy (HBM → DRAM → NVMe) that stores KV blocks across memory tiers based on recency and access frequency, enabling context windows far larger than HBM capacity. Hot blocks remain in HBM; warm blocks spill to DRAM; cold blocks are persisted to NVMe. A background prefetcher predicts which blocks will be needed and promotes them before the next decode step. Enables serving ultra-long contexts (1M tokens) by tiering rarely-accessed KV blocks to slower storage. → Chapter 36
 
-x = torch.randn(1, 2048, 4096, device="cuda", dtype=torch.bfloat16)
-
-# Profile
-with profile(activities=[ProfilerActivity.CUDA], record_shapes=True) as prof:
-    with torch.inference_mode():
-        for _ in range(5):
-            _ = model(x)
-
-table = prof.key_averages().table(sort_by="cuda_time_total", row_limit=10)
-print(table)
-```
-
-**Expected profiler output** (approximate):
-```
-Name                     CUDA time   % of total
------------------------  ----------  ----------
-attention                8.2ms       45%
-ffn                      9.8ms       54%
-  └─ aten::mm (gate)     4.1ms       23%
-  └─ aten::mm (up)       4.1ms       23%
-  └─ aten::mm (down)     1.6ms        9%
-  └─ aten::silu          0.05ms       0%
-```
-
-**Observation**: FFN dominates. Fusing gate and up projections into a single
-`Linear(d_model, 2*ffn_dim)` reduces GEMM launch overhead by 1 kernel call.
+**MQA (Multi-Query Attention)**
+Attention variant with one shared K and V head across all Q heads. Maximum KV memory reduction but quality lower than GQA. Used by some older models. → Appendix A
 
 ---
 
-## W.14 Test Harness — PyTorch Inference Primitives
+## N
 
-```python
-# ── test_appendix_w.py ─────────────────────────────────────────────────
-"""Offline tests for PyTorch inference primitives.
-Run with: python test_appendix_w.py"""
+**NCCL (NVIDIA Collective Communications Library)**
+GPU communication library for all-reduce, all-to-all, broadcast operations between GPUs. Used by vLLM for tensor parallelism. Requires NVLink or InfiniBand for good performance. → Chapter 15
 
-import math
-import torch
+**Nucleus Sampling**
+Sampling strategy selecting tokens whose cumulative probability exceeds threshold $p$ (top-p). Balances diversity and quality. → Chapter 12
 
-def test_dtype_element_sizes():
-    sizes = {
-        torch.float32: 4, torch.bfloat16: 2, torch.float16: 2,
-        torch.int8: 1, torch.bool: 1,
-    }
-    for dt, expected in sizes.items():
-        t = torch.empty(1, dtype=dt)
-        assert t.element_size() == expected, (
-            f"{dt}: expected {expected}B, got {t.element_size()}B"
-        )
-    print(f"PASS: dtype element sizes verified ({len(sizes)} dtypes)")
-
-def test_bf16_no_overflow():
-    """BF16 should not overflow at values that overflow FP16."""
-    large = torch.tensor(70_000.0)
-    fp16_val = large.to(torch.float16)
-    bf16_val = large.to(torch.bfloat16)
-    assert not torch.isinf(bf16_val), "BF16 overflowed at 70_000!"
-    assert torch.isinf(fp16_val),     "FP16 should overflow at 70_000"
-    print("PASS: BF16 handles large values; FP16 overflows as expected")
-
-def test_stride_and_contiguity():
-    x = torch.randn(4, 8)
-    assert x.is_contiguous()
-    assert x.stride() == (8, 1)
-
-    xt = x.t()
-    assert not xt.is_contiguous()
-    assert xt.stride() == (1, 8)
-
-    xt_c = xt.contiguous()
-    assert xt_c.is_contiguous()
-    assert xt_c.data_ptr() != xt.data_ptr(), "contiguous() should allocate new storage"
-    print("PASS: stride and contiguity behave correctly")
-
-def test_view_shares_storage():
-    a = torch.randn(16)
-    b = a.view(4, 4)
-    e = a.clone()
-    assert a.storage().data_ptr() == b.storage().data_ptr(), "view should share storage"
-    assert a.storage().data_ptr() != e.storage().data_ptr(), "clone should not share"
-    print("PASS: view shares storage, clone does not")
-
-def test_inference_mode_no_grad():
-    x = torch.randn(4, requires_grad=True)
-    with torch.inference_mode():
-        y = x * 2
-        assert not y.requires_grad
-        assert y.is_inference()
-    print("PASS: inference_mode disables gradients and marks tensors")
-
-def test_memory_cost_calculation():
-    def mem_bytes(shape, dtype):
-        t = torch.empty(shape, dtype=dtype)
-        return t.element_size() * t.numel()
-
-    # KV cache block: 2 (K+V) × 8 heads × 16 block_size × 128 head_dim × 2 bytes
-    kv_block = mem_bytes((2, 8, 16, 128), torch.float16)
-    assert kv_block == 2 * 8 * 16 * 128 * 2, f"KV block size mismatch: {kv_block}"
-    print(f"PASS: KV cache block = {kv_block:,} bytes ({kv_block/1024:.1f} KB)")
-
-def test_masked_softmax():
-    """Masked logit set to -inf should get exactly 0 probability."""
-    logits = torch.tensor([2.0, 1.0, float('-inf'), 0.5])
-    probs  = torch.softmax(logits, dim=-1)
-    assert probs[2].item() == 0.0, "Masked logit should get 0 probability"
-    assert not any(math.isnan(p.item()) for p in probs), "No NaN in masked softmax"
-    assert abs(probs.sum().item() - 1.0) < 1e-6, "Probabilities should sum to 1"
-    print("PASS: masked softmax is numerically stable")
-
-def test_top_k_sampling():
-    torch.manual_seed(42)
-    logits = torch.randn(1, 128_000)
-    probs  = torch.softmax(logits / 0.7, dim=-1)
-    top_k_probs, top_k_ids = torch.topk(probs, k=50)
-    sample_idx = torch.multinomial(top_k_probs, num_samples=1)
-    token_id   = top_k_ids.gather(-1, sample_idx)
-    assert 0 <= token_id.item() < 128_000, "Sampled token out of vocab range"
-    print(f"PASS: top-k sampling returned token {token_id.item():,}")
-
-def test_column_row_parallel_linear():
-    """Simulate tensor parallelism: column split → row split → all_reduce."""
-    d_model = 256
-    ffn_dim = 512
-    world_size = 4
-
-    x = torch.randn(2, d_model)
-
-    # Simulate column-parallel: each rank handles ffn_dim // 4 columns
-    W_col = torch.randn(ffn_dim, d_model)
-    shards = W_col.chunk(world_size, dim=0)
-    partial_outs = [x @ shard.t() for shard in shards]
-    col_out = torch.cat(partial_outs, dim=-1)  # equivalent to all-gather
-    ref = x @ W_col.t()
-    assert torch.allclose(col_out, ref, atol=1e-4), "Column-parallel mismatch"
-
-    # Simulate row-parallel + all-reduce (sum)
-    W_row = torch.randn(d_model, ffn_dim)
-    row_shards = W_row.chunk(world_size, dim=-1)
-    x_shards   = col_out.chunk(world_size, dim=-1)
-    partial_row_outs = [xs @ rs.t() for xs, rs in zip(x_shards, row_shards)]
-    row_out = sum(partial_row_outs)   # all_reduce SUM
-    ref_row = col_out @ W_row.t()
-    assert torch.allclose(row_out, ref_row, atol=1e-3), "Row-parallel mismatch"
-    print("PASS: column-parallel and row-parallel linear simulation correct")
-
-
-if __name__ == "__main__":
-    test_dtype_element_sizes()
-    test_bf16_no_overflow()
-    test_stride_and_contiguity()
-    test_view_shares_storage()
-    test_inference_mode_no_grad()
-    test_memory_cost_calculation()
-    test_masked_softmax()
-    test_top_k_sampling()
-    test_column_row_parallel_linear()
-    print("\n✓ All PyTorch inference primitive tests passed.")
-```
-
-**Expected output:**
-```
-PASS: dtype element sizes verified (5 dtypes)
-PASS: BF16 handles large values; FP16 overflows as expected
-PASS: stride and contiguity behave correctly
-PASS: view shares storage, clone does not
-PASS: inference_mode disables gradients and marks tensors
-PASS: KV cache block = 32,768 bytes (32.0 KB)
-PASS: masked softmax is numerically stable
-PASS: top-k sampling returned token 74,312
-PASS: column-parallel and row-parallel linear simulation correct
-
-✓ All PyTorch inference primitive tests passed.
-```
+**NVLink**
+High-bandwidth interconnect between GPUs on the same node. H100 NVLink: 900 GB/s vs PCIe 5.0: 128 GB/s. Essential for tensor parallel performance. → Chapter 15
 
 ---
 
-## W.15 Quick-Reference: Inference Checklist
+## O
 
-| Item | Correct | Common mistake |
-|---|---|---|
-| Gradient mode | `torch.inference_mode()` | Forgetting `no_grad`, gradient memory leak |
-| Mixed precision | `autocast(dtype=torch.bfloat16)` | FP32 activations on BF16 weights |
-| Memory dtype | BF16 for Ampere+ | FP16 overflow at large values |
-| Compilation | `torch.compile(mode="reduce-overhead")` | Uncompiled eager — 20–40% slower |
-| Device transfers | `.to("cuda", non_blocking=True)` | Blocking H2D stalls decode loop |
-| Pinned memory | Input tokens from pinned buffer | Pageable CPU memory halves H2D throughput |
-| KV layout | Contiguous after transpose | Non-contiguous KV triggers hidden copies |
-| Timing | CUDA events + `synchronize()` | `time.time()` without sync gives wrong numbers |
-| Memory tracking | `reset_peak_memory_stats()` before forward | Cumulative peak includes prior runs |
-| Distributed init | `dist.init_process_group("nccl")` | TCP fallback 10× slower than NCCL |
+**Occupancy (GPU)**
+Fraction of maximum warps that can run simultaneously on a Streaming Multiprocessor. Limited by register usage and shared memory. Higher occupancy → better latency hiding. → Appendix L
+
+**Online Softmax**
+Algorithm computing softmax in a single pass by maintaining running maximum and denominator. Used in Flash Attention to avoid materializing the full attention matrix. → Chapter 5, Appendix A
 
 ---
 
-*Cross-references: Chapter 8.5 (CUDA Graphs), Chapter 10 (Quantization), Chapter 15
-(Tensor Parallelism), Appendix J (CUDA C++ Introduction), Appendix X (libtorch C++ API),
-Appendix P (Triton), Appendix Q (CUTLASS).*
+## P
+
+**PagedAttention**
+vLLM's KV cache management system inspired by OS virtual memory paging. Allocates KV cache in fixed-size blocks and uses a block table to map logical sequence positions to physical blocks. Eliminates KV cache fragmentation. → Chapter 6
+
+**Pipeline Parallelism (PP)**
+Model parallelism splitting transformer layers across GPUs sequentially. GPU 0 runs layers 0-N/k, GPU 1 runs layers N/k to 2N/k, etc. Introduces pipeline bubble overhead. → Chapter 15
+
+**Prefix Caching**
+Caching KV blocks for repeated prompt prefixes (e.g., system prompts). Subsequent requests with the same prefix reuse cached KV without recomputation. vLLM implements this as RadixAttention. → Chapter 11
+
+**Prefill Phase**
+The initial computation that processes the entire input prompt simultaneously and generates the first output token. Compute-bound for long prompts. Creates the initial KV cache. → Chapter 3
+
+**Prompt Caching**
+See Prefix Caching.
+
+---
+
+## Q
+
+**Quantization**
+Reducing numerical precision of model weights (and/or activations and KV cache) to reduce memory and increase throughput. Trade-off: lower bits → more memory savings → more quality degradation. → Chapter 10
+
+---
+
+## R
+
+**RadixAttention**
+SGLang's KV cache sharing mechanism that organizes cached KV blocks in a radix tree keyed by token sequences, automatically sharing prefix blocks across requests with common prefixes. vLLM's prefix caching system is architecturally similar, using a hash-based trie rather than a true radix tree. Both systems enable O(prefix_len) cache lookup and avoid redundant prefill computation for shared prefixes. → Chapter 11
+
+**Request Throughput**
+Number of completed requests per second. Distinct from token throughput. Depends on output length distribution and batching efficiency. → Chapter 17
+
+**Ridge Point (Roofline)**
+The arithmetic intensity at which performance transitions from memory-bandwidth-bound to compute-bound. = Peak FLOPS / Peak Memory Bandwidth. H100: ~295 FLOPs/byte (BF16). → Appendix A
+
+**RoPE (Rotary Position Encoding)**
+Positional encoding method encoding token positions by rotating Q and K vectors. Key property: dot product depends only on relative position (m-n), not absolute positions. Used by Llama, Qwen, Mistral, DeepSeek. → Appendix A
+
+**RMSNorm**
+Layer normalization variant using Root Mean Square normalization without mean subtraction. ~7% faster than LayerNorm. Used by Llama, Qwen, Mistral. → Appendix A
+
+---
+
+## S
+
+**Semantic Cache**
+Cache that stores LLM responses indexed by semantic similarity (embedding similarity), not exact text match. Enables cache hits for semantically equivalent but differently worded questions. Hit rate: typically 60-80% for FAQ workloads. → Chapter 30
+
+**SnapKV**
+A KV cache compression method that clusters similar key vectors using a pooling window and retains only the cluster centroids, reducing KV cache size while preserving attention quality. SnapKV identifies "important" key positions by observing which positions receive high attention from the most recent query tokens, then retains those positions and discards the rest. → Chapter 11.5
+
+**Shared Memory (CUDA)**
+On-chip SRAM on each GPU Streaming Multiprocessor. ~228KB per SM on H100. Much faster than HBM (bandwidth > 19 TB/s vs 3.35 TB/s for HBM). Flash Attention uses shared memory for its tiled computation. → Appendix L
+
+**SM (Streaming Multiprocessor)**
+Basic compute unit of an NVIDIA GPU. H100 SXM has 132 SMs. Each SM contains 128 CUDA cores, Tensor Cores, shared memory, and register file. → Appendix L
+
+**Speculative Decoding**
+Inference acceleration technique using a small draft model to propose $\gamma$ candidate tokens, then verifying all with the target model in a single forward pass. Maintains exact target model output distribution. Speedup: 2-3× for long outputs. → Chapter 23
+
+**Structured Sparsity (2:4)**
+NVIDIA's hardware-accelerated sparsity format requiring at least 2 zeros in every group of 4 weights, enabling 2× TFLOPS on H100 Sparse Tensor Cores. A weight matrix is pruned and then stored in a compressed format with a 2-bit metadata mask per group of 4. The Sparse Tensor Core decompresses on the fly during GEMM. Requires a fine-pruning or one-shot pruning step to reach the 2:4 pattern. → Chapter 10, Chapter 37
+
+**SwiGLU**
+Activation function used in modern FFN layers: $\text{SwiGLU}(x) = (\text{SiLU}(x \cdot W_{gate})) \odot (x \cdot W_{up})$. Empirically superior to GeLU. Requires 3 weight matrices vs 2 for standard FFN. → Appendix A
+
+---
+
+## T
+
+**Tensor Parallelism (TP)**
+Model parallelism splitting individual weight matrices across GPUs. Column-parallel for $W_Q, W_K, W_V, W_{gate}$; row-parallel for $W_O, W_{down}$. Requires all-reduce between GPUs per layer. → Chapter 15
+
+**Tensor Core**
+Specialized compute unit in NVIDIA GPUs performing matrix multiply-accumulate (MMA) operations. Support BF16, FP16, INT8, FP8, TF32. Provide ~8× higher throughput than CUDA cores for GEMM. → Appendix L
+
+**Token**
+Fundamental unit of text processed by LLMs. Approximately 4 characters for English. Tokenization maps text to integer token IDs via BPE or similar algorithms. → Chapter 3
+
+**Token Throughput**
+Output tokens generated per second. Limited by: (1) hardware bandwidth in decode, (2) model FLOPS in prefill. → Chapter 17
+
+**TRT-LLM (TensorRT-LLM)**
+NVIDIA's compiled inference engine. Converts HuggingFace models to AOT-compiled `.engine` files with kernel auto-tuning, layer fusion, and FP8/sparsity support. 2-3× higher throughput than vLLM at cost of 30-60 min compile time. → Chapter 37
+
+**TTFT (Time to First Token)**
+Latency from sending request to receiving first output token. Determined by prefill speed. Critical for interactive applications. P95 target: < 500ms for most use cases. → Chapter 16
+
+---
+
+## V
+
+**vLLM**
+Open-source LLM inference engine developed by UC Berkeley Sky Computing Lab. Key innovations: PagedAttention (KV cache management), continuous batching, prefix caching. Leading throughput among Python-based serving frameworks. → Chapters 6-8
+
+**vLLM V1**
+The late-2024 architectural refactor of vLLM that introduced a disaggregated scheduler/worker design connected via ZMQ sockets, replacing the monolithic V0 engine with an async message-passing architecture. V1 enables chunked prefill and prefix caching by default, improves multi-GPU startup time, and provides cleaner separation between the scheduler (CPU) and workers (GPU). → Chapters 7-8
+
+**VRAM**
+GPU video RAM. Same as HBM for data center GPUs. Constrains maximum model size (weights) and KV cache capacity. → Chapter 2
+
+---
+
+## W
+
+**Warp**
+Group of 32 CUDA threads executing the same instruction simultaneously (SIMT). The basic scheduling unit on a GPU SM. Warp divergence (different execution paths) reduces efficiency. → Appendix L
+
+**Weight-Only Quantization**
+Quantizing model weights (not activations) to INT4/INT8. Weights are dequantized to FP16 before matrix multiply. Reduces memory footprint without modifying compute path. Used by GGUF Q4_K_M, AWQ, GPTQ. → Chapter 10
+
+---
+
+## Y
+
+**YaRN (Yet Another RoPE extensioN)**
+Context length extension technique for RoPE-based models. Adjusts RoPE base frequency to support longer sequences than the model was trained on. Achieves 4-8× context extension with minimal quality loss. → Chapter 27

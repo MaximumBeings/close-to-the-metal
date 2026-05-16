@@ -1341,3 +1341,132 @@ The key mental model: think of your model fleet as a cost-quality Pareto frontie
 4. Latency budget: the router takes 15 ms, the 7B model takes 120 ms, and the 70B model takes 600 ms. For the cascading system in question 1, compute P50 latency. *(Section 31.2)*
 
 5. Model routing introduces a feedback loop risk: if the router under-routes to the large model, quality suffers; if quality suffers, feedback training data degrades. Describe the data flywheel failure mode and a monitoring strategy to detect it. *(Section 31.5)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**Cascading: 7B first, escalate to 70B if confidence < 0.85. 1,000 requests, 65% high-confidence. 70B costs 10x per request.**
+
+**Cost calculation:**
+- 65% high-confidence: served by 7B model only. Cost per request = 1 unit.
+- 35% low-confidence: served by BOTH 7B (initial attempt) + 70B (escalation). Cost per request = 1 + 10 = 11 units.
+
+**Average cost per request:**
+```
+avg_cost = 0.65 x 1 + 0.35 x 11 = 0.65 + 3.85 = 4.50 units
+```
+
+**Relative to always using 70B:**
+```
+cost_ratio = 4.50 / 10 = 0.45
+```
+
+The cascade costs **45% of always using 70B** -- a 55% cost reduction. If 70B costs $0.01/request: cascade costs $0.0045/request vs $0.01 always-70B.
+
+**Note:** The cost includes the 7B call even for low-confidence requests (the 7B still runs before escalating). For very low confidence-rate workloads (< 10% high-confidence), cascading may cost MORE than always using 70B due to double computation.
+
+---
+
+### Question 2
+**Routing classifier misclassifies 8% of requests (complex -> 7B). Quality degradation on complex queries: 20%. 60% routed to 7B.**
+
+**Quality impact:**
+
+Overall quality score = weighted average of:
+- Correctly routed to 7B (60% - 8% misclassified = 52% correctly simple): full quality, score = 1.0
+- Correctly routed to 70B (40% - 8% misclassified = 32% correctly complex): full quality, score = 1.0
+- Misclassified to 7B (8% of total -- these were complex, sent to 7B): quality = 1.0 - 0.20 = 0.80
+
+Wait -- 8% misclassification rate means 8% of ALL requests are wrong (complex sent to 7B or simple sent to 70B). Assume all 8% are complex sent to 7B (worst case):
+
+```
+quality = 0.52 x 1.0 (correct 7B) + 0.32 x 1.0 (correct 70B) + 0.08 x 0.80 (misclassified)
+        = 0.52 + 0.32 + 0.064
+        = 0.904
+```
+
+**User satisfaction impact:** If satisfaction is proportional to quality score, overall user satisfaction is 90.4% of maximum -- a 9.6% reduction due to routing errors.
+
+**Interpretation:** For every 1,000 users, 80 receive degraded responses (8% of 1,000) with 20% lower quality. This 8% misclassification rate has a non-trivial user impact, especially if complex queries are high-stakes (medical, legal, financial).
+
+---
+
+### Question 3
+**Router accuracy 94%, 30% code queries. 10,000 requests. Confusion matrix:**
+
+True class: 3,000 code, 7,000 general.
+Router: 94% accurate overall.
+
+**Assuming balanced accuracy:**
+- TP (code correctly routed to code endpoint): 3,000 x 0.94 = 2,820
+- FN (code routed to general endpoint): 3,000 x 0.06 = 180
+- TN (general correctly routed to general): 7,000 x 0.94 = 6,580
+- FP (general routed to code endpoint): 7,000 x 0.06 = 420
+
+**Verification:** Correctly classified = 2,820 + 6,580 = 9,400 = 94% of 10,000 ✓
+
+**Confusion matrix:**
+```
+                  Predicted Code    Predicted General
+Actual Code:      TP=2,820          FN=180
+Actual General:   FP=420            TN=6,580
+```
+
+**Precision for code route:** 2,820 / (2,820 + 420) = 2,820 / 3,240 = 87.0%
+**Recall for code:** 2,820 / (2,820 + 180) = 2,820 / 3,000 = 94.0%
+
+The 420 false positives (general queries routed to code model) may receive slightly worse responses for general knowledge tasks if the code model is specialized. Monitor quality separately per predicted class.
+
+---
+
+### Question 4
+**Latency: router=15 ms, 7B=120 ms, 70B=600 ms. 65% high-confidence (go to 7B), 35% to 70B cascade.**
+
+**P50 latency:**
+65% of requests are in the faster path. The median is in the 7B path.
+
+**7B path latency:** 15 ms (router) + 120 ms (7B) = 135 ms
+**70B cascade path latency:** 15 ms (router) + 120 ms (7B attempt) + 600 ms (70B) = 735 ms
+
+**P50:** Since 65% > 50%, the P50 falls in the 7B path:
+```
+P50 = 135 ms
+```
+
+**P90:**
+The 90th percentile falls in the 70B path (since 65% < 90%):
+```
+P90 = 735 ms
+```
+
+**P65 is the boundary:** requests at exactly the 65th percentile are at the 7B / 70B boundary.
+
+**Practical observation:** The P50 looks good (135 ms) but P90 (735 ms) is 5.4x higher -- this tail is inherent to cascading with a much larger model. Users in the 35th-100th percentile wait 735 ms. If the SLA requires P90 < 500 ms, this cascade design fails the SLA.
+
+---
+
+### Question 5
+**Data flywheel failure mode and monitoring strategy:**
+
+**Failure mode:**
+1. Router under-routes to large model (too few complex queries escalated).
+2. Complex queries receive poor quality responses from the small model.
+3. Users provide negative feedback or abandon the product.
+4. The feedback data collected is biased: mostly negative examples from complex queries handled by the small model, and positive examples from simple queries. The complex queries that SHOULD have been escalated now dominate the negative-feedback training set.
+5. When the router is retrained on this feedback data, it learns that "complex-seeming queries lead to negative feedback" and routes even MORE of them to the small model (the opposite of the correct behavior) -- because the training signal conflates "bad routing decision" with "bad query type."
+
+This is a **feedback loop collapse**: poor routing -> poor quality -> biased training data -> even poorer routing.
+
+**Monitoring strategy:**
+
+1. **Route accuracy auditing:** Randomly sample 2% of all requests, send them to BOTH small AND large model, compare quality (LLM judge score). If the large model scores significantly higher for queries the router sent to the small model, the router is under-routing.
+
+2. **Quality per routing decision:** Track LLM judge scores separately for "routed to small" and "routed to large" requests. If "routed to small" quality degrades over time, the router is increasingly mis-routing complex queries.
+
+3. **Holdout comparison:** Maintain a 5% control group that always goes to the large model. Compare satisfaction scores between control (always-large) and treatment (routed). A growing gap indicates routing quality degradation.
+
+4. **Alert:** If (large_model_score - routed_small_score) > threshold for > 5% of queries, automatically revert routing threshold and trigger router retraining on freshly human-labeled data.
+

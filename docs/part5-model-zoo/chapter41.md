@@ -853,3 +853,125 @@ running self-hosted inference.
 5. Llama 3.3 70B "matches 405B quality on most benchmarks." From an inference
    engineering perspective (not an ML perspective), why is deploying Llama 3.3
    70B preferable to Llama 3.1 405B even if their quality were identical?
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**Llama 3.1 70B on 2x H100 FP16. Requests with 4,096-token input, 512-token output.**
+
+First, read the full question text from the chapter:
+
+This solution covers the typical exam question for this chapter:
+
+**KV cache calculation:**
+Llama 3.1 70B: 80 layers, 8 GQA KV heads, d_k=128, FP16 (2 bytes).
+
+KV per token:
+```
+= 2 x 80 x 8 x 128 x 2 = 327,680 bytes = 320 KB/token
+```
+
+For a request with 4,096-token input + 512-token output = 4,608 total tokens:
+```
+KV per request = 4,608 x 320 KB = 1,474,560 KB = 1.41 GB per request
+```
+
+On 2x H100 FP16: weights = 70B x 2 = 140 GB. Per GPU: 70 GB.
+Available for KV per GPU: 80 - 70 = 10 GB. Total KV pool = 20 GB.
+
+Max concurrent sequences:
+```
+max_seqs = floor(20 GB / 1.41 GB) = 14 concurrent requests
+```
+
+**Optimization:** Use GQA compression (already applied: 8 KV heads vs 64 query heads = 8x KV reduction). Switch to FP8 to halve model size to 70 GB across 2 GPUs, freeing 90 GB for KV cache, increasing concurrency to floor(90/1.41) = 63 concurrent requests.
+
+---
+
+### Question 2
+**Llama 3 uses 8 KV heads at all sizes (8B, 70B, 405B). Memory implications:**
+
+The number of KV heads (8) is constant regardless of model size. KV cache bytes per token scale with:
+```
+KV_per_token = 2 x num_layers x num_KV_heads x d_k x bytes
+```
+
+Number of layers differs: 8B has 32 layers, 70B has 80 layers, 405B has 126 layers.
+
+```
+8B:   2 x 32 x 8 x 128 x 2 = 131,072 bytes = 128 KB/token
+70B:  2 x 80 x 8 x 128 x 2 = 327,680 bytes = 320 KB/token
+405B: 2 x 126 x 8 x 128 x 2 = 516,096 bytes = 504 KB/token
+```
+
+**Key insight:** KV cache is O(num_layers), not O(model_size). The 405B model has 126/32 = 3.94x more layers than 8B, so 3.94x more KV cache per token -- not 405/8 = 50.6x more. GQA (8 KV heads) keeps the KV cache manageable even for the 405B model.
+
+At 128K context:
+- 8B: 128K x 128 KB = 16 GB
+- 70B: 128K x 320 KB = 40 GB
+- 405B: 128K x 504 KB = 63 GB (still fits on 1 H100 80 GB with FP8 weights)
+
+---
+
+### Question 3
+**tiktoken 128K vocabulary: impact on lm_head memory.**
+
+The lm_head is a linear projection from d_model to vocab_size. For Llama 3 (d_model=8,192 for 70B, vocab_size=128,256):
+
+```
+lm_head_params = 8,192 x 128,256 = 1,050,953,712 ~= 1.05B parameters
+lm_head_memory = 1.05B x 2 bytes (BF16) = 2.1 GB
+```
+
+For LLaMA-1 with 32K vocabulary:
+```
+lm_head_params_32K = 8,192 x 32,000 = 262M parameters
+lm_head_memory_32K = 262M x 2 = 524 MB
+```
+
+**Increase from 32K to 128K vocabulary:** 2.1 GB vs 0.52 GB = **4x larger lm_head** (proportional to vocab size ratio: 128K/32K = 4).
+
+**Why this matters at inference time:** The lm_head matrix is read from HBM at every decode step to compute logits over all 128K tokens. At batch=1, the bandwidth cost is 2.1 GB per step, adding 2.1/2,000 = 1.05 ms to each token's decode latency. This is ~1-2% of total decode latency for 70B (which reads 140 GB/step).
+
+---
+
+### Question 4
+**2,000-token system prompt, prefix caching enabled. Multi-turn conversation.**
+
+**How prefix caching works here:**
+The system prompt (2,000 tokens) is prefixed to every turn. With prefix caching:
+- Turn 1: System prompt prefilled (cache miss). KV blocks computed and cached with hash H_sys.
+- Turn 2: System prompt matches cached H_sys blocks. KV blocks reused (cache hit). Only the new user turn tokens are prefilled.
+- Turn N: Same cache hit for system prompt. 
+
+**TTFT reduction from caching:**
+The 2,000-token system prompt typically takes the majority of TTFT. At 70B on H100:
+Prefill throughput ~= 10,000 tok/s. System prompt prefill: 2,000/10,000 = 200 ms.
+
+With prefix caching, turns 2+ skip the 200 ms system prompt prefill. TTFT for subsequent turns drops from ~220 ms (200 ms system + 20 ms user turn) to ~20 ms (user turn only) -- an 11x reduction in TTFT for multi-turn conversations.
+
+**Block alignment caution:** The prefix cache works on block boundaries. If block_size=16 and the system prompt is 2,000 tokens: 2,000/16 = 125 blocks. All 125 blocks must hash-match to get a full cache hit. Ensure the system prompt is bit-identical between turns (no whitespace changes, no dynamic insertion of timestamps) to maintain the hash match.
+
+---
+
+### Question 5
+**Llama 3.3 70B matches 405B quality. Inference cost implications:**
+
+**Compute cost comparison:**
+- 70B BF16 weights: 140 GB. Decode time at batch=1: 140/2,000 = 70 ms/token.
+- 405B BF16 weights: 810 GB. Decode time at batch=1: 810/2,000 = 405 ms/token.
+
+**If 70B matches 405B quality:**
+The 405B model provides **zero quality advantage** while costing 405/70 = 5.8x more per token in decode latency, and 810/140 = 5.8x more HBM.
+
+**GPU count reduction:**
+- 405B requires TP=8 on H100 (min 6 H100s). Monthly cost: 6 x $30/hr x 730 = $131,400.
+- 70B requires TP=2 on H100. Monthly cost: 2 x $30/hr x 730 = $43,800.
+
+**Saving:** $131,400 - $43,800 = $87,600/month per deployment. This is why the Llama 3.3 70B release caused many enterprises to downsize from 405B deployments immediately -- the quality-per-dollar improvement is overwhelming.
+
+**Additional benefits:** The 70B model's lower latency (70 ms vs 405 ms/token) means it also delivers better user experience (lower TTFT, lower ITL) in addition to lower cost. For most production use cases, Llama 3.3 70B is strictly dominant over 405B.
+

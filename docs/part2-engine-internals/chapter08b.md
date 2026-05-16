@@ -415,3 +415,112 @@ CUDA graphs collapse ~820 individual kernel launch calls into a single GPU submi
 4. A team is deploying a custom model with a dynamic attention mask that depends on the content of the current token (not just position). Can this model use CUDA graphs? Why or why not?
 
 5. Chunked prefill with fixed chunk size C is enabled. How does this enable graphs for the prefill path? What additional pool of graphs must vLLM maintain?
+
+
+---
+
+## Worked Solutions
+
+---
+
+### Solution 1 — Expected decode latency with CUDA graphs
+
+**Given:** Without graphs: 22 ms; CPU overhead: 18% of total = 18% × 22 ms = 3.96 ms; GPU compute: 22 − 3.96 = 18.04 ms
+
+**Step 1 — Understand what graphs eliminate.**
+
+CUDA graphs replace repeated CPU-driven kernel launches with a single `cudaGraphLaunch` call. CPU overhead ≈ 0 after graphs (the scheduling work is pre-recorded).
+
+**Step 2 — Expected latency with graphs.**
+
+$$\text{latency with graphs} = \text{GPU compute} + \text{reduced CPU overhead}$$
+$$\approx 18.04 \text{ ms} + \sim 0.1 \text{ ms (graph launch)} \approx \textbf{18.1 ms}$$
+
+**Step 3 — Speedup.**
+
+$$\text{speedup} = \frac{22}{18.1} \approx \textbf{1.21}\times \quad (21\% \text{ faster})$$
+
+**Practical note:** The 18% CPU overhead figure is conservative for small batch sizes. At batch size 1, CPU overhead can be 40–60% of total decode latency (most time is spent launching kernels, not executing them). At batch size 32+, GPU compute dominates and graph speedup is smaller in percentage terms but still valuable in absolute terms.
+
+---
+
+### Solution 2 — Graph selection for 13 active sequences
+
+**Given:** Graph pool sizes = {1, 2, 4, 8, 16, 32}; active sequences = 13
+
+**Step 1 — Find the smallest graph size ≥ 13.**
+
+From the pool: 1, 2, 4, 8, **16**, 32. The smallest size ≥ 13 is **16**.
+
+**Step 2 — Dummy slots.**
+
+$$\text{dummy slots} = 16 - 13 = \textbf{3 dummy tokens}$$
+
+The 3 dummy slots are filled with padding tokens. Their K/V blocks are allocated (pointing to a shared dummy block) and their output logits are computed but discarded.
+
+**Step 3 — Compute waste fraction.**
+
+$$\text{waste} = \frac{3}{16} = \textbf{18.75\%}$$
+
+This 18.75% waste means 18.75% of the GPU's compute per step is doing "useful" work for dummy tokens that will never produce real output. This is acceptable — the alternative (running 13 sequences without graphs) would have 18% CPU overhead.
+
+**The break-even point:** If dummy waste > CPU overhead saved, graphs are not worth it. For a 4-sequence graph with 3 dummies: 3/4 = 75% waste > 18% saved → may not be beneficial. vLLM tunes graph sizes to keep waste manageable.
+
+---
+
+### Solution 3 — Why graphs are captured in descending order
+
+**Step 1 — The problem with smallest-first.**
+
+When you capture a graph at batch size 1, CUDA allocates all intermediate tensors for that forward pass. These small tensors occupy fragments of VRAM. When you subsequently try to capture batch size 256, CUDA needs large contiguous tensor allocations — but VRAM is fragmented by the earlier small-tensor allocations. The large allocation may fail even if total free VRAM is sufficient.
+
+**Step 2 — Why largest-first works.**
+
+Capturing batch size 256 first allocates all tensors at maximum size. These are freed after capture. When batch size 128 is captured next, CUDA can reuse the same contiguous regions. Smaller batch sizes reuse increasingly small sub-regions of the same memory space.
+
+**Step 3 — CUDA graph memory persistence.**
+
+Captured graphs retain their tensor memory during replay. Capturing largest-first ensures all graph memory is in a contiguous region of VRAM, minimizing fragmentation during serving.
+
+---
+
+### Solution 4 — Content-dependent dynamic attention mask and CUDA graphs
+
+**The problem:**
+
+CUDA graphs record all GPU operations, including memory addresses and tensor shapes. A graph is valid for replay only if the *exact same sequence of operations with the same shapes* is executed each time.
+
+A content-dependent attention mask means:
+- At step T₁: mask is [1,0,1,0,1] (based on token content)
+- At step T₂: mask is [0,1,1,0,0] (different tokens, different mask)
+
+These are **different operations** — they branch to different memory addresses and may trigger different execution paths.
+
+**Why graphs fail:**
+
+CUDA graph capture records one specific execution path. If the mask changes the control flow (e.g., a `torch.where` with different conditions), the graph cannot adapt. Replaying the graph from step T₁ for step T₂ would apply the wrong mask.
+
+**Solution:** Use eager mode (no graphs) for this model. The CPU overhead (~3–5 ms) is unavoidable. Alternatively, reformulate the dynamic mask as a fixed mathematical function of token *position* (not content) — then it becomes static and capturable.
+
+---
+
+### Solution 5 — Chunked prefill with CUDA graphs
+
+**Step 1 — Why chunked prefill enables graphing for the prefill path.**
+
+Without chunked prefill, prefill length varies request by request (100 tokens, 1,000 tokens, 3,000 tokens). Variable shapes → cannot use CUDA graphs.
+
+With chunk_size=C (fixed), every prefill step processes exactly C tokens. Fixed shape → graphs are possible.
+
+**Step 2 — Additional graph pool required.**
+
+vLLM maintains two separate graph pools:
+1. **Decode graph pool:** batch sizes {1, 2, 4, 8, ..., max_num_seqs} — one graph per size
+2. **Prefill chunk graph:** one graph for batch size C (the fixed chunk size)
+
+The prefill graph handles the combined step: C prefill tokens + up to `max_num_seqs` decode tokens. In practice, vLLM also needs graphs for partial chunks (final chunk of a prompt may be < C tokens), so the prefill pool may have multiple sizes.
+
+**Step 3 — Memory cost.**
+
+Each additional graph retains its tensor memory. The prefill chunk graph for C=512 tokens with 32 sequences holds 512-token attention intermediates in memory. This adds 10–50 MB to the graph memory pool depending on model size.
+

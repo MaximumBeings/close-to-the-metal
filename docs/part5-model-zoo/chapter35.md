@@ -531,3 +531,127 @@ Chapter 36 covers Kimi — Moonshot AI's production system designed specifically
 4. Qwen2.5-VL-7B processes a 1024×1024 image. Using the token budget table in §35.8.1, compute how many visual tokens are generated and whether a 10-image document fits in a 32K context window alongside a 512-token user question. *(Section 35.8)*
 
 5. Qwen3-235B-A22B has 128 fine-grained experts and activates 1 per token per FFN layer. Compare its memory footprint and per-token compute cost to Qwen2.5-72B dense (BF16). At what GPU count does each model become feasible to serve without quantisation? *(Section 35.9)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**Qwen2.5-72B: 8 GQA KV heads, d_k=128, 80 layers. KV per token vs MHA with 64 KV heads.**
+
+**Qwen2.5-72B (GQA, 8 KV heads):**
+```
+KV_per_token = 2 x 80 x 8 x 128 x 2 = 327,680 bytes = 320 KB/token
+```
+
+**MHA model with 64 KV heads (same d_k=128, 80 layers):**
+```
+KV_per_token = 2 x 80 x 64 x 128 x 2 = 2,621,440 bytes = 2,560 KB/token = 2.5 MB/token
+```
+
+**Ratio:** MHA requires 2,560 / 320 = **8x more KV cache** than Qwen2.5-72B's GQA configuration. This is exactly the GQA compression ratio (64 KV heads / 8 KV heads = 8x). At 128K context: Qwen2.5 needs 40 GB vs 320 GB for MHA -- making long-context serving feasible on 2x H100 vs requiring 4-8x H100.
+
+---
+
+### Question 2
+**Qwen2.5 vocab=152,064. LLaMA-3 vocab=128,256. Chinese prompt of 500 characters.**
+
+**Qwen2.5 tokenizer:**
+Qwen's tokenizer is trained on a large Chinese corpus with extensive Chinese character coverage. Chinese characters are common, single tokens (many 3-byte UTF-8 sequences = 1 token). 500 Chinese characters -> approximately **500-600 tokens** (most characters are single tokens; some idioms or compound words may be split).
+
+**LLaMA-3 tokenizer:**
+LLaMA-3's tokenizer has 128,256 tokens and reasonable multilingual coverage, but Chinese character merging is less aggressive than Qwen's. A 3-byte UTF-8 Chinese character may be split into 2-3 subword tokens. 500 characters -> approximately **750-1,500 tokens** (1.5-3x more than Qwen).
+
+**Difference:** Qwen2.5's larger vocabulary (152K vs 128K) includes more merged Chinese token pairs, resulting in more efficient encoding of Chinese text. At 500 characters, Qwen might use 550 tokens while LLaMA-3 uses 1,200 tokens -- a 2.2x token efficiency advantage for Chinese content. This directly reduces KV cache usage and prefill FLOPs for Chinese-language workloads.
+
+---
+
+### Question 3
+**Cost router over Qwen family (7B, 14B, 32B, 72B). 60% simple, 30% medium, 10% complex. Two-model cascade:**
+
+**Optimal two-model selection:**
+The goal is to minimize average cost while maintaining quality.
+
+Cost estimates (relative to 72B = 1.0):
+- 7B: ~0.10
+- 14B: ~0.19
+- 32B: ~0.44
+- 72B: 1.00
+
+**Best two-model cascade: Qwen2.5-7B (first) + Qwen2.5-72B (escalation):**
+
+Routing:
+- Simple (60%): 7B only -> cost = 0.10 per request
+- Medium (30%): 7B initial (low confidence) -> escalate to 72B -> cost = 0.10 + 1.00 = 1.10
+- Complex (10%): always escalate to 72B -> cost = 0.10 + 1.00 = 1.10
+
+Average cost:
+```
+avg = 0.60 x 0.10 + 0.30 x 1.10 + 0.10 x 1.10
+    = 0.06 + 0.33 + 0.11 = 0.50
+```
+vs always 72B: 1.00 -> **50% cost reduction**.
+
+**Alternative: 14B + 72B** (slightly better quality on medium tasks):
+```
+avg = 0.60 x 0.19 + 0.30 x 1.19 + 0.10 x 1.19
+    = 0.114 + 0.357 + 0.119 = 0.59
+```
+41% cost reduction -- worse than 7B + 72B.
+
+**Winner: Qwen2.5-7B + Qwen2.5-72B** for maximum cost efficiency. Use a lightweight classifier trained on task complexity to route between them.
+
+---
+
+### Question 4
+**Qwen2.5-VL-7B processes 1024x1024 image. Visual tokens + 10-image document in 32K context.**
+
+From Qwen2.5-VL documentation: 1024x1024 images are encoded at a resolution that produces approximately 768-1,024 visual tokens (using dynamic resolution encoding with 28x28 pixel patches).
+
+Using the chapter's token budget table: **~756 visual tokens** for a 1024x1024 image (14x14 grid of 4x4 merged patches = 196 tokens * 4 = 784, approximately 756 accounting for special tokens).
+
+**10-image document:**
+```
+visual_tokens = 10 x 756 = 7,560 visual tokens
+text_tokens = 512 (user question, estimated)
+total = 7,560 + 512 = 8,072 tokens
+```
+
+Does it fit in 32K context? 8,072 << 32,768. **Yes, comfortably.** There is room for 24,696 additional tokens for document text or lengthy responses.
+
+**Practical consideration:** Loading 10 large images requires significant preprocessing time (CLIP encoding). For the 7B model, ensure the vision encoder can handle 10 images in a single forward pass (some implementations require sequential image encoding).
+
+---
+
+### Question 5
+**Qwen3-235B-A22B: 128 experts, activates 1 per token per FFN. vs Qwen2.5-72B dense BF16.**
+
+**Qwen3-235B-A22B memory footprint:**
+Total parameters: 235B. At BF16 (2 bytes/param):
+```
+weight_memory = 235B x 2 = 470 GB
+```
+All 235B parameters must be in HBM (any expert could be called). Minimum GPU configuration: 6x H100-80GB (480 GB).
+
+**Per-token compute cost (active parameters):**
+Only A22B = 22B parameters activate per token (1 of 128 experts per FFN layer, not 8 like DeepSeek). At BF16:
+```
+active_per_token = 22B x 2 bytes = 44 GB read per decode step
+time = 44 / 3,350 GB/s = 13.1 ms per token (batch=1)
+```
+
+**Qwen2.5-72B dense BF16:**
+```
+weight_memory = 72B x 2 = 144 GB -> 2x H100-80GB minimum
+decode_time = 144 / 3,350 = 43 ms per token (batch=1)
+```
+
+Wait, 72B dense reads all 144 GB every step, taking 43 ms. Qwen3-235B-A22B reads only 44 GB per step, taking 13 ms. So Qwen3 is **3.3x faster per token at batch=1** despite being 3.3x larger!
+
+**GPU count for serving without quantization:**
+- Qwen2.5-72B: 2x H100-80GB (144 GB weights, comfortable with 16 GB KV headroom per GPU)
+- Qwen3-235B-A22B: 6x H100-80GB (470 GB weights) -- but 6 GPUs with NVLink required for all-to-all MoE routing
+
+**Summary:** MoE enables serving a higher-quality 235B model at lower per-token latency than the dense 72B, at the cost of 3x more GPU memory and NVLink requirement.
+

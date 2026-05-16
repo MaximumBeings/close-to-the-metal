@@ -1495,3 +1495,95 @@ The most important principles:
 4. In a 4-GPU tensor-parallel deployment, GPU 2 shows 100% utilization and GPUs 0, 1, 3 show 0%. What has happened and how do you recover? *(Section 32.6)*
 
 5. `LLAMA_LOG_LEVEL=debug` shows layer 22 taking 300 ms while all other layers take 5 ms. The model uses CUDA. What are the two most likely causes and how do you diagnose each? *(Section 32.4)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**vLLM at 95% GPU util but 800 tok/s. Expected is 2,400 tok/s at 95% util. Three diagnostic steps:**
+
+**Step 1 -- Check arithmetic intensity (are we compute-bound or bandwidth-bound?).**
+At 95% GPU util, the GPU's SMs are busy. If throughput is 3x lower than expected, either:
+- The HBM bandwidth is saturated by something other than model weights (e.g., KV cache reads)
+- The util metric is misleading (high util from idle-waiting on memory transfers)
+
+Run: `dcgmi dmon -e 1004,1005` to see SM activity vs memory throughput simultaneously. If memory throughput is at 98% while SM activity shows mostly stalls, the bottleneck is HBM bandwidth to KV cache.
+
+**Step 2 -- Profile the decode step with nsight or CUDA events.**
+```bash
+nsys profile --trace=cuda,nvtx python -m vllm.entrypoints.openai.api_server ...
+```
+Look at the timeline: are the decode kernels back-to-back, or are there gaps (Python overhead, synchronization)?
+
+**Most likely root cause:** Very long sequences consuming KV cache bandwidth. If `max_model_len=32768` and many sequences are near max length, each decode step reads 32K * 128 KB = 4 GB of KV data per sequence -- this dwarfs the 140 GB of weight reads and saturates HBM bandwidth without increasing useful token throughput.
+
+**Step 3 -- Check `vllm:num_requests_running` and sequence length distribution.**
+If a small number of very long sequences are consuming all KV cache bandwidth, reducing max sequence length or enabling KV cache quantization (INT8 KV) would halve KV bandwidth and restore throughput.
+
+---
+
+### Question 2
+**`CUDA out of memory` after 35 seconds. Sequence of events:**
+
+The request generated tokens for 35 seconds before OOM. What happened:
+
+1. **Request admitted at T=0.** KV blocks allocated incrementally as tokens are generated.
+2. **KV pool fills up (T=30-35 s).** The request has generated ~500 tokens (35s / 70ms/tok) consuming 500 x 327 KB = 163 MB of KV blocks. But OTHER concurrent requests have also consumed KV blocks.
+3. **New block request fails.** The block manager calls `can_append_slot()` which returns False -- no free blocks.
+4. **Preemption fails.** No sequences can be preempted (all are at high priority or preemption would require swapping, which also needs memory).
+5. **CUDA OOM.** vLLM attempts to allocate a new KV block directly in CUDA memory (outside the block pool, as a fallback) -- this fails with OOM.
+
+**Configuration that prevents this:**
+Set `gpu_memory_utilization=0.85` (leaving more headroom) and `max_num_seqs=64` (lower concurrency). Use `--enable-chunked-prefill` to control token budget. Monitor `vllm:gpu_cache_usage_perc` and alert at 90% to preemptively shed load.
+
+---
+
+### Question 3
+**Garbage output (repeated `<unk>` tokens) after upgrading model checkpoint. Two files to check:**
+
+**Most likely cause:** Tokenizer mismatch. The new checkpoint uses a different tokenizer vocabulary than the old one. When the model outputs token IDs that existed in the old vocabulary but map to `<unk>` in the new tokenizer (or vice versa), the decoded text shows garbage.
+
+**Two files to check first:**
+
+1. **`tokenizer_config.json`** -- verify `tokenizer_class`, `model_max_length`, and `vocab_size` match between old and new checkpoint. A mismatch in vocab_size (e.g., old=32,000, new=128,256) means the model's lm_head output has a different number of logits than the tokenizer's vocabulary.
+
+2. **`config.json`** (or `model_config.json`) -- verify `vocab_size` in the model config matches `tokenizer_config.json`. If the model config says vocab_size=128,256 but the loaded tokenizer only has 32,000 tokens, any token ID > 32,000 will decode to `<unk>`.
+
+Also check: the tokenizer's `special_tokens_map.json` to verify `<unk>`, `<pad>`, `<bos>`, `<eos>` token IDs haven't changed between versions.
+
+---
+
+### Question 4
+**4-GPU TP deployment. GPU 2 at 100% util, GPUs 0, 1, 3 at 0%. What happened?**
+
+**What has happened:** The NCCL AllReduce collective has **hung** or **deadlocked** at GPU 2. In tensor parallelism, all 4 GPUs must participate in AllReduce after each row-parallel matmul layer. If GPU 2 is running (100%) but GPUs 0, 1, 3 are waiting (0%), the other three GPUs are blocked in NCCL's AllReduce barrier, waiting for GPU 2 to reach the synchronization point.
+
+**Root causes:**
+1. GPU 2's kernel is stuck in an infinite loop (rare).
+2. A NCCL error on GPU 2 that didn't propagate correctly -- GPU 2 is spinning in an error retry loop.
+3. An OOM on GPU 2 that caused a partial state, leaving the AllReduce in a partially committed state.
+
+**How to recover:**
+1. Kill all vLLM worker processes: `pkill -f vllm.worker`.
+2. Reset NCCL state: `nvidia-smi -r -i 2` (reset GPU 2) -- may require disabling persistence mode.
+3. Check GPU 2's kernel log: `dmesg | grep GPU` for ECC errors or Xid errors that indicate hardware fault.
+4. Restart vLLM with `NCCL_TIMEOUT=30` (lower timeout so hung collectives fail fast with an error message).
+5. If GPU 2 shows persistent ECC errors: replace the GPU or exclude it with `CUDA_VISIBLE_DEVICES=0,1,3` and switch to TP=3.
+
+---
+
+### Question 5
+**Layer 22 taking 300 ms vs 5 ms for all other layers. Two most likely causes:**
+
+**Cause 1 -- CUDA kernel not found in cache (just-in-time compilation).**
+On first inference after server start, CUDA kernels that haven't been compiled are JIT-compiled by PyTorch's inductor or by the CUDA driver. Layer 22 may use a kernel with a unique shape (e.g., a different attention head count or a mixture-of-experts gate that only appears at layer 22) that requires compilation. Subsequent inferences don't show the spike.
+
+**Diagnose:** Run the same request twice. If the 300 ms spike only appears on the first inference (warm-up), it's JIT compilation. Fix: pre-warm with `--num-scheduler-steps=1` dry-run requests at startup.
+
+**Cause 2 -- CUDA graph capture miss (dynamic shape bypasses graph replay).**
+If vLLM uses CUDA graphs and layer 22 receives a tensor with a shape not captured in the graph pool (e.g., the attention mechanism has a conditional branch that activates only at layer 22), vLLM falls back to eager mode for that kernel -- which adds the Python/CUDA launch overhead (typically 100-300 ms for complex ops).
+
+**Diagnose:** Enable `CUDA_LAUNCH_BLOCKING=1` and check if layer 22's timing is consistently slow (capture miss) vs only on cold start (JIT). Also check `VLLM_TRACE_FUNCTION=1` logs for "fallback to eager" messages at layer 22. Fix: ensure all layer shapes are included in CUDA graph capture (adjust `--max-num-batched-tokens` to cover the layer 22 shape).
+

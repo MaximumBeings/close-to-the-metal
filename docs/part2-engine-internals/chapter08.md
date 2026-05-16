@@ -1222,3 +1222,145 @@ print("\nDone.")
 4. llama.cpp starts serving a first token within 300 ms on a laptop while vLLM takes 30 s on a server GPU. Name three architectural reasons for this startup time difference. *(Section 8.5)*
 
 5. What is the purpose of the warm-up pass during vLLM startup? What memory allocation failure would occur without it? *(Section 8.3)*
+
+
+---
+
+## Worked Solutions
+
+---
+
+### Solution 1 — Physical KV blocks on H100 80 GB
+
+**Given:** 80 GB HBM, gpu_memory_utilization=0.90, model=16 GB FP16 (LLaMA-3 8B), activation buffer=1 GB, block_size=16, 32 KV heads, d_k=128, BF16
+
+**Step 1 — Apply utilization cap.**
+
+$$\text{usable HBM} = 80 \text{ GB} \times 0.90 = 72 \text{ GB}$$
+
+**Step 2 — Subtract fixed overheads.**
+
+$$72 - 16 \text{ (weights)} - 1 \text{ (activations)} = 55 \text{ GB for KV pool}$$
+
+**Step 3 — Block size in BF16.**
+
+$$\text{block} = 16 \times 32 \times 128 \times 2\text{(K+V)} \times 2\text{ bytes (BF16)} = 262{,}144 \text{ bytes} = 256 \text{ KB}$$
+
+**Step 4 — Number of blocks.**
+
+$$\frac{55 \times 1024 \times 1024 \times 1024}{262{,}144} = \frac{59{,}055{,}800{,}320}{262{,}144} \approx \textbf{225,280 blocks}$$
+
+**Step 5 — Max concurrent tokens.**
+
+$$225{,}280 \times 16 = 3{,}604{,}480 \text{ tokens}$$
+
+At 8,192 tokens/user (LLaMA-3 context): 3,604,480 / 8,192 ≈ **440 theoretical max concurrent users**.
+
+---
+
+### Solution 2 — Why CUDA graph capture is O(N) not O(N²)
+
+**Given:** max-num-seqs=256, one graph captured per batch size
+
+**Step 1 — What O(N) means here.**
+
+vLLM captures one CUDA graph for each of N = 256 distinct batch sizes: {1, 2, 4, 8, ..., 256} (using power-of-2 bucket sizes in practice). Each capture runs one forward pass at that batch size.
+
+**Step 2 — Why each capture costs O(1) relative to batch size.**
+
+Capturing a CUDA graph at batch size B involves:
+1. Run one warm-up forward pass at batch size B → O(B) compute
+2. The *capture itself* (recording GPU operations) takes time proportional to the *number of distinct kernel calls*, not the data size processed
+
+The number of kernel calls per forward pass is fixed regardless of batch size: it's determined by the model architecture (num_layers × ops_per_layer), not by B.
+
+**Step 3 — Total capture time.**
+
+Total = Σ_{B=1}^{N} (capture time for batch B) = N × (one forward pass time) = O(N)
+
+NOT O(N²): increasing N just adds N more individual captures, each of constant cost. The batch size B inside each capture doesn't affect capture time — only compute time for the warm-up pass.
+
+**Step 4 — Practical numbers.**
+
+For N=256 distinct batch sizes at 1 ms per forward pass: 256 ms ≈ 0.26 s for all captures. Plus the actual warm-up runs. Total startup overhead from graphs: ~5–30 seconds for large models.
+
+---
+
+### Solution 3 — Tensor parallel weight loading on 4 GPUs
+
+**Architecture:** 4-GPU tensor parallel, ColumnParallel for Q/K/V/gate, RowParallel for output/down projections.
+
+**ColumnParallel weights (Q, K, V projections, SwiGLU gate):**
+
+The output dimension is split across ranks. For d_model=4,096 and 4 GPUs:
+
+- Full Q matrix: [4,096, 4,096] (d_model × d_model for full Q heads)
+- Each rank gets: [4,096, 1,024] — columns 0–1023 for rank 0, columns 1024–2047 for rank 1, etc.
+- Each rank computes: `q_partial = X @ W_Q_rank` → shape [batch, 1024]
+- No communication needed after ColumnParallel layer (each rank holds its own Q shards)
+
+**RowParallel weights (output projection, down projection):**
+
+The input dimension is split. Each rank has a shard of the full weight:
+
+- Full O matrix: [4,096, 4,096]  
+- Each rank gets: [1,024, 4,096] — rows 0–1023 for rank 0, etc.
+- Each rank computes: `o_partial = q_partial @ W_O_rank` → shape [batch, 4,096]
+- **AllReduce required:** `o_final = AllReduce(o_partial)` across all 4 ranks
+- After AllReduce, all ranks have the identical full output tensor
+
+**Weight loading:** vLLM uses `safetensors` sharding — the checkpoint either pre-shards (one file per rank) or loads the full tensor and slices via `tensor[rank::tp_size, :]` for column splits.
+
+---
+
+### Solution 4 — Three reasons llama.cpp starts in 300 ms vs vLLM's 30 s
+
+**Reason 1: No CUDA graph capture.**
+
+vLLM captures one CUDA graph per batch size (up to 256 captures), each requiring a full forward pass. For a 7B model at 5 ms/pass: 256 × 5 ms = 1.28 s just for captures. For 70B: much longer.
+
+llama.cpp uses eager kernel launch (no graphs), so there is nothing to capture at startup.
+
+**Reason 2: Memory-mapped (mmap) weight loading.**
+
+vLLM reads the entire model into GPU HBM before serving. A 7B FP16 model = 14 GB; at PCIe Gen4 speeds (~20 GB/s): 14 GB / 20 GB/s = 0.7 s minimum, plus disk read time.
+
+llama.cpp's mmap maps the file into virtual memory without reading it. Time: milliseconds.
+
+**Reason 3: No block allocator initialization or profiling pass.**
+
+vLLM runs a "profiling forward pass" at startup to measure peak activation memory, then allocates the full KV block pool. For a large model, this profiling pass alone can take several seconds, followed by allocating and initializing gigabytes of KV cache memory.
+
+llama.cpp allocates a single KV buffer (sized at startup via `n_ctx`) — much simpler, takes milliseconds.
+
+---
+
+### Solution 5 — Purpose of the warm-up pass during vLLM startup
+
+**What we need:** Why warm-up exists and what OOM failure it prevents.
+
+**Step 1 — What the warm-up pass does.**
+
+Before opening for traffic, vLLM runs a synthetic forward pass with:
+- The maximum batch size configured (`max_num_seqs`)
+- The maximum sequence length (`max_model_len`)
+- All token positions filled with dummy values
+
+This exercises every code path the server will use under production load.
+
+**Step 2 — What it measures.**
+
+During the warm-up pass, CUDA's memory allocator tracks peak memory usage for all intermediate (activation) tensors: attention score matrices, intermediate FFN activations, layer norm buffers, etc.
+
+The result: a precise measurement of "how much HBM do activations need at maximum load?"
+
+**Step 3 — Without warm-up: the failure mode.**
+
+Without a warm-up pass, vLLM would allocate the full KV block pool based on a *guess* about activation memory. If that guess is too small:
+
+- First real request arrives at max batch size
+- Activation tensors try to allocate more HBM than estimated
+- GPU OOM error → server crash
+
+With warm-up, the measured activation peak is subtracted from available HBM *before* the block pool is sized, guaranteeing no OOM from activation memory at any batch size up to the configured maximum.
+

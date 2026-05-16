@@ -773,3 +773,118 @@ groups:
 4. Write a PromQL expression that alerts when the 5-minute rolling P99 TTFT exceeds 2 seconds. *(Section 16.4)*
 
 5. An OpenTelemetry trace for a single request shows: HTTP gateway 2 ms, scheduler queue 450 ms, prefill 620 ms, decode (120 tokens) 4 800 ms, detokenise 3 ms. Identify the bottleneck and suggest one configuration change. *(Section 16.5)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**Observations:** `vllm:gpu_cache_usage_perc = 0.97`, `vllm:num_requests_running = 120`.
+
+**What is happening:**
+The KV cache is at 97% capacity with 120 concurrent sequences. The system is at the edge of cache exhaustion. Any additional requests requiring new blocks will trigger **preemption** — the scheduler will evict and recompute (or swap) one or more lower-priority sequences to free blocks for the new request.
+
+**Next metric to check:** `vllm:num_requests_waiting`
+- If this is non-zero and growing, requests are queuing because the scheduler cannot admit new sequences without first freeing blocks.
+- Also check `vllm:gpu_cache_usage_perc` over time (rate of change): a rapidly rising metric indicates a memory leak or pathologically long sequences consuming all blocks.
+
+**Secondary check:** `vllm:num_preemptions_total` — a rising preemption count alongside 97% cache usage confirms the system is thrashing. Consider reducing `max_num_seqs` or `max_model_len`.
+
+---
+
+### Question 2
+**Observations:** P99 TTFT = 3.2 s, P50 TTFT = 0.4 s.
+
+**What the distribution tells you:**
+The median request receives prefill service within 0.4 s, but 1 in 100 requests waits 3.2 s. This is a **heavy-tailed waiting distribution**, not a uniform latency problem. The GPU is not uniformly slow — specific requests are waiting in the scheduler queue for a long time before their prefill begins.
+
+**Two scheduling configurations that could cause this:**
+
+1. **`max_num_batched_tokens` is too small relative to `max_num_seqs`.**
+   With many short decode requests filling the token budget (e.g., 128 sequences × 1 token = 128 tokens), a large prefill request (e.g., 3,000 tokens) must wait for multiple scheduling rounds until the token budget opens up. P99 TTFT spikes for these "whales."
+
+2. **No chunked prefill + large prompt variance.**
+   When a single huge prompt (p99 length = 20K tokens) arrives, it blocks the entire token budget for multiple steps. All other requests admitted after it experience head-of-line blocking, inflating their P99 TTFT. Enabling `--enable-chunked-prefill` breaks this monopoly by splitting large prefills into chunks.
+
+---
+
+### Question 3
+**Setup:** 70B BF16 on A100, GPU util = 89%, ITL P50 = 80 ms.
+
+**Expected ITL calculation:**
+For a 70B BF16 model, each decode step reads all 70B × 2 bytes = 140 GB of weights from HBM (batch=1). A100 HBM bandwidth = 2 TB/s.
+
+**Theoretical minimum ITL at batch=1:**
+```
+t_min = 140 GB / 2,000 GB/s = 0.07 s = 70 ms
+```
+
+**Observed ITL: 80 ms.**
+```
+80 ms is within 14% of the 70 ms theoretical minimum.
+```
+
+At 89% GPU utilization, the extra 10 ms (80−70) is consistent with scheduling overhead, NCCL synchronization, and Python-layer latency. The 89% util metric reflects SM (streaming multiprocessor) activity, which includes memory load instructions — memory-bound workloads show high GPU util even when compute throughput is low.
+
+**Conclusion:** 80 ms ITL at 89% utilization is **consistent** and expected. The model is deeply memory-bandwidth-bound (arithmetic intensity ≈ 1 FLOP/byte), so 89% SM utilization means the HBM bandwidth is nearly saturated — exactly the correct state for efficient bandwidth-bound inference.
+
+---
+
+### Question 4
+**PromQL alert for P99 TTFT > 2 seconds (5-minute window):**
+
+```promql
+histogram_quantile(
+  0.99,
+  rate(vllm:e2e_request_latency_seconds_bucket{phase="prefill"}[5m])
+) > 2
+```
+
+Or using the TTFT metric directly if exposed:
+```promql
+histogram_quantile(
+  0.99,
+  rate(vllm:time_to_first_token_seconds_bucket[5m])
+) > 2
+```
+
+**Alert rule in YAML:**
+```yaml
+- alert: HighP99TTFT
+  expr: |
+    histogram_quantile(0.99,
+      rate(vllm:time_to_first_token_seconds_bucket[5m])
+    ) > 2
+  for: 2m
+  labels:
+    severity: warning
+  annotations:
+    summary: "P99 TTFT exceeds 2 s"
+    description: "5-minute P99 TTFT is {{ $value }}s — check scheduler queue depth and chunked-prefill config."
+```
+
+The `for: 2m` clause prevents alerting on momentary spikes (one large request). The 5-minute rate window smooths noisy bucket increments.
+
+---
+
+### Question 5
+**Trace breakdown:**
+- HTTP gateway: 2 ms
+- Scheduler queue: **450 ms** ← large
+- Prefill: 620 ms
+- Decode (120 tokens): **4,800 ms** ← largest
+- Detokenize: 3 ms
+- **Total: ~5,875 ms**
+
+**Bottleneck identification:**
+The decode phase takes 4,800 ms for 120 tokens = 40 ms/token ITL.
+
+For context: on an A100 with a typical 7–13B model, 40 ms ITL at batch=1 is 2–4× slower than expected (expected ~10–20 ms). This suggests either:
+- A **large batch** inflating decode time per token (the request waited 450 ms in queue because the batch was full → decode step is now processing many concurrent sequences → ITL for this request is high due to context-switching overhead), or
+- A **memory bandwidth bottleneck** from a very large model with insufficient HBM.
+
+The 450 ms scheduler queue time indicates the system was under significant load — the request was blocked waiting for KV blocks to free.
+
+**One configuration change:** Reduce `--max-num-seqs` from its current value (or set it explicitly to, e.g., 64) to reduce the number of concurrent decode sequences, which will lower per-request ITL at the cost of slightly reduced throughput. Alternatively, enable `--enable-chunked-prefill` to allow the 450 ms queued request to interleave with decode steps rather than waiting for the entire batch to finish prefill.
+

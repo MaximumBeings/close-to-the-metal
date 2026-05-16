@@ -966,3 +966,172 @@ throughput, latency, and memory.
 4. You set `proxy_buffering on` in nginx in front of vLLM. Describe the user experience change and explain the buffering mechanism that causes it. *(Section 13.5)*
 
 5. llama.cpp's `/v1/chat/completions` server uses chunked Transfer-Encoding rather than SSE. Name one client-side difference in how the response is parsed compared to an SSE stream. *(Section 13.3)*
+
+
+---
+
+## Worked Solutions
+
+---
+
+### Solution 1 — First character and full response timing
+
+**Given:** TTFT=800 ms, ITL=35 ms/token, 120 tokens total
+
+**Part (a) — When does the user see the first character?**
+
+TTFT (Time to First Token) is exactly the time to the first visible character:
+
+$$\textbf{800 ms} \text{ after the request is sent}$$
+
+This includes: network round-trip, tokenization, prefill forward pass, and the decode of the first token. The user's screen shows nothing for 800 ms, then the first word appears.
+
+**Part (b) — Time until the full response is complete.**
+
+$$\text{total time} = \text{TTFT} + (\text{tokens} - 1) \times \text{ITL}$$
+$$= 800 \text{ ms} + 119 \times 35 \text{ ms}$$
+$$= 800 + 4{,}165 = \textbf{4,965 ms} \approx 5.0 \text{ seconds}$$
+
+We subtract 1 from 120 because TTFT already accounts for generating the first token; the remaining 119 tokens are produced at ITL pace.
+
+**Practical note:** 35 ms ITL corresponds to ~28.6 tokens/second — typical for a 7B model on an A10G GPU at batch size 16. The 800 ms TTFT suggests a 400–600 token prompt (prefill dominates TTFT for longer prompts).
+
+---
+
+### Solution 2 — SSE JSON chunk structure for delta.content = "the"
+
+**What we need:** Full SSE wire format including JSON structure and terminators.
+
+**The complete SSE chunk:**
+
+```
+data: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","created":1699000000,"model":"meta-llama/Meta-Llama-3-8B-Instruct","choices":[{"index":0,"delta":{"content":"the"},"logprobs":null,"finish_reason":null}]}
+
+```
+
+**Breaking it down:**
+
+| Component | Value | Meaning |
+|-----------|-------|---------|
+| `data: ` | literal prefix | SSE event data field |
+| `"id"` | `"chatcmpl-abc123"` | Unique request ID |
+| `"object"` | `"chat.completion.chunk"` | Streaming response type |
+| `"choices[0].delta.content"` | `"the"` | The generated token text |
+| `"finish_reason"` | `null` | Not null on last chunk (set to `"stop"` or `"length"`) |
+| Trailing `\n\n` | (two newlines) | **SSE chunk terminator** — required |
+
+**Why two newlines?**
+
+The Server-Sent Events specification (RFC) uses a blank line (two consecutive `\n`) to signal the end of one event. Without it, the browser's EventSource API would not fire the `message` event. A common bug is sending only one newline, causing the client to buffer indefinitely waiting for the second.
+
+---
+
+### Solution 3 — UTF-8 partial character streaming
+
+**Setup:** A 3-byte UTF-8 character (e.g., the Chinese character 你 = 0xE4 0xBD 0xA0) is emitted as three separate token steps.
+
+**Step T — First byte emitted.**
+
+The tokenizer can produce individual bytes as tokens for characters not in the vocabulary. At step T, the byte `0xE4` is emitted.
+
+vLLM's text streamer calls the tokenizer's `decode([0xE4])` method — this returns an empty string or a replacement character (the bytes are not a complete codepoint).
+
+**What the streamer does:** Buffer the incomplete bytes. **Send an empty delta** (`delta.content = ""`). The client sees no new character but does not stall.
+
+**Step T+1 — Second byte emitted (0xBD).**
+
+Buffer now contains [0xE4, 0xBD]. Still incomplete (requires 3 bytes for this codepoint). Streamer sends **empty delta** again.
+
+**Step T+2 — Third byte emitted (0xA0).**
+
+Buffer: [0xE4, 0xBD, 0xA0]. `decode([0xE4, 0xBD, 0xA0])` returns `"你"` — a complete, valid UTF-8 codepoint.
+
+Streamer sends: `delta.content = "你"`.
+
+**User experience:** No character appears for 2 steps (70 ms at 35 ms/ITL), then the Chinese character appears in one step. This 2-step delay is imperceptible to humans but visible in log analysis.
+
+**Why this matters:** Sending raw bytes to the client without this buffering would produce garbled output (invalid UTF-8 sequences). The streamer's buffering is required for multilingual correctness.
+
+---
+
+### Solution 4 — proxy_buffering on: user experience and mechanism
+
+**User experience change:**
+
+Without `proxy_buffering off` (i.e., buffering is ON): the user sees **no streaming output**. Instead of tokens appearing one by one as the model generates them, the user sees a spinning cursor for the full response duration (~5 seconds in Solution 1), then the *complete* 120-token response appears all at once.
+
+**Mechanism:**
+
+1. vLLM sends SSE chunks (each one token) to nginx as they are produced.
+2. nginx's proxy buffer collects these chunks in its internal buffer (default: 8 KB or 128 KB).
+3. nginx waits until the buffer is full OR the upstream connection closes before forwarding to the client.
+4. Since the full response is 120 tokens × ~10 bytes/token = ~1,200 bytes < 8 KB, nginx buffers the *entire* response before sending.
+5. The client receives all 1,200 bytes in one TCP segment at t=5 seconds.
+
+**Fix:**
+
+```nginx
+location /v1/ {
+    proxy_pass http://vllm_backend;
+    proxy_buffering off;           # forward chunks immediately
+    proxy_cache off;
+    proxy_set_header X-Accel-Buffering no;
+}
+```
+
+Also set `X-Accel-Buffering: no` in the upstream response headers for belt-and-suspenders.
+
+---
+
+### Solution 5 — Chunked Transfer-Encoding vs SSE: client-side difference
+
+**SSE (Server-Sent Events):**
+
+The response uses `Content-Type: text/event-stream`. The client uses the browser's built-in `EventSource` API or a polyfill:
+
+```javascript
+const source = new EventSource('/v1/chat/completions');
+source.onmessage = (event) => {
+    const chunk = JSON.parse(event.data);
+    console.log(chunk.choices[0].delta.content);
+};
+```
+
+The `EventSource` API handles all parsing: it reads `data: {...}\n\n` lines, extracts the JSON, and fires `onmessage` for each complete event.
+
+**Chunked Transfer-Encoding:**
+
+The response uses `Transfer-Encoding: chunked`. Each chunk is prefixed with its length in hexadecimal:
+
+```
+5e
+
+{"choices":[{"delta":{"content":"the"}}]}
+
+0
+
+
+
+```
+
+The client must:
+1. Read hex chunk length (`5e` = 94 bytes)
+2. Read exactly 94 bytes of chunk body
+3. Read the trailing `\r\n`
+4. Repeat until chunk length = `0` (stream end marker)
+5. Parse each chunk body as JSON
+
+```javascript
+// Simplified chunked stream reader
+const reader = response.body.getReader();
+let buffer = '';
+while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += new TextDecoder().decode(value);
+    // Parse hex length, extract body, parse JSON...
+}
+```
+
+**Key difference:** SSE provides a structured event protocol with built-in parsing (newline delimiters, `data:` prefix). Chunked transfer is raw byte streaming — the client must implement its own framing parser. SSE is simpler for browser clients; chunked is more flexible for server-to-server streaming with non-standard formats.
+

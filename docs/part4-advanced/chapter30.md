@@ -1608,3 +1608,142 @@ gracefully when the small model isn't enough.*
 4. The model is updated from version 1 to version 2. The cache contains 50 000 entries from version 1. Describe the invalidation strategy: how do you prevent version 1 responses from being served under version 2? *(Section 30.5)*
 
 5. A user asks "What happened in the news today?" The semantic cache returns a response from 3 days ago with similarity 0.995. This is a cache hit. Why is this dangerous, and what cache policy prevents it? *(Section 30.6)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**Semantic cache: cosine threshold theta=0.97. Query A vs B similarity=0.988 > 0.97 --> cache hit served?**
+
+Yes: 0.988 > 0.97 -> **cache hit is served**. Query B receives the cached response to Query A.
+
+**Potential problem for factual questions:**
+"What is the capital of France?" and "Name the capital city of France?" are semantically very similar (similarity ~0.988) and have the same correct answer (Paris). No problem here.
+
+However, consider:
+- "What is the population of France?" vs "What is the population of Germany?" 
+These might have similarity ~0.91 (both ask about European country populations) -- below 0.97, so no hit. But:
+- "What is France's GDP?" vs "What is France's GDP in euros?" might exceed 0.97 despite one expecting a number and the other expecting a currency-denominated number.
+
+**Core problem:** Semantic similarity captures topical relatedness, not logical equivalence. Two factually different questions about the same topic can have very high semantic similarity. Serving stale or wrong-entity answers for factually-sensitive queries can cause significant misinformation.
+
+**Mitigation:** For factual queries, combine semantic similarity with keyword/entity matching. A cached answer should only be served if ALL named entities in the query match those in the cached query (France in query A and France in query B), not just the topic.
+
+---
+
+### Question 2
+**Embedding model: 12 ms/query. Inference: 400 ms. Cache hit rate: 45%.**
+
+**Without semantic cache:**
+Every request goes to inference: 400 ms/request.
+
+**With semantic cache:**
+Every request goes through embedding model first: +12 ms overhead.
+- 45% hit rate: 12 ms total (cache hit, no inference)
+- 55% miss rate: 12 + 400 = 412 ms total
+
+**Average latency:**
+```
+avg_latency = 0.45 x 12 ms + 0.55 x 412 ms
+            = 5.4 + 226.6
+            = 232 ms per request
+```
+
+**vs without cache:** 400 ms.
+
+**Speedup:** 400 / 232 = 1.72x faster average latency with the semantic cache.
+
+**Note:** The cache also changes the latency distribution. Cache hits (45% of requests) see P99 ~= 20 ms vs 400+ ms without cache -- a dramatic improvement for users whose queries happen to hit the cache.
+
+---
+
+### Question 3
+**500K requests/day, 40% hit rate. Cache miss: $0.004/request. Hit: $0.0001/request.**
+
+**Daily costs:**
+
+Cache hits:
+```
+hits = 500,000 x 0.40 = 200,000 requests/day
+hit_cost = 200,000 x $0.0001 = $20.00/day
+```
+
+Cache misses:
+```
+misses = 500,000 x 0.60 = 300,000 requests/day
+miss_cost = 300,000 x $0.004 = $1,200.00/day
+```
+
+**Total with cache:**
+```
+total = $20 + $1,200 = $1,220/day
+```
+
+**Without cache (all misses):**
+```
+total = 500,000 x $0.004 = $2,000/day
+```
+
+**Daily saving:** $2,000 - $1,220 = **$780/day**
+
+**Monthly saving:** $780 x 30 = **$23,400/month**
+
+The embedding cost ($20/day for hits) is negligible vs the $780 daily saving. The cache ROI is clear -- even expensive vector databases ($200-500/month) are justified at this scale.
+
+---
+
+### Question 4
+**Model updated v1 -> v2. Cache has 50,000 entries from v1. Invalidation strategy:**
+
+**Why version 1 responses are dangerous under version 2:**
+The new model may have different knowledge (updated training data), different reasoning patterns, or intentional behavior changes (safety improvements, style updates). Serving v1 responses under v2 violates users' expectation that they are interacting with the updated model.
+
+**Recommended invalidation strategy: Version-tagged cache with TTL drain.**
+
+**Implementation:**
+1. Add a `model_version` field to every cache entry: `{"query_embedding": [...], "response": "...", "model_version": "v1", "cached_at": timestamp}`.
+2. On cache lookup, require `model_version == current_deployed_version`. A v1 entry is a **forced miss** under v2.
+3. Set a TTL of 24-48 hours on all entries. v1 entries expire naturally and are replaced by v2 entries as requests come in.
+4. Optionally: at deploy time, run a background job that deletes all entries with `model_version != v2` immediately (clean break), or let TTL handle it (gradual transition).
+
+**Trade-off:**
+- Immediate flush: clean, no mixed-version responses, but cold cache for 1-2 hours post-deploy.
+- TTL drain: gradual, some v1 responses served briefly, but cache warms continuously as users make requests.
+
+For safety-critical model updates, always use **immediate flush**.
+
+---
+
+### Question 5
+**"What happened in the news today?" returns cached response from 3 days ago with similarity 0.995. Why dangerous? What policy prevents it?**
+
+**Why dangerous:**
+The question explicitly asks for *today's* news. A response from 3 days ago is factually stale -- it describes events that are no longer current. Worse: at similarity 0.995, it will appear as if the response is answering the current query. The user receives misinformation presented with confidence.
+
+Real consequences: serving outdated stock prices, weather forecasts, sports scores, breaking news -- any time-sensitive information becomes incorrect.
+
+**Cache policy to prevent this: Temporal Query Detection + TTL=0 for time-sensitive queries.**
+
+**Detection:** Classify queries as time-sensitive using keyword detection:
+- Trigger words: "today", "now", "current", "latest", "this week", "just", "recently", "breaking", "live"
+- Date references: "in 2026", "yesterday", "last night"
+
+**Policy:**
+```python
+def is_time_sensitive(query: str) -> bool:
+    time_words = {"today", "now", "current", "latest", "this week", 
+                  "yesterday", "breaking", "just", "recently"}
+    return any(word in query.lower() for word in time_words)
+
+if is_time_sensitive(query):
+    # Bypass cache entirely -- always go to inference
+    return None  # force cache miss
+```
+
+**Additional policy:** For all cache entries, set TTL based on content type:
+- Factual static (capital cities): TTL = 30 days
+- Semi-static (company info): TTL = 24 hours
+- Time-sensitive (news, prices): TTL = 0 (never cache) or TTL = 1 hour
+

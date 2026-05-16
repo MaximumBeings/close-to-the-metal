@@ -756,3 +756,99 @@ Chapter 35 covers Qwen — the multilingual model family from Alibaba that spans
 - **KV cache savings from MLA**: at sequence length 4 096, MLA reduces per-token KV memory from 512 KB (full MHA at 128 heads) to ~40 KB — a 13× reduction, enabling much larger batch sizes.
 - **Serving DeepSeek with vLLM**: requires `--trust-remote-code` and MLA-specific kernel support; `--quantization fp8` leverages native FP8 inference.
 - **DeepSeek-R1**: reasoning variant with chain-of-thought; average 8 000 thinking tokens per query dramatically increases KV cache and compute requirements.
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**KV cache: Llama 3.1 70B vs DeepSeek-V3 (MLA) at 128K context.**
+
+**Llama 3.1 70B (GQA, 8 KV heads, 128 layers... wait: 80 layers, d_k=128, BF16):**
+```
+KV_per_token = 2 x 80 layers x 8 KV heads x 128 dim x 2 bytes
+             = 2 x 80 x 8 x 128 x 2
+             = 327,680 bytes = 320 KB per token
+
+Total at 128K: 128,000 x 320 KB = 40,960 MB = 40 GB
+```
+
+**DeepSeek-V3 (MLA, c_KV=512 per token):**
+MLA caches only the compressed latent vector c_KV of dimension 512 per token (not the full K/V).
+```
+MLA_KV_per_token = 61 transformer layers x 512 x 2 bytes = 62,464 bytes ~= 61 KB per token
+
+Total at 128K: 128,000 x 61 KB = 7,808 MB ~= 7.6 GB
+```
+
+**Comparison:** DeepSeek-V3 MLA uses ~7.6 GB vs Llama's ~40 GB -- approximately **5.3x less KV cache** at 128K context. This is the core efficiency win of MLA that enables DeepSeek-V3 to handle much longer contexts on the same hardware.
+
+---
+
+### Question 2
+**DeepSeek-V3: 671B parameters, 37B active per token.**
+
+**(a) Memory requirement:**
+The full 671B parameters must be stored in memory even though only 37B are active per token. Expert weights for all 256 experts must be loaded (MoE routing is dynamic -- any expert could be called for any token). At FP8 (1 byte/param):
+```
+memory = 671B x 1 byte = 671 GB minimum
+```
+This requires at least 9 x H100-80GB (720 GB total, giving 49 GB headroom) or 8 x H200-141GB (1,128 GB, with ample headroom for KV cache).
+
+**(b) Throughput at batch=1:**
+At batch=1, each decode step activates only 37B parameters (top-8 of 256 experts). The memory bandwidth bottleneck is loading active weights:
+```
+bytes_loaded = 37B x 1 byte/param (FP8) = 37 GB per decode step
+time = 37 GB / 3,350 GB/s (H100 HBM bandwidth) = 11 ms per token
+```
+This is comparable to a 37B dense model -- the sparsity directly translates to throughput at batch=1. At large batch sizes, MoE throughput advantage grows further as the expert routing distributes across all 256 experts.
+
+---
+
+### Question 3
+**Why MoE serving requires NVLink rather than PCIe between GPUs:**
+
+In MoE serving, every forward pass includes an all-to-all communication: each GPU sends token activations to the GPUs holding the selected expert weights, and receives the expert outputs back. For DeepSeek-V3 with top-8 routing and 256 experts across 8+ GPUs:
+
+**Communication volume per token per step:**
+Each token is sent to 8 different expert GPUs and receives 8 expert outputs back. For d_model=7,168, BF16:
+```
+per_token_comm = 8 experts x 7,168 x 2 bytes x 2 (send+receive) = 229,376 bytes = 224 KB
+```
+For a batch of 1,000 tokens:
+```
+total = 1,000 x 224 KB = 224 MB per forward pass step
+```
+
+**Bandwidth requirement:**
+If each decode step must complete in 20 ms (50 Hz), the all-to-all bandwidth requirement is:
+```
+required_bandwidth = 224 MB / 0.020 s = 11.2 GB/s per GPU pair
+```
+
+- NVLink 4.0: 900 GB/s bidirectional between all GPU pairs via NVSwitch -> easily handles 11.2 GB/s.
+- PCIe 4.0: 16-32 GB/s *total*, shared across all GPU-to-GPU transfers, with high latency (~5 µs vs ~1 µs for NVLink).
+
+On PCIe, the all-to-all becomes the dominant bottleneck, reducing effective throughput by 5-10x. NVLink is effectively mandatory for production MoE serving.
+
+---
+
+### Question 4
+**Minimum GPU configuration for DeepSeek-V3 with FP8 weights:**
+
+DeepSeek-V3 at FP8: 671B x 1 byte = 671 GB model weights.
+
+Add KV cache for reasonable context (e.g., 8K tokens at 61 KB/token = 488 MB, negligible).
+Add activations and overhead: ~50 GB.
+
+Total: ~721 GB.
+
+**Minimum configuration:**
+- 8x H100-SXM5 (80 GB each = 640 GB): **insufficient** (671 GB weights alone exceed 640 GB).
+- 10x H100-SXM5 (800 GB): sufficient for weights, minimal KV budget.
+- **8x H200 (141 GB each = 1,128 GB)**: sufficient with ample KV cache headroom. This is DeepSeek's recommended configuration.
+- Alternatively: 16x A100-80GB (1,280 GB) with TP=16 and EP=8 -- works but high communication overhead.
+
+**Practical minimum: 8x H200-141GB** connected via NVLink -- matching DeepSeek's reference deployment.
+

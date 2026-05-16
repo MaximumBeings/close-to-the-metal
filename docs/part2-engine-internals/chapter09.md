@@ -847,3 +847,135 @@ implementation.
 4. The `paged_attention_v2` kernel must look up each KV block's physical address via the block table. Sketch the CUDA kernel structure: what data does each thread block access, and how is work divided across blocks and threads? *(Section 9.2)*
 
 5. llama.cpp's ggml compute graph is rebuilt on every forward pass when sequences have different lengths. What is the cost of this rebuild, and how does llama.cpp minimize it for server workloads? *(Section 9.5)*
+
+
+---
+
+## Worked Solutions
+
+---
+
+### Solution 1 — Batched Q tensor shape for 32 decode sequences
+
+**What we need:** Shape of the query tensor for 32 simultaneous decode sequences.
+
+**Step 1 — Per-sequence query at decode time.**
+
+At decode, each sequence generates exactly 1 new token. The query for sequence s at head h is a vector of shape `[1, d_k]`. With `num_heads` heads: the full per-sequence query is `[1, num_heads, d_k]`.
+
+**Step 2 — Batched query.**
+
+Stacking 32 sequences:
+
+$$Q \text{ shape} = [32, \text{num\_heads}, 1, d_k] \quad \text{or equivalently} \quad [32, 1, \text{num\_heads}, d_k]$$
+
+For LLaMA-3 8B (32 Q-heads, d_k=128): `[32, 32, 1, 128]` = 32 × 32 × 128 = 131,072 elements = 256 KB in BF16.
+
+**Step 3 — Contrast with prefill.**
+
+At prefill with sequence length T: Q shape = `[1, T, num_heads, d_k]`. The `T` dimension is what enables all-to-all attention during prefill. Decode's `1` in that position is what makes it memory-bound (tiny compute per large weight load).
+
+---
+
+### Solution 2 — How KV cache grows between CUDA graph replays
+
+**What we need:** What changes between replays, what stays fixed.
+
+**What STAYS FIXED (required for graph validity):**
+
+- **Tensor shapes:** All input/output tensor shapes are identical across replays
+- **KV cache buffer:** The buffer is preallocated at max size — its shape never changes
+- **Graph structure:** Same sequence of CUDA kernels is called in the same order
+
+**What CHANGES between replays:**
+
+1. **Values in the KV buffer:** After each decode step, new K and V vectors for the current token are *written* into the preallocated buffer at the current position index. The buffer's shape doesn't change; only its contents do.
+
+2. **Block table contents:** The mapping from sequence logical positions to physical block addresses is passed as an input tensor. Its *shape* is fixed (`[max_num_seqs, max_blocks_per_seq]`), but its *values* change as sequences advance.
+
+3. **Sequence length counters:** A `seq_lens` tensor tracks how far each sequence has progressed. Its shape is fixed; values increment each step.
+
+**Summary:** CUDA graphs require static shapes but allow dynamic values. vLLM engineers the API so that all variable state (KV positions, sequence lengths, block tables) lives in pre-allocated tensors that are updated in-place before each graph replay.
+
+---
+
+### Solution 3 — AllReduce overhead for 4-GPU tensor parallel
+
+**Given:** 32 transformer blocks, 2 AllReduce per block, block_time=1 ms, AllReduce_time=0.1 ms
+
+**Step 1 — Total AllReduce operations.**
+
+$$2 \text{ AllReduce/block} \times 32 \text{ blocks} = 64 \text{ AllReduce calls}$$
+
+**Step 2 — Total time breakdown.**
+
+$$\text{compute time} = 32 \times 1 \text{ ms} = 32 \text{ ms}$$
+$$\text{communication time} = 64 \times 0.1 \text{ ms} = 6.4 \text{ ms}$$
+$$\text{total with TP} = 32 + 6.4 = 38.4 \text{ ms}$$
+
+**Step 3 — Overhead fraction.**
+
+$$\text{overhead} = \frac{6.4}{38.4} \approx \textbf{16.7\%}$$
+
+**Step 4 — Practical context.**
+
+NVLink on H100 provides 900 GB/s per GPU — AllReduce for a typical activation tensor (16 KB) takes ~18 μs, not 100 μs. The 0.1 ms figure represents PCIe-limited inter-node communication, which is why vLLM prefers intra-node tensor parallelism (NVLink) over inter-node (PCIe/InfiniBand). With NVLink, the 16.7% overhead drops to ~2%.
+
+---
+
+### Solution 4 — paged_attention_v2 kernel structure
+
+**What we need:** Thread block organization and memory access pattern.
+
+**High-level structure:**
+
+The paged attention kernel computes attention for one query vector against a paged KV cache.
+
+**Thread block assignment:**
+
+- Each **CUDA thread block** handles: one (sequence, head) pair
+- Grid: `[num_sequences, num_kv_heads]`
+
+**Within a thread block:**
+
+1. **Load query:** All threads collaboratively load the query vector `q[head_dim]` into shared memory (one load from HBM).
+
+2. **Iterate over blocks:** For block_idx = 0, 1, ..., num_blocks_for_this_sequence:
+   a. Look up physical block address: `phys_addr = block_table[seq_id][block_idx]`
+   b. Load K block from `kv_cache[phys_addr, 0, :, :]` → shared memory (16 tokens × d_k)
+   c. Compute dot products q · k_j for all j in this block → local scores
+   d. Track running max for online softmax
+
+3. **Second pass:** Reload V blocks, compute weighted sum using final softmax weights
+
+4. **Write output:** Each thread writes its output element to global memory
+
+**Key design decision:** The block table lookup (`phys_addr = block_table[seq_id][block_idx]`) introduces one extra memory indirection per block compared to contiguous attention. This is the cost of paging — mitigated by keeping the block table in shared memory.
+
+---
+
+### Solution 5 — ggml compute graph rebuild cost and minimization
+
+**What we need:** Cost of rebuild, how server mode minimizes it.
+
+**Step 1 — What triggers a rebuild.**
+
+ggml represents computation as a directed acyclic graph (DAG) of tensor operations. The graph nodes specify which operations to run and on which tensors. If the sequence length changes (e.g., from 512 to 513 tokens), some node shapes change (attention mask, positional encoding tensors), requiring graph reconstruction.
+
+**Step 2 — Rebuild cost.**
+
+Rebuilding the ggml graph for a 32-layer LLaMA model involves:
+- Allocating ~200–400 graph nodes (each is a small struct)
+- Linking nodes in topological order
+- Allocating workspace memory for new tensor shapes
+
+Cost: approximately **0.5–2 ms** per rebuild on a modern CPU. This is small but becomes significant if triggered every single decode step (e.g., 35 ms/token becomes 37 ms/token — 6% overhead).
+
+**Step 3 — Server mode minimization strategies.**
+
+1. **Pre-build graphs for common lengths:** llama.cpp server builds and caches graphs for sequence lengths in discrete steps (e.g., 128, 256, 512, 1024, 2048). Most sequences fit an existing cached graph.
+
+2. **Fixed-size batches:** By fixing batch size and context length at server startup, the graph shape becomes static and never needs rebuilding.
+
+3. **Batched decode:** Process multiple sequences simultaneously with a fixed batch tensor shape — the graph shape depends on batch size (fixed) not per-sequence length (variable).
+

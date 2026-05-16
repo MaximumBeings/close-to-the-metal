@@ -1482,3 +1482,188 @@ In Chapter 4 we will open the transformer block and study exactly what happens i
 4. A batch of 16 requests all happen to be at the same decode step. How many forward passes does vLLM run? How many would a static-batching engine run? *(Section 3.4)*
 
 5. What is the difference between sequence length and context length? What happens in vLLM when a sequence's KV cache consumption reaches `max_model_len`? *(Section 3.2)*
+
+
+---
+
+## Worked Solutions
+
+---
+
+### Solution 1 — Token count estimate for 342-character English prose
+
+**What we need:** Estimate tokens from character count.
+
+**Step 1 — The rule of thumb.**
+
+LLaMA-3's tokenizer (based on tiktoken with a 128K vocabulary) processes English prose at approximately **3.5–4.5 characters per token** on average. Common words like "the", "is", "of" are typically single tokens; longer words may split into 2–3 tokens.
+
+**Step 2 — Apply the estimate.**
+
+$$\text{Estimated tokens} = \frac{342 \text{ characters}}{4 \text{ chars/token}} = 85.5 \approx \textbf{85–86 tokens}$$
+
+**Step 3 — Understand the variance.**
+
+The actual token count depends on vocabulary coverage:
+- **Dense vocabulary coverage** (common English words): ~4 chars/token → 85 tokens
+- **Technical jargon or rare words**: ~3 chars/token → 114 tokens
+- **Code or symbols**: ~2 chars/token → 171 tokens
+
+For a quick mental estimate, use 4 chars/token for English prose and 3 chars/token for mixed technical text.
+
+**Step 4 — Why this matters in production.**
+
+Token count directly determines:
+- **KV cache memory** consumed (bytes per token × token count)
+- **Billing** (LLM API pricing is per token, not per character)
+- **Batch slot usage** (a 342-char prompt uses ~86 token slots, not 342)
+
+Always estimate tokens, not characters, when planning memory budgets.
+
+---
+
+### Solution 2 — Batch scheduling with a 2,048-token budget
+
+**What we need:** Show which requests fit in the next scheduling step.
+
+**Setup:**
+- Token budget per step: 2,048
+- Running (mid-decode): 3 sequences, each contributing 1 token (decode is always 1 token/sequence/step)
+- Waiting (new prefills): 4 sequences, each ~512 tokens
+
+**Step 1 — Reserve tokens for running decode sequences.**
+
+The 3 mid-decode sequences each need exactly 1 token slot:
+
+$$\text{Decode tokens consumed} = 3 \times 1 = 3$$
+
+$$\text{Remaining budget} = 2{,}048 - 3 = 2{,}045 \text{ tokens}$$
+
+**Step 2 — Admit waiting prefill sequences greedily.**
+
+With 2,045 tokens remaining, admit waiting requests from the queue:
+
+| Action | Tokens used | Remaining |
+|--------|-------------|-----------|
+| Admit prefill #1 (512 tokens) | 512 | 2,045 − 512 = **1,533** |
+| Admit prefill #2 (512 tokens) | 512 | 1,533 − 512 = **1,021** |
+| Admit prefill #3 (512 tokens) | 512 | 1,021 − 512 = **509** |
+| Admit prefill #4 (512 tokens)? | 512 | 509 < 512 → **REJECTED** |
+
+**Step 3 — Final batch composition.**
+
+The batch contains:
+- 3 decode sequences (3 tokens)
+- 3 new prefill sequences (1,536 tokens)
+- **Total: 6 sequences, 1,539 tokens**
+
+Prefill sequence #4 stays in the waiting queue and will be the first admitted in the next step.
+
+**Step 4 — With chunked prefill (alternative).**
+
+If chunked prefill is enabled with chunk_size=512, prefill #4 could be partially processed: admit 509 tokens of its 512-token prompt in this step (chunk), finishing the remaining 3 tokens next step. This keeps the GPU fuller but at the cost of added scheduling complexity.
+
+---
+
+### Solution 3 — Head-of-line blocking and continuous batching
+
+**What we need:** Define HoL blocking, explain why continuous batching eliminates it.
+
+**Step 1 — Static batching and the head-of-line problem.**
+
+In traditional static batching, a "batch" is defined as a fixed set of sequences that all start together and must all finish before the next batch begins:
+
+```
+Batch 1: [seq_A (200 tokens), seq_B (200 tokens), seq_C (2000 tokens)]
+         ← wait for seq_C → seq_C takes 10× longer → A and B are BLOCKED
+```
+
+Sequences A and B finish after 200 decode steps but cannot be evicted. Their GPU slots sit idle while seq_C continues generating. New requests in the queue cannot start. This is **head-of-line blocking**: the slowest sequence in the batch blocks all subsequent requests.
+
+**Step 2 — Why it wastes GPU time.**
+
+The GPU runs one forward pass per step regardless of how many sequences are "active" in that step. Once A and B finish, the GPU is running at reduced utilization (fewer active sequences), but slots are still occupied.
+
+**Step 3 — How continuous batching (iteration-level scheduling) eliminates it.**
+
+In continuous batching, the scheduler re-evaluates the batch **after every single decode step**:
+
+1. After step N: check which sequences produced an EOS token.
+2. Immediately free their KV cache blocks.
+3. Immediately promote the next waiting request into the freed slots.
+4. The next forward pass already includes the new sequence.
+
+```
+Step 200: seq_A finishes (EOS) → freed → seq_D (new, waiting) immediately promoted
+Step 200: seq_B finishes (EOS) → freed → seq_E promoted
+Step 201: batch = [seq_C, seq_D, seq_E] — GPU stays full
+```
+
+There is no "wait for the whole batch" gate. Each step's batch is independent.
+
+---
+
+### Solution 4 — Forward passes for 16 decode sequences
+
+**What we need:** Compare vLLM (continuous batching) vs static batching engine.
+
+**Answer:**
+
+| Engine | Forward passes for 16 simultaneous decode sequences |
+|--------|-----------------------------------------------------|
+| vLLM (continuous batching) | **1** |
+| Naive static batching | **1** (if batched) or **16** (if sequential) |
+
+**Step 1 — vLLM's approach.**
+
+vLLM batches all 16 decode tokens from 16 sequences into a single forward pass. The GPU processes a batch of shape `[16, 1, d_model]` in one shot. This is 1 forward pass.
+
+**Step 2 — Static batching (properly implemented).**
+
+A well-implemented static batch engine would also batch 16 sequences in one forward pass — provided they are all in the same batch. The static batch engine's problem is not the *number* of forward passes per step, but the lack of flexibility to admit new sequences mid-batch.
+
+**Step 3 — The key difference (for clarity).**
+
+The 1-pass answer applies *per step* for both engines. The distinction is what happens **between steps**:
+- **Static batching:** holds the batch fixed until all sequences finish
+- **Continuous batching:** re-evaluates after every step, immediately evicting finished sequences and admitting new ones
+
+For 16 sequences all at the same decode step: **1 forward pass** for both engines. The continuous batching advantage shows up over *time* — fewer wasted cycles across many steps.
+
+---
+
+### Solution 5 — Sequence length vs context length, and what happens at max_model_len
+
+**What we need:** Distinguish the two terms and explain the vLLM limit.
+
+**Step 1 — Sequence length (runtime concept).**
+
+*Sequence length* is the *current* total number of tokens in a sequence:
+
+$$\text{sequence\_length} = \text{prompt tokens} + \text{generated tokens so far}$$
+
+It grows by 1 every decode step. At step 0 (after prefill), sequence_length = num_prompt_tokens. At step 50, it equals num_prompt_tokens + 50.
+
+**Step 2 — Context length / max_model_len (architectural limit).**
+
+*Context length* (also called `max_model_len` in vLLM) is the **maximum total tokens** the model's positional encoding supports. This is baked into the model architecture — a LLaMA-3 8B with `max_position_embeddings=8192` cannot meaningfully attend beyond 8,192 positions because its RoPE embeddings were only trained up to that length.
+
+**Step 3 — What happens when sequence_length reaches max_model_len.**
+
+When `sequence_length == max_model_len`, vLLM:
+
+1. **Stops generation** for that sequence (regardless of whether EOS was produced).
+2. Sets `finish_reason = "length"` in the API response.
+3. Frees all KV blocks for that sequence.
+
+The sequence is not truncated mid-token — it is terminated cleanly. The client receives whatever tokens were generated up to `max_model_len`.
+
+**Step 4 — Production implications.**
+
+If users frequently hit `max_model_len`:
+- They receive incomplete responses
+- Long sequences occupy KV cache for many steps before being forcibly terminated
+- Use `max_tokens` in the API request to terminate early when output is complete
+
+To support longer contexts, models must be fine-tuned with extended positional embeddings (e.g., LLaMA-3.1 with rope_scaling extends the base 8K to 128K).
+

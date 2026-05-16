@@ -579,3 +579,96 @@ Before publishing any benchmark comparing vLLM and llama.cpp:
 4. Shared-GPU benchmarks (running vLLM on a node also running other containers) give misleading results. Explain the two mechanisms that cause interference and how to control for them. *(Section 17.2)*
 
 5. Define `goodput` in the context of LLM serving and explain how it differs from raw throughput. Why is goodput the correct metric for SLA-bound deployments? *(Section 17.5)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**Benchmark reports 2,400 tok/s, production shows 1,100 tok/s. Three factors for 2× optimism:**
+
+**Factor 1 — Benchmark uses synthetic, uniform request lengths.**
+`vllm bench throughput` generates requests with fixed or Gaussian prompt/output lengths. Real production traffic has long-tail distributions where occasional very long prompts occupy KV cache blocks for extended periods, reducing effective concurrency. The benchmark's uniform distribution hides this variance.
+
+**Factor 2 — Benchmark measures saturated throughput, not offered load.**
+The benchmark sends requests as fast as possible to keep the GPU 100% busy — measuring peak throughput under ideal conditions. In production, requests arrive stochastically (Poisson or bursty), creating idle periods when arrival rate is below peak, lowering average utilization.
+
+**Factor 3 — Benchmark excludes real-world overhead: tokenization, HTTP, multi-tenancy.**
+`vllm bench throughput` bypasses the HTTP server layer and calls the engine API directly. It does not include: (a) tokenization latency for diverse vocabularies, (b) HTTP/SSE streaming overhead, (c) multi-tenant token counting and billing middleware, (d) prefix cache cold-start effects when request prefixes are diverse.
+
+---
+
+### Question 2
+**Reproducing production request distribution with 10,000 real prompts:**
+
+**Step 1 — Sample from the real distribution.**
+Tokenize all 10,000 prompts and compute (input_len, output_len) pairs. Compute the empirical distribution (histogram with 50 bins for each axis).
+
+**Step 2 — Construct the test dataset.**
+Use the actual prompts (anonymized if needed) as the benchmark corpus. This preserves the prefix distribution — critical for prefix caching evaluation.
+
+**Step 3 — Configure `vllm bench serve`:**
+```bash
+python -m vllm.entrypoints.benchmark_serving   --backend vllm   --model meta-llama/Llama-3.1-70B   --dataset-name sharegpt \   # or use --dataset-path for custom corpus
+  --dataset-path ./production_prompts.jsonl   --num-prompts 10000   --request-rate 50 \        # match production QPS
+  --max-concurrency 200   --percentile-metrics p50,p90,p99   --save-result
+```
+
+**Step 4 — Sweep request rates.**
+Run at 20%, 50%, 80%, 100%, 120% of expected production QPS to build a load-latency curve. Identify the saturation point where P99 TTFT exceeds SLA.
+
+**Step 5 — Validate with shadow traffic.**
+Run the benchmark in parallel with a shadow copy of the production server receiving 1% of live traffic, comparing benchmark latency percentiles to shadow-traffic measurements.
+
+---
+
+### Question 3
+**vLLM: 3× higher throughput, 2× higher P99 TTFT. Choose llama.cpp when:**
+
+The 2× TTFT penalty is significant for **latency-sensitive, low-batch workloads.** Choose llama.cpp when:
+
+1. **The workload is batch=1 or very low concurrency (≤ 4 concurrent users).** At batch=1, vLLM's Python scheduler overhead (~20–30 ms) is visible in every TTFT, while llama.cpp's C++ stack adds <5 ms. The throughput advantage of vLLM is irrelevant if only one user is making requests.
+
+2. **The SLA requires strict P99 TTFT guarantees.** If a chatbot contract requires P99 TTFT ≤ 500 ms and vLLM hits P99 = 800 ms at scale while llama.cpp hits 400 ms, llama.cpp is the correct choice despite lower overall throughput.
+
+3. **The deployment is edge/on-premises with limited GPU memory.** llama.cpp's lower VRAM usage (no KV block reservation overhead) allows larger models to fit on limited hardware where vLLM would OOM before reaching high batch sizes.
+
+---
+
+### Question 4
+**Two interference mechanisms in shared-GPU benchmarks:**
+
+**Mechanism 1 — GPU memory pressure and eviction.**
+Other containers may hold GPU memory allocations (ML frameworks, CUDA contexts, other models). This reduces the HBM available to vLLM, shrinking the KV cache pool. Fewer KV blocks → lower effective `max_num_seqs` → artificially lower throughput and higher TTFT. The benchmark appears to show low throughput but the bottleneck is memory contention, not the engine.
+
+**Mechanism 2 — SM (compute) contention and priority inversion.**
+NVIDIA's MPS (Multi-Process Service) or time-sliced GPU sharing means other container workloads may preempt vLLM's CUDA kernels or share SMs. This adds irregular kernel latency that inflates ITL measurements unpredictably. The P99 latency becomes dominated by the tail of scheduling jitter rather than model arithmetic, making results irreproducible.
+
+**Control strategies:**
+- Run benchmarks on isolated, dedicated GPU nodes (no other containers).
+- Use `nvidia-smi mig` (MIG partitioning on A100/H100) to create hard resource partitions.
+- Monitor `nvidia-smi dmon -s u,m` concurrently to detect external GPU memory pressure.
+- Run 3 independent benchmark trials and report median to filter jitter outliers.
+
+---
+
+### Question 5
+**Goodput definition and distinction from raw throughput:**
+
+**Raw throughput:** Total tokens generated per second, regardless of whether responses met SLA requirements (TTFT, ITL, total latency). A system that serves 2,400 tok/s but has 30% of requests exceeding their latency SLA reports high raw throughput but poor user experience.
+
+**Goodput:** Tokens per second from requests that *meet all SLA constraints.* Formally:
+```
+goodput = (tokens from SLA-compliant requests) / (elapsed time)
+```
+
+If 30% of 2,400 tok/s responses violate SLA, goodput = 2,400 × 0.70 = 1,680 tok/s.
+
+**Why goodput is the correct metric for SLA-bound deployments:**
+1. It captures the true useful output of the system — tokens that are actually valuable to users.
+2. It penalizes configurations that maximize throughput by sacrificing tail latency (e.g., very large batch sizes that improve P50 but destroy P99 TTFT).
+3. It aligns infrastructure cost optimization with business outcomes: maximizing goodput per dollar is equivalent to maximizing value per dollar.
+
+The SLA threshold should be calibrated to the product requirement (e.g., "TTFT < 1 s and ITL < 50 ms"), and goodput is the only metric that integrates both the throughput and the latency dimensions simultaneously.
+

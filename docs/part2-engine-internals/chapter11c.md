@@ -1055,3 +1055,153 @@ Measure your cache hit rate from day one and let the data drive the decision.
    maximum cache hit rate (by tokens) if all turns within a session reuse
    prior turns' KV cache? How does this compare to cross-session reuse if
    1,000 concurrent users share the same system prompt?
+
+
+---
+
+## Worked Solutions
+
+---
+
+### Solution 1 — Tokens recoverable: block-level caching vs RadixAttention
+
+**Given:** 1,537-token system prompt, block_size=16
+
+**Block-level prefix caching (vLLM):**
+
+Only *complete* blocks are cached. Block-level caching uses block hashes computed on full block content.
+
+$$\text{complete blocks} = \lfloor 1537/16 \rfloor = 96 \text{ blocks} = 96 \times 16 = \textbf{1,536 tokens recoverable}$$
+
+The 1 remaining token (1537 − 1536) is in an incomplete block that is NOT cached.
+
+**RadixAttention (SGLang):**
+
+RadixAttention stores sequences in a radix tree indexed by token content (hashed). The tree node for the 1,537-token sequence stores all 1,537 tokens' KV data as a contiguous tree path. The entire sequence — including the partial last block — is represented as a single tree node.
+
+$$\textbf{1,537 tokens recoverable} \text{ (full sequence, no partial-block penalty)}$$
+
+**Practical difference:**
+
+For this example, RadixAttention recovers 1 additional token. More importantly, RadixAttention's tree structure allows matching at *any* prefix length — including lengths not aligned to block boundaries. For 1,000 different users with a shared 1,537-token prompt, RadixAttention eliminates 1,537 tokens of KV recomputation per user vs 1,536 for block-level caching. Over 1M daily requests, this adds up.
+
+---
+
+### Solution 2 — Why evicting an interior radix tree node requires evicting descendants first
+
+**Step 1 — Tree invariant.**
+
+The radix tree encodes the property: **every path from root to a node represents a unique token sequence prefix whose KV data is stored in the node chain.**
+
+**Step 2 — Interior node dependency.**
+
+Suppose the tree has:
+
+```
+Root → [A: tokens 1-512] → [B: tokens 513-768] → [C: tokens 769-1024]
+```
+
+Node B's KV data covers tokens 513–768. But this data was computed with full attention to all preceding tokens (1–512, stored in node A). If node A is evicted:
+
+- Nodes B and C reference token positions 1–512 in their attention computation
+- Those positions no longer have valid KV data in the cache
+- Any future request trying to use node B's cache would compute incorrect attention
+
+**Step 3 — Enforced invariant.**
+
+Every node's cached KV data is only valid if ALL ancestor nodes' data remains in cache. Therefore:
+
+- Before evicting node A, must evict B and C first (free descendants before ancestors)
+- This is enforced by the reference count system: node A's ref_count includes contributions from all paths passing through it
+
+**Result:** The eviction order is always leaf-first, bottom-up. This is implemented by a LRU queue over leaf nodes only — internal nodes become evictable only after all their leaf descendants are evicted and their ref_count reaches 0.
+
+---
+
+### Solution 3 — Cache value threshold: when is prefix cache more valuable than an extra request slot?
+
+**Setup:**
+
+- 1,000 req/min total, 600 share a 2,000-token system prompt, 400 have unique prompts
+- Trade-off: cache for 2,000 tokens OR one additional concurrent request slot
+
+**Step 1 — Value of the prefix cache.**
+
+Each of the 600 shared-prompt requests saves the 2,000-token prefill computation. At a typical prefill rate of 5,000 tok/s on an H100:
+
+$$\text{time saved per request} = \frac{2{,}000}{5{,}000} = 0.4 \text{ s}$$
+$$\text{GPU time saved per minute} = 600 \times 0.4 = 240 \text{ GPU-seconds/minute}$$
+
+**Step 2 — Value of one additional request slot.**
+
+One extra slot serves one additional concurrent request. At the system's decode throughput (say 50 tokens/s per sequence, 200-token average response):
+
+$$\text{time per request} = 200/50 = 4 \text{ s}$$
+$$\text{requests served from extra slot per minute} = 60/4 = 15 \text{ extra requests}$$
+
+**Step 3 — Break-even.**
+
+Cache is more valuable when its compute saving exceeds the extra-slot throughput:
+
+$$600 \times 0.4 \text{ GPU-s} > 15 \text{ requests} \times 4 \text{ s} \implies 240 > 60 \checkmark$$
+
+The prefix cache wins by 4× in this scenario. The break-even point (cache = slot) occurs when:
+
+$$\text{hit rate} \times \text{time\_saved/req} = \text{throughput\_from\_one\_slot}$$
+
+For this example, even a 10% hit rate (60 hits/min × 0.4 s = 24 GPU-s) vs slot (60 GPU-s) means the slot is better below ~40% hit rate. At 60% hit rate, the cache is unambiguously more valuable.
+
+---
+
+### Solution 4 — Cancelled request with ref_count = 1 on prefix nodes
+
+**Scenario:** User cancels mid-generation. The request owns prefix nodes P1 → P2 → P3, each with ref_count = 1.
+
+**Step-by-step release sequence:**
+
+**Step 1:** Server detects client disconnect (TCP RST or explicit cancel).
+
+**Step 2:** Scheduler marks the sequence as cancelled. Decode stops immediately for this sequence.
+
+**Step 3:** Walk the sequence's node path from leaf to root:
+- **Node P3 (leaf):** Decrement ref_count: 1 → 0. P3 is now unreferenced → move to LRU eviction pool (mark as eligible for eviction). Physical GPU blocks are NOT freed yet (lazy eviction).
+- **Node P2:** Decrement ref_count: if 1 → 0 → move to LRU pool. If > 0 after decrement, stop (other sequences share this prefix).
+- **Node P1:** Same logic.
+
+**Step 4:** Physical block reclamation happens lazily — when the block manager needs new blocks for a different request, it evicts the lowest-priority LRU pool entries and physically frees their GPU blocks.
+
+**Why lazy eviction:**
+
+If another request arrives *immediately after* the cancellation with the same prefix, P1 may still be in the LRU pool (not yet physically freed). It can be re-promoted instantly (set ref_count = 1, remove from LRU pool) — avoiding a redundant recomputation. Lazy eviction exploits temporal locality.
+
+---
+
+### Solution 5 — Multi-turn chatbot cache hit rate
+
+**Setup:** 500-token system prompt, 8 turns, 150 tokens/turn average
+
+**Within-session cache hit rate by turn:**
+
+| Turn | Total tokens so far | Cached tokens (prior turns) | Cache hit rate |
+|------|---------------------|------------------------------|----------------|
+| 1 | 500 + 150 = 650 | 500 (system prompt) | 500/650 = **76.9%** |
+| 2 | 800 | 650 (system prompt + turn 1) | 650/800 = **81.3%** |
+| 3 | 950 | 800 | 800/950 = **84.2%** |
+| 4 | 1,100 | 950 | 950/1,100 = **86.4%** |
+| 5 | 1,250 | 1,100 | **88.0%** |
+| 6 | 1,400 | 1,250 | **89.3%** |
+| 7 | 1,550 | 1,400 | **90.3%** |
+| 8 | 1,700 | 1,550 | **91.2%** |
+
+**Average across 8 turns:** ~86%
+
+**Cross-session reuse (different users, same system prompt):**
+
+Only the 500-token system prompt is shared across different user sessions. Turn-specific context is unique per user.
+
+$$\text{cross-session hit rate} = \frac{500}{\text{total tokens per request}}$$
+
+For a new user's first turn (650 tokens): 500/650 = 76.9%. For subsequent turns, the unique tokens grow and the system prompt share shrinks.
+
+**Conclusion:** Within-session reuse is highly effective (76–91% hit rate across turns). Cross-session reuse is more limited — only the system prompt is shared, so the benefit is proportional to the system prompt fraction of total context.
+

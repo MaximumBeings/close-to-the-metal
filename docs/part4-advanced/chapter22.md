@@ -931,3 +931,75 @@ Chapter 23 covers speculative decoding — the technique that breaks the one-tok
 - **Dynamic loading**: adapters not in the active set are evicted from GPU to CPU; loading time is proportional to adapter size and PCIe bandwidth.
 - **Batching across adapters**: vLLM can batch requests from different adapters in the same forward pass using a segment-padded approach; throughput is lower than single-adapter batching due to the segmentation overhead.
 - **llama.cpp adapter support**: `--lora PATH --lora-scaled PATH α` loads a GGUF-format LoRA; only one adapter at a time is supported in the base llama.cpp server.
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**Setup:** Attention weight matrix = 4096 x 4096, LoRA rank r=8, BF16.
+
+**Step 1 — Parameters in A and B:**
+- A has shape (4096, r) = (4096, 8) -> 32,768 parameters
+- B has shape (r, 4096) = (8, 4096) -> 32,768 parameters
+- Total: **65,536 parameters**
+
+**Step 2 — Bytes at BF16 (2 bytes/param):**
+```
+65,536 x 2 = 131,072 bytes = 128 KB
+```
+
+The full weight matrix W is 4096 x 4096 x 2 bytes = 32 MB. The LoRA adapter is 128 KB -- a 256x compression ratio. This is why LoRA adapters can be served with negligible memory overhead per adapter.
+
+---
+
+### Question 2
+**Why vLLM's batched LoRA maintains high GPU utilization across different adapters:**
+
+Without batched LoRA, each adapter would require loading separate model weights into VRAM -- effectively serving N separate models. vLLM's key efficiency: the **base model weights are shared across all adapters.** The base model occupies ~140 GB HBM; each adapter adds only ~128 KB per attention layer. All adapters run the same base model forward pass, with the LoRA delta B*A*(alpha/r) computed as a small additive term.
+
+vLLM packs requests for different adapters into the **same batch**. The forward pass runs once over all requests using the shared base model. For each linear layer, adapter-specific LoRA deltas are applied using a batched GEMM (Punica or SGMV kernels) that dispatches per-sequence adapter indices. The GPU sees a large, efficient matrix multiply regardless of which adapter each request uses -- no adapter-switching idle time.
+
+---
+
+### Question 3
+**Merging LoRA into Q4_K_M -- why quality may be lower than FP16 merge:**
+
+The Q4_K_M format quantizes weights to 4-bit using k-means. When merging:
+```
+W_merged = W_quantized_base + B*A*(alpha/r)
+```
+The LoRA delta is added to a lossy approximation of the original weights. After merging, W_merged must be re-quantized to Q4_K_M. This second quantization uses cluster centers optimized for W_base -- suboptimal for W_merged with different per-channel statistics.
+
+**Recommended mitigation:**
+1. Dequantize base model to FP16.
+2. Merge: W_merged = W_FP16_base + B*A*(alpha/r).
+3. Re-quantize W_merged to Q4_K_M from scratch, letting the quantizer optimize cluster centers for the merged weights.
+
+---
+
+### Question 4
+**`--max-loras 4` and a fifth adapter is requested -- trace:**
+
+1. Request arrives with adapter_id=5. Manager checks in-memory registry: 4 adapters loaded, cache full.
+2. LRU eviction: adapter with oldest last-use timestamp is evicted from GPU VRAM (A and B matrices freed; base model unchanged).
+3. Adapter 5's weight file is loaded from disk into CPU memory and transferred to GPU VRAM (~50-200 ms I/O cost).
+4. Request is admitted to the scheduler queue and processed normally.
+
+For production: set --max-loras to the expected concurrently-needed adapter count, not total adapter count, to avoid I/O eviction overhead.
+
+---
+
+### Question 5
+**A/B test: stable 90% / candidate 10%. After 1,000 requests: stable=902, candidate=98.**
+
+**Is routing correct?** Expected = 100 candidate. Observed = 98. Deviation = 2% -- within normal statistical noise. Routing appears correct.
+
+**Verify deterministic routing:**
+Use hash-based routing: route = "candidate" if hash(user_id) % 100 < 10 else "stable". This ensures:
+1. The same user always sees the same adapter (no A/B contamination across sessions).
+2. The 10% split is deterministic, not probabilistic.
+
+Verification: sample 10,000 synthetic user IDs, confirm 900-1100 (9-11%) route to candidate. Log adapter_id per request and alert if rolling ratio deviates >5% from target in production.
+

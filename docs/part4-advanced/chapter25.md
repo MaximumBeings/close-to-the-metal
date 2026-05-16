@@ -676,3 +676,122 @@ vLLM is the execution layer where policy decisions become GPU computation. llama
 4. `--enforce-eager` disables CUDA graph replay. For a 70B model, decode throughput drops by approximately 30% (typical CUDA graph speedup). Quantify the impact on GRPO rollout time for a batch of 256 prompts × 8 completions × 200 tokens each. *(Section 25.5)*
 
 5. You need to serve the policy model to users while simultaneously running GRPO updates. Describe a blue-green deployment strategy that prevents users from seeing a mid-update model. *(Section 25.6)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**GRPO: G=8 completions per prompt, batch=32 prompts. Total sequences for scheduler:**
+
+```
+total_sequences = 32 prompts x 8 completions = 256 sequences
+```
+
+**KV cache budget impact:**
+Each of the 256 sequences needs its own KV cache blocks. If each sequence generates 200 tokens average, and KV cost per token = 327 KB (70B model):
+```
+total_KV = 256 x 200 x 327 KB = 256 x 65.4 MB = 16.75 GB
+```
+This is a 256x increase over serving a single sequence. The scheduler must either:
+1. Set max_num_seqs >= 256 and ensure the KV pool can hold all 256 sequences simultaneously, or
+2. Process the 32 prompts in smaller sub-batches (G=2 or G=4) to fit within the KV budget.
+
+GRPO training is therefore far more memory-intensive than inference serving. A typical 4x A100 serving deployment (max_num_seqs=128) must be reconfigured with larger KV reservations for GRPO rollouts.
+
+---
+
+### Question 2
+**Policy update invalidates prefix-cached KV blocks. Cache hit rate was 70%. Impact on TTFT for first 60 seconds:**
+
+**Before update:** 70% of requests skip prefill entirely (cache hit). TTFT for hits ~= 0 ms (just decode start). Average TTFT = 0.70 x 0 + 0.30 x T_prefill where T_prefill ~= 500 ms (assumed).
+```
+avg_TTFT_before = 0.30 x 500 ms = 150 ms
+```
+
+**After policy update:** Cache is invalidated. All new blocks must be computed. Hit rate drops to 0% immediately, recovering to ~70% as the new cache warms up. Warmup time depends on request rate -- at 100 req/min, after 60 s (100 requests), the most frequent prefixes are re-cached.
+
+```
+avg_TTFT_first_60s = 1.0 x 500 ms = 500 ms  (all cache misses)
+```
+
+**TTFT increase:** 500 ms vs 150 ms = 3.3x worse TTFT for the first 60 seconds after update. For production RLHF, schedule policy updates during low-traffic windows or pre-warm the cache with synthetic requests before re-enabling production traffic.
+
+---
+
+### Question 3
+**Online RLHF: reward model P99 latency = 250 ms. Minimum training step time:**
+
+Each training step requires at least one reward evaluation per completion. The reward model call is on the critical path:
+
+```
+min_step_time >= reward_model_P99_latency = 250 ms
+```
+
+But the step also includes:
+- Forward pass through policy model (vLLM inference): ~100-500 ms depending on sequence length
+- Backward pass (gradient computation): ~2-5x forward pass time
+- Optimizer step: ~10-50 ms
+
+**Minimum step time** (reward model is the bottleneck only if it exceeds all other components):
+```
+min_step_time = max(250 ms, forward_pass + backward_pass + optimizer) 
+             >= 250 ms
+```
+
+For a 70B model with 200-token completions: forward ~= 200 x 70 ms = 14 s, backward ~= 28 s. The reward model 250 ms P99 is NOT the bottleneck -- the training backward pass is ~112x slower. However, if 256 completions need reward evaluation sequentially, total reward time = 256 x 250 ms = 64 s, which DOES become the bottleneck.
+
+**Solution:** Parallelize reward evaluation across completions using a batched reward model API or multiple reward model replicas.
+
+---
+
+### Question 4
+**`--enforce-eager` drops decode throughput 30%. GRPO rollout: 256 prompts x 8 completions x 200 tokens.**
+
+**Total tokens to generate:**
+```
+total_tokens = 256 x 8 x 200 = 409,600 tokens
+```
+
+**Throughput without CUDA graphs (30% penalty):**
+If baseline throughput = 1,800 tok/s, without graphs: 1,800 x 0.70 = 1,260 tok/s.
+
+**Rollout time comparison:**
+```
+with CUDA graphs:    409,600 / 1,800 = 227.6 s
+without CUDA graphs: 409,600 / 1,260 = 325.1 s
+```
+
+**Additional time from --enforce-eager:**
+```
+delta = 325.1 - 227.6 = 97.5 s per rollout batch
+```
+
+For GRPO training with 100 update steps, the overhead is 97.5 x 100 = 9,750 s = 2.7 hours of extra rollout time. Re-enable CUDA graphs for GRPO unless the reason for --enforce-eager (e.g., dynamic control flow in the model) is mandatory.
+
+---
+
+### Question 5
+**Blue-green deployment for serving policy while running GRPO updates:**
+
+**Setup:**
+- Blue: current stable policy model serving user traffic
+- Green: model being updated via GRPO
+
+**Strategy:**
+
+1. **Deploy Blue:** Start Blue on GPU cluster A, serving 100% of user traffic. Blue is frozen -- no weight updates.
+
+2. **GRPO on separate cluster:** Run GRPO rollouts and updates on GPU cluster B using a copy of the Blue weights as the starting point. Cluster B never receives user traffic.
+
+3. **Checkpoint:** After N GRPO update steps, save the updated Green checkpoint to object storage.
+
+4. **Parallel validation:** Load Green onto a shadow cluster C. Run quality eval (LLM judge, perplexity) against the eval set. If metrics pass (score >= Blue threshold), proceed to swap.
+
+5. **Atomic swap:** Update the load balancer to route 100% of traffic from Blue to Green in a single atomic operation. Green becomes the new Blue. Old Blue cluster is freed for the next GRPO cycle.
+
+**Key invariant:** Users never see a model that is mid-update. The GRPO update modifies only the Green copy; Blue is immutable throughout. The swap is instantaneous from the load balancer's perspective.
+
+**Additional safeguard:** Keep Blue running for 15 minutes after the swap with 0% traffic. If Green shows elevated error rate (P99 TTFT spike, quality regression), immediately revert by updating load balancer back to Blue.
+

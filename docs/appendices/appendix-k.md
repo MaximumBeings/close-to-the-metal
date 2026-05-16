@@ -1,667 +1,1176 @@
-# Appendix K: Operational Decision Tree and Troubleshooting Guide
+# Appendix K — Introduction to `std::mdspan` for CPU Inference
 
-This appendix is a production reference. It is organized as decision trees, quick-lookup tables, and fill-in worksheets that a serving engineer can consult during an incident or capacity-planning session without re-reading the main chapters.
-
----
-
-## K.1 Symptom → Diagnosis → Fix: The Main Decision Tree
-
-Each section below starts with an observable symptom and walks through a structured diagnostic sequence. Metrics referenced assume a Prometheus/Grafana stack as described in Chapter 16.
+> *"A matrix is just a 1-D array wearing a map."*
 
 ---
 
-### K.1.1 TTFT (Time to First Token) is Too High
+## K.1 Why mdspan Exists
 
-**Target**: p95 TTFT < 500 ms for interactive workloads.
+Every matrix operation in LLM inference — weight multiplication, attention score
+computation, KV cache reads — ultimately touches a contiguous block of memory.
+But a flat pointer tells you nothing about shape, stride, or access pattern.
+For decades C++ engineers bridged this gap with bespoke wrappers: raw `float*`
+paired with separately tracked `rows` and `cols` variables, hand-rolled
+`Matrix<T>` classes, or Eigen maps.
 
-**Observable signal**: `vllm:time_to_first_token_seconds` p95 > 0.5 s.
+C++23 standardises the answer: `std::mdspan`. An mdspan is a **non-owning,
+multidimensional view** of an existing memory region. It carries three pieces
+of metadata alongside the pointer:
+
+- **Extents** — the size of each dimension (static or dynamic)
+- **Layout policy** — how multi-index `(i, j, k, …)` maps to a flat offset
+- **Accessor policy** — how the flat offset is dereferenced into a value
+
+Think of it as `std::span` promoted to N dimensions, with pluggable memory
+layout and access semantics. The pointer and the data it describes live
+separately; mdspan is purely the view.
 
 ```
-Is the median prompt length > 4 K tokens?
-├── YES → Enable chunked prefill: --enable-chunked-prefill
-│         Set --max-num-batched-tokens to 2048–4096.
-│         Monitor: prefill chunks per request should be > 1.
-│         Expected improvement: 20–50% TTFT reduction for long prompts.
-│
-├── NO  → Do many requests share the same system prompt?
-│         ├── YES → Enable prefix caching: --enable-prefix-caching
-│         │         Warm the cache with one representative request before
-│         │         opening traffic. Monitor: prefix_cache_hit_rate > 0.7.
-│         │         Expected improvement: up to 90% TTFT reduction for
-│         │         identical system prompts.
-│         │
-│         └── NO  → Is GPU utilization during prefill < 60%?
-│                   ├── YES → Increase --max-num-batched-tokens (default 32768).
-│                   │         Try doubling until GPU utilization reaches 80–90%.
-│                   │         Warning: too large increases memory pressure.
-│                   │
-│                   └── NO  → Is this a disaggregated prefill/decode setup?
-│                             ├── YES → Check prefill worker count vs request
-│                             │         arrival rate. If prefill queue depth > 5,
-│                             │         add prefill replicas.
-│                             │         See: Chapter 18.
-│                             │
-│                             └── NO  → Profile with torch.profiler:
-│                                       python -c "
-│                                       import torch.profiler as p
-│                                       with p.profile(activities=[
-│                                           p.ProfilerActivity.CPU,
-│                                           p.ProfilerActivity.CUDA
-│                                       ]) as prof:
-│                                           # run one representative request
-│                                           pass
-│                                       prof.export_chrome_trace('ttft.json')
-│                                       "
-│                                       Look for: CPU-bound tokenization,
-│                                       host-to-device copy latency,
-│                                       Python scheduler overhead.
+┌──────────────────────────────────────────────────────────────────────┐
+│  mdspan<float, extents<size_t,4096,4096>, layout_right, default_accessor>
+│                                                                      │
+│  .data_handle() ──► float* ──► [row-major 4096×4096 weight matrix]  │
+│  .extents()     ──► (4096, 4096)                                     │
+│  .stride(0)     ──► 4096   (one row = 4096 floats)                  │
+│  .stride(1)     ──► 1      (adjacent columns are adjacent bytes)     │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-**Quick TTFT checklist**:
-
-- [ ] Chunked prefill enabled for prompts > 4 K tokens
-- [ ] Prefix caching enabled if system prompt is shared
-- [ ] `--max-num-batched-tokens` tuned to fill GPU
-- [ ] Prefill replicas scaled to match arrival rate
-- [ ] No CPU stall visible in profiler trace
+This appendix covers mdspan from first principles, works through the layout and
+accessor policies, shows how `submdspan` enables zero-copy tensor slicing, and
+builds up to real CPU inference patterns: tiled GEMM, KV cache views, and the
+multi-head attention inner loop.
 
 ---
 
-### K.1.2 Throughput Ceiling Hit
+## K.2 Compiler and Standard Library Support
 
-**Target**: tokens/s should scale linearly with GPU count until the roofline limit.
+`std::mdspan` ships in:
 
-**Observable signal**: adding load increases queue depth but not `vllm:generation_tokens_total` rate.
+| Compiler / stdlib | Version | Flag |
+|---|---|---|
+| GCC | 13+ | `-std=c++23` |
+| Clang | 17+ | `-std=c++23` |
+| MSVC | 19.36+ | `/std:c++latest` |
+| Apple Clang | 15+ | `-std=c++23` |
 
-```
-Compute roofline ratio: actual_tps / theoretical_tps
-├── Ratio < 0.5 → Hardware bottleneck.
-│   ├── Are weights in BF16?
-│   │   └── YES → Switch to FP8: --quantization fp8
-│   │             Run perplexity regression (Appendix K.5) before promoting.
-│   │             Expected: ~2× throughput improvement on H100.
-│   │             See: Chapter 10, Chapter 37.
-│   │
-│   ├── Is batch utilization low (avg batch size < max_num_seqs / 2)?
-│   │   └── YES → Increase --max-num-seqs (default 256).
-│   │             Monitor memory: if OOM, reduce --gpu-memory-utilization first.
-│   │             Target: avg batch size > 0.6 × max_num_seqs.
-│   │
-│   ├── Is median context length > 8 K tokens?
-│   │   └── YES → Flash Decoding is activated automatically when using
-│   │             FlashInfer backend. Verify: check vllm startup logs for
-│   │             "attention backend: flashinfer".
-│   │             If using triton backend, switch: --attention-backend flashinfer
-│   │
-│   └── Is GPU utilization < 70% during decode?
-│       └── YES → Disaggregate prefill and decode.
-│                 Use vLLM V1 disaggregated scheduler.
-│                 Prefill nodes: 1–2 GPUs, decode nodes: remainder.
-│                 See: Chapter 18.
-│
-└── Ratio 0.5–0.9 → Software overhead.
-    ├── Check Python scheduler overhead: should be < 1 ms per step.
-    ├── Verify CUDA graphs are enabled (default in vLLM V1).
-    └── Profile with nsight systems for kernel launch gaps.
-```
+If your toolchain is older, the reference implementation from Kokkos ships as a
+single header:
 
-**Throughput optimization sequence** (run in order, measure after each step):
-1. Enable FP8: `--quantization fp8`
-2. Tune `--max-num-seqs` and `--max-num-batched-tokens`
-3. Enable chunked prefill to improve batching efficiency
-4. Switch to FlashInfer backend for long contexts
-5. Disaggregate if single-node throughput is saturated
-
----
-
-### K.1.3 OOM (Out of Memory) Crashes
-
-**Observable signals**: `CUDA out of memory` in logs, `vllm:gpu_cache_usage_perc` at 100%.
-
-```
-When does the OOM occur?
-│
-├── DURING STARTUP (model loading)
-│   ├── Reduce --gpu-memory-utilization from 0.9 → 0.85 → 0.80
-│   │   (each step frees ~5–8 GB on an 80 GB GPU)
-│   ├── Verify tensor parallel size covers weight memory:
-│   │   weight_GB = params_B × dtype_bytes / tp_size
-│   │   Must fit in gpu_memory × gpu_memory_utilization - activations
-│   ├── Use --load-format safetensors for streaming load (lower peak RAM)
-│   └── If quantized: verify quantization checkpoint matches --quantization flag
-│
-├── DURING A TRAFFIC BURST
-│   ├── Enable request preemption (default in vLLM; verify not disabled)
-│   │   --preemption-mode recompute   # lower peak memory, higher latency
-│   │   --preemption-mode swap        # uses CPU RAM, avoid on bandwidth-sensitive paths
-│   ├── Reduce --max-model-len to cap per-sequence KV footprint
-│   │   KV per sequence = 2 × layers × kv_heads × head_dim × max_len × dtype_bytes
-│   │   Reducing max_len from 32K to 16K frees ~50% of per-sequence KV budget
-│   └── Add replica and load-balance: route long requests to dedicated nodes
-│
-├── WITH LORA ADAPTERS
-│   ├── Each LoRA adapter occupies: rank × d_model × 2 × num_layers × dtype_bytes
-│   │   Example: rank=16, d_model=4096, 32 layers, BF16 ≈ 268 MB per adapter
-│   ├── Reduce --max-loras (default 1; multiple adapters multiply this cost)
-│   ├── Use --enable-lora-bias carefully (adds bias vectors per adapter)
-│   └── Consider adapter merging for static-traffic adapters
-│
-└── WEIGHT LOADING OOM (host RAM)
-    ├── Use --load-format safetensors (streams, lower peak host RAM)
-    ├── Verify tensor_parallel_size is set correctly before loading
-    └── Use HF_HOME on a fast NVMe to avoid double-buffering in RAM
-```
-
-**Memory sanity check commands**:
 ```bash
-# Before starting vLLM, check available GPU memory
-nvidia-smi --query-gpu=memory.free,memory.total --format=csv
-
-# Estimate weight memory
-python -c "
-params_b = 70   # model size in billions
-dtype_b  = 2    # BF16 = 2 bytes, FP8 = 1 byte
-tp       = 4    # tensor parallel size
-print(f'Weight memory per GPU: {params_b * 1e9 * dtype_b / tp / 1e9:.1f} GB')
-"
+# Standalone reference implementation (C++17 compatible)
+git clone https://github.com/kokkos/mdspan
+# then #include "mdspan/mdspan.hpp"
 ```
 
----
+All examples in this appendix compile with:
 
-### K.1.4 Latency Spikes / p99 Much Higher Than p50
-
-**Observable signal**: p99/p50 TPOT ratio > 3×, or periodic latency spikes visible in time-series.
-
-```
-Is vllm:num_preemptions_total rising?
-├── YES → KV cache pressure causing preemptions.
-│         ├── Increase GPU memory allocation or reduce max_num_seqs
-│         ├── Enable chunked prefill to reduce peak KV pressure
-│         └── Consider prefix caching to reuse existing KV blocks
-│
-├── NO  → Are long requests co-scheduled with short requests?
-│         ├── YES → Enable chunked prefill + priority scheduling:
-│         │         --enable-chunked-prefill
-│         │         --scheduler-policy priority   # if available
-│         │         Long requests are chunked, allowing short requests to interleave
-│         │
-│         └── NO  → Are spikes correlated with periodic intervals (e.g., every 60s)?
-│                   ├── YES → Likely Python garbage collection pause.
-│                   │         Add to serving startup:
-│                   │         import gc; gc.disable()
-│                   │         # Re-enable only outside request hot path
-│                   │         Profile with: py-spy record -o gc_trace.svg --pid <PID>
-│                   │
-│                   └── NO  → Are spikes at startup or after idle periods?
-│                             ├── YES → CUDA graph capture stall.
-│                             │         Verify CUDA graphs are pre-captured at startup.
-│                             │         vLLM V1 captures graphs during warmup by default.
-│                             │         Check: "CUDA graph captured for batch size X" in logs.
-│                             │
-│                             └── NO  → Check for thermal throttling:
-│                                       nvidia-smi dmon -s u -d 5
-│                                       If GPU clocks drop, check cooling / power limits.
-```
-
-**p99 latency investigation commands**:
 ```bash
-# Watch preemption rate in real time
-watch -n 2 'curl -s localhost:8000/metrics | grep preemption'
-
-# Check KV cache utilization
-curl -s localhost:8000/metrics | grep gpu_cache_usage_perc
-
-# Profile GC pauses (requires py-spy)
-pip install py-spy
-py-spy record -o profile.svg --pid $(pgrep -f vllm)
+g++ -std=c++23 -O2 -march=native -o demo demo.cpp
 ```
 
 ---
 
-### K.1.5 Output Quality Degraded After Optimization
+## K.3 The Minimal mdspan — A 2-D Matrix View
 
-**Observable signal**: user complaints, MMLU/perplexity regression, output truncation or repetition.
+### K.3.1 Declaring and constructing
 
-```
-Which optimization was applied?
-│
-├── FP8 QUANTIZATION
-│   ├── Run perplexity regression immediately:
-│   │   python -m lm_eval --model vllm --model_args pretrained=<model>,
-│   │       quantization=fp8 --tasks wikitext --device cuda
-│   │   Acceptable regression: < 0.3 perplexity points vs BF16 baseline.
-│   ├── If regression > 0.5: use static FP8 calibration (not dynamic):
-│   │   llm-compressor calibrate --model <path> --calibration-dataset <data>
-│   └── If still regressed: fall back to INT8 weight-only (--quantization bitsandbytes)
-│
-├── PREFIX CACHING
-│   ├── Verify KV block hash collisions are not occurring:
-│   │   Check vllm logs for "hash collision" warnings.
-│   │   Hash collision probability ≈ 1 / 2^64 per block pair (negligible).
-│   ├── Verify cached blocks are not from a different model revision:
-│   │   Restart vLLM when updating model weights (cache is invalidated on restart).
-│   └── Verify --enable-prefix-caching is not mixing adapters incorrectly:
-│       Each LoRA adapter gets its own prefix cache namespace in vLLM V1.
-│
-├── WEIGHT QUANTIZATION (INT4/AWQ/GPTQ)
-│   ├── Run MMLU benchmark:
-│   │   python -m lm_eval --model vllm --tasks mmlu --num_fewshot 5
-│   │   Acceptable: < 1% absolute drop vs FP16 baseline.
-│   ├── INT4 regression > 2%: switch to INT8 or AWQ (usually better than GPTQ)
-│   └── Check quantization group size: group_size=128 better than group_size=64
-│       for accuracy; group_size=64 saves ~1% memory.
-│
-└── CONTEXT LENGTH EXTENSION (YaRN / RoPE scaling)
-    ├── Test with needle-in-haystack: inject fact at various context positions
-    │   and verify retrieval accuracy across the full context window.
-    └── Regression at long distances (> 50K tokens): reduce RoPE scale factor.
+```cpp
+#include <mdspan>
+#include <vector>
+#include <print>       // C++23
+
+int main() {
+    // Allocate 4×6 data
+    std::vector<float> storage(24);
+    std::iota(storage.begin(), storage.end(), 0.0f);
+
+    // Wrap as a 4-row, 6-column mdspan (row-major by default)
+    using MatF = std::mdspan<float,
+                             std::extents<std::size_t, 4, 6>>;
+    MatF mat(storage.data());
+
+    // Element access via operator()
+    std::println("mat(2,3) = {}", mat(2, 3));   // → 15.0
+    std::println("rows={} cols={}", mat.extent(0), mat.extent(1));
+}
 ```
 
----
+`std::extents<IndexType, E0, E1, …>` encodes the shape. When the value is a
+compile-time constant (like `4` and `6` above) the compiler can fold the stride
+computation entirely into constants. When a dimension is unknown at compile time,
+use the sentinel `std::dynamic_extent`:
 
-### K.1.6 Cost Per Request Too High
-
-**Observable signal**: cost/1K tokens higher than budget target.
-
+```cpp
+// Runtime-sized matrix — shape known only at runtime
+std::mdspan<float,
+            std::extents<std::size_t,
+                         std::dynamic_extent,
+                         std::dynamic_extent>>
+    dyn_mat(ptr, rows, cols);
 ```
-Run 7-layer optimization stack (Chapter 38) in this order:
-│
-Layer 1: QUANTIZATION (largest impact)
-├── BF16 → FP8: ~2× throughput, same GPU count → ~50% cost reduction
-└── Measure: perplexity regression must be < 0.3 points
 
-Layer 2: BATCHING EFFICIENCY
-├── Check avg_batch_size / max_num_seqs. Target > 0.65.
-├── If < 0.65: increase --max-num-seqs, tune --max-num-batched-tokens
-└── Consider request buffering (small latency increase, large cost savings)
+Mixing static and dynamic is idiomatic and efficient: a 4096-wide weight slab
+where the batch dimension varies at runtime:
 
-Layer 3: PREFIX CACHING
-├── Measure prefix_cache_hit_rate in metrics
-├── If system prompt reuse rate > 50%, prefix caching alone cuts prefill cost by 40–80%
-└── For RAG: cache document embeddings + KV to avoid re-encoding
+```cpp
+// Static hidden dim=4096, dynamic batch
+std::mdspan<float,
+            std::extents<std::size_t, std::dynamic_extent, 4096>>
+    weights(ptr, batch_size);
+```
 
-Layer 4: SPECULATIVE DECODING (output-heavy workloads)
-├── Effective when output >> input (e.g., code generation)
-├── 2–3× decode speedup → same GPU serves 2–3× more requests
-└── Requires draft model; adds ~10% memory overhead
+### K.3.2 Type aliases — the inference engineer's toolkit
 
-Layer 5: AUTO-SCALING
-├── Scale to zero during off-peak (useful for batch or low-traffic deployments)
-├── Use KubeRay + vLLM V1 for sub-60s scale-up
-└── Cost target: 80–90% GPU utilization at peak, NOT 100% (leaves 10% headroom
-    for bursts, preventing SLO violations that require expensive retries)
+```cpp
+// Convenience aliases used throughout this appendix
+template<class T, std::size_t R, std::size_t C>
+using StaticMat = std::mdspan<T,
+    std::extents<std::size_t, R, C>>;
 
-Layer 6: HARDWARE SELECTION
-├── H100 vs A100: H100 ~2× cost per hour but ~3× throughput → lower cost/token
-├── Spot/preemptible instances for batch workloads (save 60–70%)
-└── NVLink topology matters for TP > 4: always prefer NVLink over PCIe
+template<class T>
+using DynMat = std::mdspan<T,
+    std::extents<std::size_t,
+                 std::dynamic_extent,
+                 std::dynamic_extent>>;
 
-Layer 7: MODEL DISTILLATION / SMALLER MODELS
-├── Can a smaller model meet quality SLOs?
-│   70B → 8B with RAG: often matches quality at 8× lower cost
-└── Measure: A/B test on representative traffic sample before routing all traffic
+template<class T>
+using DynVec = std::mdspan<T,
+    std::extents<std::size_t, std::dynamic_extent>>;
+
+template<class T, std::size_t D0, std::size_t D1, std::size_t D2>
+using Tensor3 = std::mdspan<T,
+    std::extents<std::size_t, D0, D1, D2>>;
 ```
 
 ---
 
-## K.2 The vLLM Flags Quick Reference
+## K.4 Extents in Depth
 
-The 20 most important vLLM engine arguments. All flags are passed to `vllm serve <model>` or set in `EngineArgs`.
+`std::extents` is a purely compile-time descriptor. Its template parameters
+alternate between `IndexType` and one extent per dimension:
 
-| Flag | Default | What it does | When to change | Chapter |
-|------|---------|-------------|----------------|---------|
-| `--gpu-memory-utilization` | `0.9` | Fraction of GPU HBM reserved for vLLM (weights + KV cache) | Reduce to 0.85 if OOM at startup; increase to 0.95 if GPU memory is underused | Ch 6 |
-| `--max-num-seqs` | `256` | Maximum concurrent sequences in the engine | Increase for high-concurrency workloads; reduce if OOM during bursts | Ch 7 |
-| `--max-num-batched-tokens` | `32768` | Max tokens in a single forward pass (prefill + decode combined) | Increase for GPU-starved prefill; decrease to reduce TTFT variance | Ch 11 |
-| `--max-model-len` | model default | Maximum sequence length (input + output tokens) | Reduce to save KV cache memory; must be ≤ model's trained context length | Ch 6 |
-| `--tensor-parallel-size` | `1` | Number of GPUs for tensor parallelism | Set to number of GPUs on a single node | Ch 15 |
-| `--pipeline-parallel-size` | `1` | Number of pipeline stages across nodes | Set to number of nodes for multi-node; adds bubble overhead | Ch 15 |
-| `--quantization` | `None` | Weight quantization method: `fp8`, `awq`, `gptq`, `bitsandbytes` | Always enable `fp8` on H100 for 2× throughput gain | Ch 10 |
-| `--enable-prefix-caching` | `False` (V0) / `True` (V1) | Hash-based KV block deduplication for common prefixes | Enable whenever system prompts are shared across requests | Ch 11 |
-| `--enable-chunked-prefill` | `False` (V0) / `True` (V1) | Split long prefills into chunks, interleaved with decode | Enable for interactive workloads with mixed prompt lengths | Ch 11 |
-| `--max-loras` | `1` | Max simultaneously loaded LoRA adapters | Increase for multi-tenant LoRA serving; each adapter ~200–500 MB | Ch 22 |
-| `--lora-extra-vocab-size` | `0` | Extra vocabulary tokens added by LoRA adapters | Set to adapter's extra vocab size if fine-tuned on new tokens | Ch 22 |
-| `--speculative-model` | `None` | Path to draft model for speculative decoding | Set to a small (1–3B) model of same architecture | Ch 23 |
-| `--num-speculative-tokens` | `5` | Draft tokens proposed per step (γ) | Tune 3–8; higher γ = better speedup if acceptance rate is high | Ch 23 |
-| `--load-format` | `auto` | Weight loading format: `safetensors`, `pt`, `gguf`, `npcache` | Use `safetensors` for faster streaming load; avoid `pt` for large models | Ch 8 |
-| `--dtype` | `auto` | Compute dtype: `bfloat16`, `float16`, `float32` | Use `bfloat16` always unless model requires `float16` | Ch 2 |
-| `--kv-cache-dtype` | `auto` | KV cache storage dtype: `fp8`, `fp16`, `bf16` | Use `fp8` on H100 to reduce KV memory by 2× | Ch 6 |
-| `--preemption-mode` | `recompute` | How to handle KV cache eviction: `recompute` or `swap` | Use `recompute` (default); `swap` only if recompute latency is too high | Ch 7 |
-| `--attention-backend` | `flashinfer` (V1) | Attention kernel backend: `flashinfer`, `flash_attn`, `triton` | Use `flashinfer` for best performance on H100/A100 | Ch 5 |
-| `--swap-space` | `4` (GB) | CPU RAM allocated for KV block swapping | Increase on nodes with abundant RAM; set 0 to disable swapping | Ch 7 |
-| `--disable-log-stats` | `False` | Suppress per-step statistics logging | Enable in production to reduce logging overhead (saves ~2% throughput) | Ch 16 |
+```
+std::extents<std::size_t, 128, std::dynamic_extent, 64>
+              ^index type  ^D0  ^D1 (runtime)          ^D2
+```
 
-**Notes**:
+At runtime, dynamic extents are passed to the mdspan constructor positionally
+after the pointer:
 
-- vLLM V1 enables chunked prefill and prefix caching by default. V0 does not.
-- `--quantization fp8` requires H100 or newer; on A100, use `awq` or `gptq`.
-- `--tensor-parallel-size` must evenly divide `num_attention_heads` and `num_key_value_heads`.
+```cpp
+float buf[128 * N * 64];   // N varies
+auto t = std::mdspan<float,
+             std::extents<std::size_t, 128, std::dynamic_extent, 64>>(
+             buf, N);       // only dynamic extents are passed
+```
+
+### K.4.1 Querying extents
+
+```cpp
+auto e = t.extents();
+std::size_t d0 = e.extent(0);   // 128  (static)
+std::size_t d1 = e.extent(1);   // N    (dynamic, runtime value)
+std::size_t d2 = e.extent(2);   // 64   (static)
+std::size_t total = t.mapping().required_span_size();
+```
+
+### K.4.2 `dextents` — shorthand for all-dynamic
+
+When all dimensions are dynamic, `std::dextents<T, N>` is a concise alias:
+
+```cpp
+// 3-D all-dynamic tensor
+std::mdspan<float, std::dextents<std::size_t, 3>> tensor(ptr, D, H, W);
+```
+
+This is the equivalent of NumPy's unconstrained array. In inference code it
+appears wherever you cannot statically know batch size, sequence length, or
+head count.
 
 ---
 
-## K.3 llama.cpp CLI Quick Reference
+## K.5 Layout Policies
 
-Key flags for `llama-cli` and `llama-server`. Flag names shown for the unified CLI (llama.cpp post-2024 refactor).
+The layout policy translates a multi-dimensional index into a flat offset. This
+is where the real power lies for inference engineering.
 
-| Flag | Default | What it does | When to change |
-|------|---------|-------------|----------------|
-| `-n` / `--predict` | `128` | Maximum output tokens to generate | Set to expected output length; `-1` for unlimited (use with caution) |
-| `-c` / `--ctx-size` | `512` | Context window in tokens (input + output) | Increase to model's trained max; larger contexts use more RAM |
-| `-ngl` / `--n-gpu-layers` | `0` | Number of transformer layers offloaded to GPU | Set to model's total layer count for full GPU offload; partial for CPU+GPU |
-| `-t` / `--threads` | CPU count | CPU threads for compute | Set to physical core count (not hyperthreads) for CPU inference |
-| `-tb` / `--threads-batch` | same as `-t` | Threads used during batch/prefill | Can be set higher than `-t` for better prefill throughput |
-| `-b` / `--batch-size` | `2048` | Prompt batch size (tokens processed per chunk) | Increase to 4096–8192 for long prompts; limited by RAM |
-| `--ubatch-size` | `512` | Micro-batch size for physical computation | Tune for memory: smaller uses less VRAM peak |
-| `-m` / `--model` | required | Path to GGUF model file | — |
-| `--mlock` | `false` | Lock model weights in RAM (prevent swapping) | Enable in production to prevent OS from swapping weights to disk |
-| `--no-mmap` | `false` | Disable memory-mapped file loading | Enable if mmap causes latency spikes on NFS or slow storage |
-| `--numa` | `none` | NUMA strategy: `distribute`, `isolate`, `numactl` | On multi-socket servers, use `numactl` with taskset for best performance |
-| `-fa` / `--flash-attn` | `false` | Enable Flash Attention | Enable always when supported (requires compatible GGUF and CUDA backend) |
-| `--cache-type-k` | `f16` | KV cache dtype for keys: `f16`, `q8_0`, `q4_0` | Use `q8_0` to reduce VRAM by ~50% with minimal quality loss |
-| `--cache-type-v` | `f16` | KV cache dtype for values | Same as above; can differ from key cache type |
-| `-nkvo` / `--no-kv-offload` | `false` | Disable KV cache GPU offload | Use if VRAM is tight and CPU KV cache is acceptable |
-| `--grp-attn-n` | `1` | Group attention factor for context extension | Set to 4–8 for 4–8× context extension (Self-Extend technique) |
-| `--temp` | `0.8` | Sampling temperature | 0.0 for greedy/deterministic; 0.7–1.0 for creative tasks |
-| `--top-p` | `0.95` | Nucleus sampling threshold | Reduce to 0.85 for more focused outputs |
-| `--top-k` | `40` | Top-K sampling | Set to 0 to disable; combine with top-p |
-| `--repeat-penalty` | `1.1` | Penalty for repeated tokens | Increase to 1.2–1.3 if model loops; decrease if output is too sparse |
-| `-sp` / `--system-prompt` | `""` | System prompt string | Use `-spf` to load from file |
-| `--port` | `8080` | HTTP server port (llama-server) | Change if 8080 is in use |
-| `--parallel` | `1` | Simultaneous parallel slots (llama-server) | Increase for multi-user serving; each slot needs separate KV cache |
-| `--cont-batching` | `true` | Continuous batching (llama-server) | Keep enabled; disable only for debugging |
+### K.5.1 `layout_right` — row-major (C order)
 
-**llama.cpp performance quick-start** (70B model, single H100 80GB):
+The default. The last dimension varies fastest:
+
+```
+offset(i₀, i₁, …, iₙ) = i₀·s₀ + i₁·s₁ + … + iₙ·sₙ
+where s_k = product of extents from k+1 to N
+```
+
+For a `[M, N]` matrix: `offset(i, j) = i·N + j`.
+
+PyTorch's CPU tensors, NumPy arrays, and vLLM's weight files are all row-major
+by default. This is the layout to reach for first.
+
+```cpp
+std::mdspan<float, std::extents<std::size_t, 1024, 4096>,
+            std::layout_right> W(ptr);
+// W(i, j) ≡ ptr[i * 4096 + j]
+```
+
+### K.5.2 `layout_left` — column-major (Fortran order)
+
+The first dimension varies fastest:
+
+```
+offset(i, j) = i + j·M    for an [M, N] matrix
+```
+
+BLAS libraries (LAPACK, cuBLAS host API) expect column-major. When calling
+`cblas_sgemm`, you can wrap your storage in `layout_left` mdspan and pass the
+strides directly — no transposition copies:
+
+```cpp
+std::mdspan<float, std::dextents<std::size_t, 2>,
+            std::layout_left> A_colmaj(A_ptr, M, K);
+// stride(0) = 1, stride(1) = M — matches CBLAS_COL_MAJOR
+```
+
+### K.5.3 `layout_stride` — arbitrary strides
+
+The most general policy. Each dimension has an independent stride stored at
+runtime:
+
+```cpp
+// A row-major 512×512 matrix inside a larger 1024×1024 buffer
+// (top-left quadrant view, no copy)
+std::array<std::ptrdiff_t, 2> strides{1024, 1};
+std::layout_stride::mapping<std::dextents<std::size_t, 2>>
+    map{{512, 512}, strides};
+std::mdspan A_sub(big_ptr, map);
+```
+
+`layout_stride` is the workhorse for:
+
+- Non-contiguous subviews (every other row, every 4th column)
+- Transposed views without copying (`strides = {1, M}` transposes an M×N matrix)
+- Interleaved formats (AoS → SoA reinterpretation)
+
+### K.5.4 Worked Example K.1 — Transpose view at zero cost
+
+A standard matrix multiply kernel requires A and Bᵀ (or transposed B). With
+`layout_stride` you can present B transposed without allocating or copying:
+
+```cpp
+#include <mdspan>
+#include <array>
+
+// Original B: [K, N] row-major
+float B_data[K * N];
+DynMat<float> B(B_data, K, N);
+// stride(0) = N, stride(1) = 1
+
+// Transposed view Bᵀ: [N, K] — swap extents AND strides
+std::array<std::ptrdiff_t, 2> T_strides{1, static_cast<std::ptrdiff_t>(N)};
+std::layout_stride::mapping<std::dextents<std::size_t, 2>>
+    T_map{{N, K}, T_strides};
+std::mdspan<float, std::dextents<std::size_t, 2>,
+            std::layout_stride> Bt(B_data, T_map);
+
+// Bt(n, k) == B(k, n) — same memory, different map
+assert(Bt(3, 7) == B(7, 3));
+// No allocation. No copy. Zero overhead.
+```
+
+In autoregressive decode, every GEMV (matrix-vector multiply) for a single
+token reads weight rows sequentially — layout_right is cache-optimal. In
+prefill, batched GEMM benefits from different access patterns. The transpose
+trick lets the same weight buffer serve both without duplication.
+
+### K.5.5 Custom layout policies
+
+The layout concept is open for extension. Any type satisfying `LayoutMapping`
+works. This enables:
+
+- **Tiled layouts** — tiles in L1/L2-friendly chunks (§K.8)
+- **Hilbert-curve layouts** — cache-oblivious matrix traversal
+- **Quantised layouts** — INT4 packed storage, FP8 blocks
+
+```cpp
+// Sketch: a 16×16 tiled layout for 4-bit packed weights
+struct layout_tile_16x16 {
+    template<class Extents>
+    struct mapping {
+        using index_type = typename Extents::index_type;
+        Extents extents_;
+
+        auto operator()(index_type row, index_type col) const noexcept {
+            auto tile_r = row / 16,  elem_r = row % 16;
+            auto tile_c = col / 16,  elem_c = col % 16;
+            auto tiles_per_row = extents_.extent(1) / 16;
+            return (tile_r * tiles_per_row + tile_c) * 256
+                   + elem_r * 16 + elem_c;
+        }
+        // … required_span_size(), strides(), is_always_unique(), etc.
+    };
+};
+```
+
+---
+
+## K.6 Accessor Policies
+
+The accessor policy controls how the flat offset is converted to a reference.
+The default `std::default_accessor<T>` is trivial: `ptr[offset]`. But
+custom accessors enable powerful patterns.
+
+### K.6.1 Aligned accessor
+
+SIMD loads require 32- or 64-byte alignment. An aligned accessor adds
+`[[assume_aligned]]` hints the compiler can exploit:
+
+```cpp
+template<class T, std::size_t Alignment>
+struct aligned_accessor {
+    using element_type     = T;
+    using reference        = T&;
+    using data_handle_type = T*;
+    using offset_policy    = aligned_accessor;   // same type for offsets
+
+    reference access(data_handle_type p, std::ptrdiff_t i) const noexcept {
+        return *std::assume_aligned<Alignment>(p + i);
+    }
+    data_handle_type offset(data_handle_type p, std::ptrdiff_t i) const noexcept {
+        return p + i;
+    }
+};
+
+// A 64-byte-aligned weight matrix
+std::mdspan<float,
+            std::extents<std::size_t, 4096, 4096>,
+            std::layout_right,
+            aligned_accessor<float, 64>> W(aligned_ptr);
+```
+
+With this accessor, LLVM/GCC will emit AVX-512 aligned loads (`vmovaps`) instead
+of unaligned loads (`vmovups`) — a measurable win on inner-loop kernels.
+
+### K.6.2 Atomic accessor
+
+For parallel writes to a shared accumulation buffer without data races:
+
+```cpp
+#include <atomic>
+
+template<class T>
+struct atomic_ref_accessor {
+    using element_type     = T;
+    using reference        = std::atomic_ref<T>;
+    using data_handle_type = T*;
+    using offset_policy    = atomic_ref_accessor;
+
+    reference access(data_handle_type p, std::ptrdiff_t i) const noexcept {
+        return std::atomic_ref<T>(p[i]);
+    }
+    data_handle_type offset(data_handle_type p, std::ptrdiff_t i) const noexcept {
+        return p + i;
+    }
+};
+```
+
+Useful when accumulating attention scores across threads — each thread owns a
+slice of the Q dimension but writes to the same output buffer.
+
+### K.6.3 Scaled accessor — FP8 dequantisation
+
+LLM weights are often stored as FP8 but processed as FP32. An accessor can
+perform dequantisation on every read:
+
+```cpp
+struct fp8_to_float_accessor {
+    using element_type     = float;          // logical type
+    using reference        = float;          // value, not reference (read-only)
+    using data_handle_type = uint8_t*;       // physical storage
+
+    // scale stored alongside the accessor
+    float scale;
+
+    float access(data_handle_type p, std::ptrdiff_t i) const noexcept {
+        // decode E4M3 FP8 → float, then scale
+        return fp8_e4m3_to_float(p[i]) * scale;
+    }
+    data_handle_type offset(data_handle_type p, std::ptrdiff_t i) const noexcept {
+        return p + i;
+    }
+};
+
+// FP8 weight matrix presenting as float view
+std::mdspan<float,
+            std::dextents<std::size_t, 2>,
+            std::layout_right,
+            fp8_to_float_accessor>
+    W_fp8(fp8_ptr, fp8_to_float_accessor{scale}, rows, cols);
+
+// Caller sees floats; physical reads are uint8_t with on-the-fly decode
+float val = W_fp8(i, j);   // fp8_e4m3_to_float(fp8_ptr[i*cols+j]) * scale
+```
+
+This is how llama.cpp's GGUF GGML_TYPE_F8_E4M3 weights are conceptually
+accessed: a strided view of packed bytes with per-tensor or per-row scales
+applied at read time.
+
+---
+
+## K.7 `submdspan` — Zero-Copy Tensor Slicing
+
+`std::submdspan` (C++26, but available in the Kokkos reference implementation
+for C++17/23) extracts a lower-dimensional view from an mdspan without touching
+the underlying data.
+
+### K.7.1 Slice specifiers
+
+| Specifier | Meaning |
+|---|---|
+| `std::full_extent` | Take the entire dimension |
+| `i` (integer) | Fix dimension to index `i`, reducing rank by 1 |
+| `std::pair{lo, hi}` | Slice `[lo, hi)` |
+| `std::strided_slice{off, ext, stride}` | Strided range |
+
+### K.7.2 Extracting a single token's embedding
+
+```cpp
+// token_emb: [seq_len, d_model] — all token embeddings for a sequence
+DynMat<float> token_emb(ptr, seq_len, d_model);
+
+// Extract embedding for token t → shape [d_model]
+auto tok_vec = std::submdspan(token_emb,
+                              t,                   // fix row dimension
+                              std::full_extent);   // keep column dimension
+// tok_vec is mdspan<float, extents<size_t, dynamic_extent>>
+// Points into the same memory — zero copy
+float e0 = tok_vec(0);   // token_emb(t, 0)
+```
+
+### K.7.3 Extracting a KV cache head slice
+
+The KV cache in a multi-head attention layer is typically:
+`[num_layers, 2, num_heads, seq_len, head_dim]`
+(the `2` indexes K vs V).
+
+```cpp
+// Full KV cache tensor
+std::mdspan<float,
+    std::extents<std::size_t,
+        std::dynamic_extent,   // num_layers
+        2,                     // K=0, V=1
+        std::dynamic_extent,   // num_heads
+        std::dynamic_extent,   // seq_len
+        64>>                   // head_dim = 64 (static)
+    kv_cache(ptr, num_layers, num_heads, max_seq_len);
+
+// Extract K matrix for layer 12, head 7: shape [seq_len, 64]
+auto K_12_7 = std::submdspan(kv_cache,
+    12,                  // layer 12
+    0,                   // K
+    7,                   // head 7
+    std::full_extent,    // all sequence positions
+    std::full_extent);   // all head dims
+// K_12_7(pos, d) == kv_cache(12, 0, 7, pos, d)
+// No copy. The view is valid for the lifetime of kv_cache's backing storage.
+```
+
+### K.7.4 Batch slice and strided access
+
+```cpp
+// Weight matrix W: [out_features, in_features]
+DynMat<float> W(w_ptr, out_features, in_features);
+
+// Every other output neuron (for debug / ablation):
+auto W_even = std::submdspan(W,
+    std::strided_slice{0, out_features/2, 2},   // rows 0,2,4,...
+    std::full_extent);
+// W_even.extent(0) == out_features/2
+// W_even(i, j)    == W(2*i, j)
+```
+
+---
+
+## K.8 Tiled GEMM with mdspan
+
+Matrix multiplication is memory-bound on CPU for the weight sizes typical in
+LLM inference (4096×4096 and larger). The standard fix is register tiling:
+load small blocks of A and B into L1-resident registers, accumulate into a C
+tile, and write back once. mdspan makes the tiling logic clean and the index
+arithmetic explicit.
+
+### K.8.1 Tile layout helper
+
+```cpp
+// Extract a [TILE_M, TILE_K] block of A starting at (row_base, col_base)
+template<std::size_t TM, std::size_t TK, class MDS>
+auto tile_of(MDS A, std::size_t row_base, std::size_t col_base) {
+    return std::submdspan(A,
+        std::pair{row_base, row_base + TM},
+        std::pair{col_base, col_base + TK});
+}
+```
+
+### K.8.2 Tiled GEMM kernel
+
+```cpp
+#include <mdspan>
+#include <immintrin.h>   // AVX-256
+
+template<std::size_t TM = 4, std::size_t TN = 4, std::size_t TK = 32>
+void gemm_tiled(DynMat<const float> A,    // [M, K]
+                DynMat<const float> B,    // [K, N]
+                DynMat<float>       C) {  // [M, N]
+    const auto M = A.extent(0);
+    const auto N = B.extent(1);
+    const auto K = A.extent(1);
+
+    for (std::size_t m = 0; m < M; m += TM)
+    for (std::size_t n = 0; n < N; n += TN)
+    for (std::size_t k = 0; k < K; k += TK) {
+        // Register accumulator tile
+        float acc[TM][TN] = {};
+
+        // Load A tile [TM, TK] and B tile [TK, TN] into registers
+        auto At = tile_of<TM, TK>(A, m, k);
+        auto Bt = tile_of<TK, TN>(B, k, n);
+
+        for (std::size_t ti = 0; ti < TM; ++ti)
+        for (std::size_t tk = 0; tk < TK; ++tk)
+        for (std::size_t tj = 0; tj < TN; ++tj)
+            acc[ti][tj] += At(ti, tk) * Bt(tk, tj);
+
+        // Write accumulated tile back to C
+        for (std::size_t ti = 0; ti < TM; ++ti)
+        for (std::size_t tj = 0; tj < TN; ++tj)
+            C(m + ti, n + tj) += acc[ti][tj];
+    }
+}
+```
+
+The mdspan views `At` and `Bt` compile to pointer + constant-stride arithmetic —
+no heap allocation, no virtual dispatch. With `-O3 -march=native` the inner
+accumulation loop auto-vectorises to SIMD FMA instructions.
+
+### K.8.3 Worked Example K.2 — GEMV for single-token decode
+
+During autoregressive decode, batch size = 1: the computation degenerates from
+GEMM to GEMV (matrix-vector multiply). The memory access pattern changes
+fundamentally:
+
+```
+B=1:   output[out]  = Σ_k  W[out, k] * input[k]
+                      ^reads entire row of W for each output neuron
+```
+
+```cpp
+// W: [out_features, hidden_dim], x: [hidden_dim], y: [out_features]
+void gemv(DynMat<const float> W,
+          DynVec<const float> x,
+          DynVec<float>       y) {
+    const auto rows = W.extent(0);
+    const auto cols = W.extent(1);
+
+    for (std::size_t i = 0; i < rows; ++i) {
+        float acc = 0.0f;
+        // submdspan extracts row i as a 1-D span — zero copy
+        auto row = std::submdspan(W, i, std::full_extent);
+        for (std::size_t j = 0; j < cols; ++j)
+            acc += row(j) * x(j);
+        y(i) = acc;
+    }
+}
+```
+
+With AVX-512 the inner loop becomes 16-wide FMA: 16 floats × 1 FMA = 32
+FLOP/cycle → ~100 GB/s effective bandwidth on a modern Xeon at 3 GHz.
+
+---
+
+## K.9 Multi-Head Attention with mdspan
+
+The entire MHA inner loop can be expressed cleanly using mdspan views and
+submdspan slices. This section builds the forward pass from scratch, making the
+tensor indexing explicit.
+
+### K.9.1 Tensor shapes
+
+```
+Q, K, V:  [batch, num_heads, seq_len, head_dim]
+scores:   [batch, num_heads, seq_len, seq_len]
+output:   [batch, num_heads, seq_len, head_dim]
+```
+
+For single-batch inference (batch=1) the batch dimension is dropped.
+
+### K.9.2 Score computation — Q × Kᵀ
+
+```cpp
+// score[h, i, j] = dot(Q[h, i, :], K[h, j, :]) / sqrt(head_dim)
+void attention_scores(
+    std::mdspan<const float,
+        std::extents<std::size_t,
+            std::dynamic_extent,   // num_heads
+            std::dynamic_extent,   // seq_len
+            std::dynamic_extent>>  // head_dim
+    Q, K,
+    std::mdspan<float,
+        std::extents<std::size_t,
+            std::dynamic_extent,   // num_heads
+            std::dynamic_extent,   // seq_len Q
+            std::dynamic_extent>>  // seq_len K
+    scores)
+{
+    const auto H   = Q.extent(0);
+    const auto S   = Q.extent(1);
+    const auto D   = Q.extent(2);
+    const float scale = 1.0f / std::sqrt(static_cast<float>(D));
+
+    for (std::size_t h = 0; h < H; ++h) {
+        // Q_h: [S, D],  K_h: [S, D]
+        auto Q_h = std::submdspan(Q, h, std::full_extent, std::full_extent);
+        auto K_h = std::submdspan(K, h, std::full_extent, std::full_extent);
+
+        for (std::size_t i = 0; i < S; ++i)
+        for (std::size_t j = 0; j < S; ++j) {
+            float dot = 0.0f;
+            auto qi = std::submdspan(Q_h, i, std::full_extent);   // row i
+            auto kj = std::submdspan(K_h, j, std::full_extent);   // row j
+            for (std::size_t d = 0; d < D; ++d)
+                dot += qi(d) * kj(d);
+            scores(h, i, j) = dot * scale;
+        }
+    }
+}
+```
+
+All `submdspan` calls produce views into the same buffer — the compiler sees
+contiguous accesses and vectorises the inner `d` loop.
+
+### K.9.3 Online softmax with mdspan
+
+```cpp
+void softmax_rows(
+    std::mdspan<float,
+        std::extents<std::size_t,
+            std::dynamic_extent,    // num_heads
+            std::dynamic_extent,    // seq_len
+            std::dynamic_extent>>   // seq_len
+    scores)
+{
+    const auto H = scores.extent(0);
+    const auto S = scores.extent(1);
+
+    for (std::size_t h = 0; h < H; ++h)
+    for (std::size_t i = 0; i < S; ++i) {
+        // Extract row [i, :] for head h — causal mask: only j <= i
+        auto row = std::submdspan(scores, h, i, std::pair{0UZ, i + 1});
+
+        float max_val = -std::numeric_limits<float>::infinity();
+        for (std::size_t j = 0; j <= i; ++j)
+            max_val = std::max(max_val, row(j));
+
+        float sum = 0.0f;
+        for (std::size_t j = 0; j <= i; ++j) {
+            row(j) = std::exp(row(j) - max_val);
+            sum += row(j);
+        }
+        for (std::size_t j = 0; j <= i; ++j)
+            row(j) /= sum;
+
+        // Positions j > i are masked — set to 0
+        for (std::size_t j = i + 1; j < S; ++j)
+            scores(h, i, j) = 0.0f;
+    }
+}
+```
+
+The causal `std::pair{0, i+1}` slice is zero-cost: it reduces the upper bound
+of the inner loop without masking or branching.
+
+### K.9.4 Weighted value aggregation
+
+```cpp
+// output[h, i, :] = Σ_j scores[h, i, j] * V[h, j, :]
+void weighted_sum(
+    std::mdspan<const float,
+        std::extents<std::size_t,
+            std::dynamic_extent,
+            std::dynamic_extent,
+            std::dynamic_extent>> scores,
+    std::mdspan<const float,
+        std::extents<std::size_t,
+            std::dynamic_extent,
+            std::dynamic_extent,
+            std::dynamic_extent>> V,
+    std::mdspan<float,
+        std::extents<std::size_t,
+            std::dynamic_extent,
+            std::dynamic_extent,
+            std::dynamic_extent>> out)
+{
+    const auto H = scores.extent(0);
+    const auto S = scores.extent(1);
+    const auto D = V.extent(2);
+
+    for (std::size_t h = 0; h < H; ++h)
+    for (std::size_t i = 0; i < S; ++i) {
+        auto out_vec = std::submdspan(out, h, i, std::full_extent);
+        for (std::size_t d = 0; d < D; ++d) out_vec(d) = 0.0f;
+
+        for (std::size_t j = 0; j <= i; ++j) {   // causal
+            float w = scores(h, i, j);
+            auto v_row = std::submdspan(V, h, j, std::full_extent);
+            for (std::size_t d = 0; d < D; ++d)
+                out_vec(d) += w * v_row(d);
+        }
+    }
+}
+```
+
+---
+
+## K.10 KV Cache Management with mdspan
+
+The KV cache is the largest runtime allocation in LLM inference — 2 × num_layers
+× num_heads × seq_len × head_dim × sizeof(float) bytes per request. mdspan makes
+it easy to manage as a preallocated slab with per-request views.
+
+### K.10.1 Slab allocation
+
+```cpp
+struct KVCacheSlab {
+    // Preallocate max_seq_len slots for one request
+    std::vector<float> storage;
+
+    // Shape: [num_layers, 2, num_heads, max_seq_len, head_dim]
+    using KVTensor = std::mdspan<float,
+        std::extents<std::size_t,
+            std::dynamic_extent,   // num_layers
+            2,                     // K=0, V=1
+            std::dynamic_extent,   // num_heads
+            std::dynamic_extent,   // max_seq_len
+            std::dynamic_extent>>; // head_dim
+
+    KVTensor view;
+
+    KVCacheSlab(std::size_t num_layers,
+                std::size_t num_heads,
+                std::size_t max_seq_len,
+                std::size_t head_dim)
+        : storage(num_layers * 2 * num_heads * max_seq_len * head_dim, 0.0f)
+        , view(storage.data(), num_layers, num_heads, max_seq_len, head_dim)
+    {}
+
+    // Get K or V for one layer and head, up to current seq position
+    auto get(std::size_t layer, int kv, std::size_t head,
+             std::size_t seq_pos) {
+        return std::submdspan(view,
+            layer, kv, head,
+            std::pair{0UZ, seq_pos},
+            std::full_extent);
+        // Returns [seq_pos, head_dim] — live window, zero copy
+    }
+};
+```
+
+### K.10.2 PagedAttention analogy
+
+vLLM's PagedAttention (Chapter 6) manages the KV cache as a pool of fixed-size
+blocks. In a CPU-only setting you can replicate the concept with mdspan: divide
+the slab into `PAGE_SIZE`-token pages and maintain a free list.
+
+```cpp
+constexpr std::size_t PAGE_SIZE = 16;   // tokens per page
+
+// One page: [2, num_heads, PAGE_SIZE, head_dim]
+template<std::size_t NH, std::size_t HD>
+using KVPage = std::mdspan<float,
+    std::extents<std::size_t, 2, NH, PAGE_SIZE, HD>>;
+
+struct PagePool {
+    std::vector<float> arena;       // one contiguous arena
+    std::vector<std::size_t> free_pages;
+    std::size_t page_floats;
+
+    PagePool(std::size_t num_pages, std::size_t num_heads,
+             std::size_t head_dim)
+        : page_floats(2 * num_heads * PAGE_SIZE * head_dim)
+        , arena(num_pages * page_floats)
+    {
+        for (std::size_t i = num_pages; i-- > 0;)
+            free_pages.push_back(i);
+    }
+
+    float* alloc_page() {
+        auto idx = free_pages.back();
+        free_pages.pop_back();
+        return arena.data() + idx * page_floats;
+    }
+    void free_page(float* p) {
+        free_pages.push_back((p - arena.data()) / page_floats);
+    }
+};
+```
+
+Each page is an mdspan created on demand — its lifetime matches the request,
+not the pool.
+
+---
+
+## K.11 `std::linalg` — mdspan Meets BLAS (C++26)
+
+C++26 adds `<linalg>`, a standardised interface to BLAS-level operations
+parameterised over mdspan. This closes the loop between the view abstraction
+and high-performance compute.
+
+### K.11.1 Key operations
+
+```cpp
+#include <linalg>
+
+// Dot product: result = x · y
+float d = std::linalg::dot(x_span, y_span);
+
+// Scale: x *= alpha
+std::linalg::scale(2.0f, x_span);
+
+// Matrix-vector: y = A * x
+std::linalg::matrix_vector_product(A_span, x_span, y_span);
+
+// GEMM: C = A * B
+std::linalg::matrix_product(A_span, B_span, C_span);
+
+// Symmetric GEMM: C = A * Aᵀ + C
+std::linalg::symmetric_matrix_rank_k_update(1.0f, A_span, C_span,
+    std::linalg::upper_triangle);
+```
+
+All operations dispatch to the platform BLAS if one is linked (MKL, OpenBLAS,
+Accelerate), falling back to a reference implementation. The dispatch is
+transparent — you write mdspan code, the library decides whether to call
+`cblas_sgemm` or a built-in kernel.
+
+### K.11.2 Inference GEMM with linalg
+
+```cpp
+#include <mdspan>
+#include <linalg>
+
+void linear_layer(
+    DynMat<const float> W,    // [out, in]
+    DynMat<const float> X,    // [batch, in]
+    DynMat<float>       Y)    // [batch, out]
+{
+    // Y = X * Wᵀ  →  each row of X dotted with each row of W
+    // linalg::matrix_product expects [M,K] × [K,N] → [M,N]
+    // so pass X [batch,in] and Wᵀ [in,out]
+    auto Wt = /* layout_stride transpose view (§K.5.4) */;
+    std::linalg::matrix_product(X, Wt, Y);
+}
+```
+
+With MKL linked, `matrix_product` calls `cblas_sgemm` with the right leading-
+dimension values derived automatically from the mdspan strides.
+
+---
+
+## K.12 mdspan in SIMD Code — Combining with `std::experimental::simd`
+
+C++23 also standardises `std::experimental::simd` (merged into C++26 as
+`std::simd`). Combining mdspan addressing with SIMD loads gives fully
+standards-based vectorised kernels without intrinsics.
+
+```cpp
+#include <mdspan>
+#include <experimental/simd>
+namespace stdx = std::experimental;
+
+// Vectorised dot product: a · b where both are 1-D mdspan
+float dot_simd(DynVec<const float> a, DynVec<const float> b) {
+    using V = stdx::native_simd<float>;
+    constexpr auto W = V::size();                // e.g. 8 on AVX2
+
+    const auto N = a.extent(0);
+    V acc{0.0f};
+
+    std::size_t i = 0;
+    for (; i + W <= N; i += W) {
+        V va, vb;
+        va.copy_from(a.data_handle() + i, stdx::element_aligned);
+        vb.copy_from(b.data_handle() + i, stdx::element_aligned);
+        acc += va * vb;
+    }
+    float result = stdx::reduce(acc);
+    for (; i < N; ++i) result += a(i) * b(i);   // scalar tail
+    return result;
+}
+```
+
+This emits AVX2 `vfmadd231ps` instructions on x86 — the same code compiles to
+NEON `fmla` on Apple Silicon with no changes.
+
+---
+
+## K.13 Worked Example K.3 — Feed-Forward Layer (FFN)
+
+The Transformer FFN is two linear projections with a nonlinearity:
+
+```
+h  = SiLU(X · W₁ᵀ)    [batch, seq, 4*d_model]
+out = h  · W₂ᵀ         [batch, seq, d_model]
+```
+
+```cpp
+#include <mdspan>
+#include <cmath>
+#include <algorithm>
+
+inline float silu(float x) { return x / (1.0f + std::exp(-x)); }
+
+// W1: [4*d_model, d_model], W2: [d_model, 4*d_model]
+// X:  [batch, seq, d_model], out: [batch, seq, d_model]
+void ffn(
+    std::mdspan<const float, std::dextents<std::size_t, 3>> X,
+    DynMat<const float> W1,
+    DynMat<const float> W2,
+    std::mdspan<float,  std::dextents<std::size_t, 3>> out,
+    std::vector<float>& scratch)   // [batch*seq * 4*d_model]
+{
+    const auto B  = X.extent(0);
+    const auto S  = X.extent(1);
+    const auto D  = X.extent(2);
+    const auto D4 = W1.extent(0);   // 4 * D
+
+    // Reshape scratch as [B*S, D4]
+    DynMat<float> H(scratch.data(), B * S, D4);
+    // Reshape X as [B*S, D] for GEMM
+    DynMat<const float> X2d(X.data_handle(), B * S, D);
+    // Reshape out as [B*S, D]
+    DynMat<float> out2d(out.data_handle(), B * S, D);
+
+    // H = X2d × W1ᵀ
+    // (use gemm_tiled from §K.8 or std::linalg::matrix_product)
+    gemm_tiled(X2d, /* W1ᵀ */ W1, H);   // simplified: assume W1 already transposed
+
+    // SiLU activation in-place
+    for (std::size_t i = 0; i < B * S; ++i)
+        for (std::size_t j = 0; j < D4; ++j)
+            H(i, j) = silu(H(i, j));
+
+    // out2d = H × W2ᵀ
+    gemm_tiled(H, W2, out2d);
+}
+```
+
+All tensor reshape operations (`X2d`, `out2d`, `H`) are mdspan re-wraps of the
+same underlying buffers — zero copies, zero allocations.
+
+---
+
+## K.14 Performance Notes and Guidelines
+
+### K.14.1 Static vs. dynamic extents
+
+| Property | Static | Dynamic |
+|---|---|---|
+| Size in memory | Sizeof pointer only | Pointer + rank × sizeof(index) |
+| Stride computation | Compile-time constant | Runtime multiply |
+| Aliasing hints | Compiler can assume | May inhibit auto-vec |
+| Flexibility | Fixed at compile time | Changed per call |
+
+For weight matrices with fixed hidden dimensions (common in production models),
+prefer static extents on the hidden dimension and dynamic on batch/sequence:
+
+```cpp
+// Prefer this for d_model=4096 models:
+std::mdspan<float,
+    std::extents<std::size_t, std::dynamic_extent, 4096>>
+// Over:
+std::mdspan<float, std::dextents<std::size_t, 2>>
+```
+
+The compiler eliminates one runtime multiply from every access.
+
+### K.14.2 `is_contiguous` and cache prefetch hints
+
+```cpp
+if constexpr (decltype(mat)::is_always_contiguous()) {
+    // emit __builtin_prefetch hints safely
+    __builtin_prefetch(mat.data_handle() + prefetch_offset, 0, 3);
+}
+```
+
+`layout_right` and `layout_left` are always contiguous; `layout_stride` and
+custom tiled layouts are not. Checking `is_always_contiguous()` at compile time
+allows safe prefetch without branching.
+
+### K.14.3 Avoid `operator()` in innermost hot loops
+
+When the innermost loop is fully unrolled and the compiler cannot see that
+strides are constant (dynamic extent), the `operator()` call may generate a
+multiply per access. Fix: cache the stride:
+
+```cpp
+const std::size_t stride0 = mat.stride(0);   // cache once
+const float* base = mat.data_handle();
+for (std::size_t i = 0; i < rows; ++i)
+    base[i * stride0 + j] += ...;           // pointer arithmetic
+```
+
+For static extents the compiler does this automatically; for dynamic extents,
+the manual cache eliminates repeated `extent(0)` loads.
+
+### K.14.4 Alignment guarantees
+
+`std::vector<float>` guarantees `alignof(float)` (4 bytes). For AVX-512 you
+need 64-byte alignment. Use `std::aligned_alloc`:
+
+```cpp
+float* ptr = static_cast<float*>(
+    std::aligned_alloc(64, num_elements * sizeof(float)));
+// Wrap with mdspan + aligned_accessor (§K.6.1)
+```
+
+Or use `std::pmr::vector` with a custom `std::pmr::pool_resource` that enforces
+alignment.
+
+---
+
+## K.15 Decision Framework
+
+| You need… | Use… |
+|---|---|
+| Row-major weight matrix (default) | `layout_right` |
+| Column-major for BLAS call | `layout_left` |
+| Non-contiguous view / transpose | `layout_stride` |
+| Tile-blocked GEMM | Custom `layout_tile` |
+| On-the-fly FP8 dequant | Custom accessor |
+| Parallel write accumulation | `atomic_ref_accessor` |
+| SIMD alignment hints | `aligned_accessor<T,64>` |
+| Tensor slice (no copy) | `submdspan` |
+| BLAS call without copy | `std::linalg` + mdspan |
+| Runtime shapes (batch, seq_len) | `dynamic_extent` |
+| Fixed model dim (d_model, head_dim) | Static extent |
+
+---
+
+## K.16 Relation to Existing Inference Frameworks
+
+| Framework | Memory abstraction | mdspan analogy |
+|---|---|---|
+| llama.cpp | `ggml_tensor` (shape + type + data ptr) | mdspan + custom accessor per GGML type |
+| vLLM (C++ kernels) | Flat pointer + size args passed to CUDA kernels | mdspan would replace manual stride args |
+| PyTorch ATen (CPU) | `TensorImpl` → `StorageImpl` → `void*` + stride array | Dynamic mdspan with `layout_stride` |
+| Eigen | `Map<MatrixXf>` | `DynMat<float>` with `layout_right` |
+| BLAS / LAPACK | `lda`, `ldb` leading-dimension arguments | `layout_left` mdspan strides |
+
+Starting from C++23, writing new inference kernels with mdspan rather than raw
+pointers gives you the safety and expressiveness of PyTorch tensors with the
+overhead of Eigen maps — and full interoperability with `std::linalg` and
+`std::simd`.
+
+---
+
+## K.17 Compiling and Running the Examples
+
+All examples in this appendix compile with:
+
 ```bash
-llama-cli \
-  -m Meta-Llama-3.1-70B-Instruct-Q4_K_M.gguf \
-  -ngl 80 \           # all 80 layers on GPU
-  -c 32768 \          # 32K context
-  -b 4096 \           # large prefill batch
-  -fa \               # Flash Attention
-  --mlock \           # lock weights in memory
-  --cache-type-k q8_0 \  # compressed KV cache
-  -n 512
+# C++23 with GCC 13
+g++ -std=c++23 -O3 -march=native -Wall -Wextra -o demo demo.cpp
+
+# C++23 with Clang 17
+clang++ -std=c++23 -O3 -march=native -stdlib=libc++ -o demo demo.cpp
+
+# Link OpenBLAS for std::linalg dispatch
+g++ -std=c++23 -O3 -march=native -o demo demo.cpp -lopenblas
+
+# Using Kokkos reference mdspan on older compilers
+g++ -std=c++17 -O3 -march=native -I/path/to/mdspan/include -o demo demo.cpp
+```
+
+To verify the worked examples:
+
+```bash
+# Worked Example K.1: transpose view correctness
+static_assert(Bt(3, 7) == B(7, 3));
+
+# Worked Example K.2: GEMV bandwidth
+# Run: ./gemv_bench 4096 4096  → should report ~80–120 GB/s on modern x86
 ```
 
 ---
 
-## K.4 Memory Budget Worksheet
+## K.18 Chapter Summary
 
-Use this template during capacity planning. Fill in values from left to right; each row feeds the next.
+`std::mdspan` is the standard C++ answer to a question inference engineers have
+been solving ad-hoc for years: how to describe a multidimensional view of
+memory without owning it, without copying it, and without paying runtime
+overhead for the description.
 
-```
-═══════════════════════════════════════════════════════════════════════════
-                    KV CACHE MEMORY BUDGET WORKSHEET
-═══════════════════════════════════════════════════════════════════════════
+The key ideas are:
 
-MODEL CONFIGURATION
-  Model name:          ________________
-  Parameter count:     _____ B  (e.g., 70)
-  Precision (weights): ______   (BF16=2B, FP8=1B, INT4=0.5B, INT8=1B)
-  Architecture:        ______   (e.g., Llama-3, Qwen2.5, Mistral)
+**Extents** encode shape: static dimensions fold to compile-time constants,
+dynamic dimensions add one index-word each. Mix static and dynamic to match
+your model's architecture — static hidden dim, dynamic batch.
 
-GPU CONFIGURATION
-  GPU model:           ___×  ______________________  (e.g., 4× H100 SXM)
-  HBM per GPU:         _____ GB   (H100=80, A100=80, A10=24, L40S=48)
-  Total HBM:           _____  ×  _____  =  _____ GB
-  Tensor parallel:     _____ GPUs  (set to number of GPUs on node)
+**Layout policies** encode the index-to-offset map: `layout_right` for row-major
+(PyTorch default), `layout_left` for BLAS column-major, `layout_stride` for
+transposed or non-contiguous views, and custom layouts for tiled or quantised
+storage. The transpose-without-copy pattern (§K.5.4) eliminates a common source
+of allocation in GEMM code.
 
-WEIGHT MEMORY (per GPU after tensor parallelism)
-  weight_bytes = params_B × 1e9 × dtype_bytes / tp_size
-              = _____ × 1e9 × _____ / _____
-              = _____ GB
+**Accessor policies** encode how an offset becomes a value: the default is a raw
+pointer dereference, but custom accessors give you aligned loads, atomic writes,
+and on-the-fly FP8 dequantisation — all at zero abstraction cost.
 
-ACTIVATION MEMORY (estimate, typically 1–3 GB per GPU)
-  activation_GB = _____ GB  (use 2 GB as conservative estimate)
+**`submdspan`** is the surgical tool: extract a head's KV slice, a single
+token's embedding, or a causal attention row without touching the backing data.
+Every slice compiles to pointer arithmetic.
 
-KV CACHE BUDGET (per GPU)
-  kv_budget = total_HBM × gpu_memory_utilization - weight_GB - activation_GB
-            = _____ × _____ - _____ - _____
-            = _____ GB
+**`std::linalg`** (C++26) closes the loop: mdspan views connect directly to
+BLAS dispatch, so weight-matrix multiply becomes a one-liner that routes to MKL
+or OpenBLAS transparently.
 
-KV CACHE PER TOKEN (per GPU, across all sequences)
-  Architecture parameters:
-    num_layers:     _____   (e.g., 80 for Llama-3 70B)
-    num_kv_heads:   _____   (e.g., 8 for GQA in Llama-3 70B)
-    head_dim:       _____   (typically 128)
-    kv_dtype_bytes: _____   (FP16/BF16=2, FP8=1, INT8=1)
-    tp_size:        _____   (same as above)
-
-  kv_per_token = 2 × num_layers × (num_kv_heads / tp_size) × head_dim × kv_dtype_bytes
-               = 2 × _____ × _____ × _____ × _____
-               = _____ bytes per token
-
-MAX SEQUENCE CAPACITY
-  max_tokens_in_cache = kv_budget_GB × 1e9 / kv_per_token
-                      = _____ × 1e9 / _____
-                      = _____ tokens total
-
-  Given max_model_len = _____ tokens per sequence:
-  max_sequences = max_tokens_in_cache / max_model_len
-                = _____ / _____
-                = _____ concurrent sequences (theoretical max)
-
-  Practical max (apply 0.8 efficiency factor):
-  practical_max_seqs ≈ max_sequences × 0.8 = _____
-
-BLOCK TABLE SIZE
-  block_size = _____ tokens per block (vLLM default: 16)
-  num_blocks = max_tokens_in_cache / block_size
-             = _____ / _____ = _____ blocks
-
-WORKED EXAMPLE (Llama-3.1 70B, BF16, 4× H100, max_len=32K)
-  weight_GB   = 70 × 2 / 4       = 35 GB per GPU
-  activation  = 2 GB
-  kv_budget   = 80 × 0.90 - 35 - 2 = 35 GB per GPU
-  kv_per_tok  = 2 × 80 × (8/4) × 128 × 2 = 81,920 bytes ≈ 80 KB/token
-  max_tokens  = 35e9 / 81920     ≈ 427,246 tokens
-  max_seqs    = 427,246 / 32768  ≈ 13 sequences (× 0.8 ≈ 10 practical)
-
-  → With FP8 KV cache (kv_dtype=1B):
-  kv_per_tok  = 2 × 80 × 2 × 128 × 1 = 40,960 bytes
-  max_tokens  = 35e9 / 40960     ≈ 854,492 tokens
-  max_seqs    ≈ 20 practical     (2× improvement from KV quantization alone)
-═══════════════════════════════════════════════════════════════════════════
-```
-
-**Copy-paste calculation script**:
-```python
-# kv_budget_calc.py
-params_b        = 70        # model size in billions
-weight_dtype_b  = 2         # BF16
-tp_size         = 4         # tensor parallel
-hbm_per_gpu_gb  = 80        # H100
-num_gpus        = 4
-gpu_mem_util    = 0.90
-activation_gb   = 2.0
-
-num_layers      = 80
-num_kv_heads    = 8
-head_dim        = 128
-kv_dtype_b      = 2         # FP16/BF16 KV cache
-max_model_len   = 32768
-block_size      = 16
-
-weight_gb     = params_b * 1e9 * weight_dtype_b / tp_size / 1e9
-kv_budget_gb  = hbm_per_gpu_gb * gpu_mem_util - weight_gb - activation_gb
-kv_per_tok    = 2 * num_layers * (num_kv_heads // tp_size) * head_dim * kv_dtype_b
-max_tokens    = int(kv_budget_gb * 1e9 / kv_per_tok)
-max_seqs      = max_tokens // max_model_len
-num_blocks    = max_tokens // block_size
-
-print(f"Weight memory per GPU:  {weight_gb:.1f} GB")
-print(f"KV cache budget:        {kv_budget_gb:.1f} GB")
-print(f"KV bytes per token:     {kv_per_tok:,} bytes ({kv_per_tok/1024:.1f} KB)")
-print(f"Max tokens in cache:    {max_tokens:,}")
-print(f"Max sequences:          {max_seqs} (theoretical) / {int(max_seqs*0.8)} (practical)")
-print(f"Number of KV blocks:    {num_blocks:,}")
-```
+For CPU inference in 2026, mdspan is the lowest-overhead, highest-expressiveness
+way to manage the tensor views that sit between your GGUF weight file and your
+SIMD kernels.
 
 ---
 
-## K.5 SLO Calibration Guide
+## Self-Check Questions
 
-Service Level Objectives for LLM inference differ fundamentally by use case. The following guidelines are based on industry benchmarks and user perception research (Chapter 16).
+1. A weight matrix W is stored as `float[4096 * 4096]` in row-major order. You
+   need to call a BLAS function that expects column-major. Write the `layout_stride`
+   mdspan construction that presents W as column-major without copying any data.
 
-### Metric Definitions
+2. Explain why `std::submdspan(K_cache, layer, 0, head, std::pair{0, seq_pos}, std::full_extent)`
+   produces a zero-copy view. What happens to the pointer arithmetic at compile time
+   when `layer`, `head` are `size_t` and `seq_pos` is `dynamic_extent`?
 
-| Metric | Definition | Notes |
-|--------|-----------|-------|
-| **TTFT** | Time from request send to first output token | Includes network + queue + prefill time |
-| **TPOT** | Time per output token (inter-token latency) | = 1 / decode_tokens_per_second |
-| **E2E Latency** | Total time from request to final token | = TTFT + (output_len - 1) × TPOT |
-| **p50** | Median latency | Half of requests are faster |
-| **p95** | 95th percentile | 1 in 20 requests exceeds this |
-| **p99** | 99th percentile | 1 in 100 requests exceeds this |
+3. You have a custom FP4 weight format: two 4-bit values packed per byte,
+   scale factor per 32-element group. Sketch an `accessor_policy` that unpacks
+   FP4 values on read. What type should `reference` be — a `float&` or a `float`?
+   Why?
 
-### SLO Targets by Use Case
+4. Compare the compile-time behaviour of:
+   ```cpp
+   std::mdspan<float, std::extents<size_t, 4096, 4096>> A(ptr);  // static
+   std::mdspan<float, std::dextents<size_t, 2>>         B(ptr, 4096, 4096);  // dynamic
+   ```
+   For the expression `A(i, j)` vs `B(i, j)`, what assembly differs between the two?
+   Under what conditions would you prefer B over A in production inference code?
 
-**Interactive Chat (e.g., customer support bot, general assistant)**
-
-| Metric | Tight (premium) | Moderate | Relaxed |
-|--------|----------------|----------|---------|
-| TTFT p50 | < 200 ms | < 400 ms | < 800 ms |
-| TTFT p95 | < 500 ms | < 800 ms | < 1,500 ms |
-| TPOT p50 | < 30 ms | < 50 ms | < 80 ms |
-| TPOT p95 | < 60 ms | < 100 ms | < 150 ms |
-
-Human perception notes: TTFT > 1 s feels "slow" to most users. TPOT > 100 ms disrupts the illusion of streaming. TPOT > 50 ms is noticeable for fast readers. 15–30 ms TPOT (≈ 33–67 tokens/s) is comfortable for most.
-
-**Coding Assistant (e.g., inline code completion, docstring generation)**
-
-| Metric | Tight | Moderate | Relaxed |
-|--------|-------|----------|---------|
-| TTFT p50 | < 100 ms | < 200 ms | < 400 ms |
-| TTFT p95 | < 250 ms | < 500 ms | < 800 ms |
-| TPOT p50 | < 20 ms | < 35 ms | < 60 ms |
-| E2E (512 output) | < 3 s | < 6 s | < 10 s |
-
-Notes: Coding completions require faster TTFT than chat because users are actively waiting. Short outputs (50–200 tokens) mean E2E latency is dominated by TTFT. Prefer smaller, faster models (8B–14B) over larger models unless quality requires it.
-
-**Batch Processing (e.g., document summarization, data extraction, offline eval)**
-
-| Metric | Target |
-|--------|--------|
-| TTFT | Not a primary SLO (batch jobs are not interactive) |
-| Throughput | Maximize tokens/s |
-| E2E per item | < N × baseline (define per job type) |
-| Cost per 1K tokens | Primary optimization target |
-
-Notes: For batch workloads, sacrifice latency for throughput. Set `--max-num-seqs` as high as memory allows. Use FP8 and larger batch sizes. Consider offline batching with vLLM's offline API.
-
-**RAG (Retrieval-Augmented Generation)**
-
-| Metric | Target |
-|--------|--------|
-| Retrieval TTFT (pre-LLM) | < 100 ms (vector DB query) |
-| LLM TTFT | < 300 ms p95 |
-| TPOT | < 40 ms p95 |
-| Total E2E (incl. retrieval) | < 2 s p95 |
-
-Notes: RAG latency budget must account for retrieval time. LLM TTFT must therefore be tighter. Prefix caching is highly effective for RAG: cache the static document KV blocks, only recompute the query KV. Cache hit rate can reach 70–95% if documents are repeated across queries.
-
-**Agentic / Multi-step Reasoning (e.g., tool-calling loops, chain-of-thought)**
-
-| Metric | Target |
-|--------|--------|
-| Per-step TTFT | < 300 ms |
-| Per-step E2E | < 5 s |
-| Total task completion | Defined per workflow |
-
-Notes: Agentic workloads compound latency across N steps. A 10-step agent with 1 s per step has 10 s total latency — budget each step accordingly. Caching is critical: cache the growing conversation context across turns.
-
-### SLO Implementation Checklist
-
-- [ ] Define SLOs in terms of p50 AND p95 (p50 alone hides tail behavior)
-- [ ] Alert on p99 for early warning; page on p95 breach
-- [ ] Set separate SLOs for TTFT and TPOT (they have different root causes)
-- [ ] Instrument with Prometheus histograms, not averages
-- [ ] Run synthetic load tests at 110% expected peak before production launch
-- [ ] Review SLOs quarterly as model size and traffic patterns evolve
+5. The KV cache for Llama-3 70B has: 80 layers, 8 KV heads, head_dim=128, and
+   you are serving a 4096-token context. Calculate the total bytes for one request's
+   KV cache at FP16. Then write the `std::extents` declaration for a single mdspan
+   that covers the full cache, using static extents for head_dim and dynamic for
+   all other dimensions.
 
 ---
 
-## K.6 Common Failure Modes Reference Card
-
-Quick-lookup table for on-call engineers. Each row is a distinct failure mode with its diagnostic command and fastest fix.
-
-| Symptom | Likely Cause | Diagnostic Command | Fix |
-|---------|-------------|-------------------|-----|
-| TTFT > 2× baseline suddenly | Prefix cache cold (after restart or model update) | `curl localhost:8000/metrics \| grep prefix_cache_hit_rate` | Warm cache with representative requests; consider cache persistence in future |
-| TPOT increases with load | KV cache filling, preemptions occurring | `curl localhost:8000/metrics \| grep num_preemptions` | Add GPU replicas; reduce `--max-num-seqs`; increase `--gpu-memory-utilization` |
-| Requests timing out | Queue backed up; decode not keeping up with arrival | `curl localhost:8000/metrics \| grep num_waiting` | Scale out replicas; enable chunked prefill; shed load via admission control |
-| `CUDA out of memory` at startup | Weight + KV reservation exceeds available HBM | `nvidia-smi --query-gpu=memory.free --format=csv` | Reduce `--gpu-memory-utilization`; increase `--tensor-parallel-size` |
-| `CUDA out of memory` during burst | Peak KV cache usage exceeds reservation | Check `vllm:gpu_cache_usage_perc` == 1.0 | Reduce `--max-model-len`; reduce `--max-num-seqs`; enable preemption |
-| Output tokens cut short | `max_model_len` too small, sequence hits limit | Check `finish_reason: length` in API responses | Increase `--max-model-len`; ensure sufficient KV budget |
-| Repetitive / looping output | Sampling temperature issue or KV cache corruption | Compare BF16 vs quantized output for same seed | Increase `--repeat-penalty`; if after quantization, run perplexity check |
-| High variance in response quality | Multiple LoRA adapters mixing up | Check adapter routing logs | Verify `lora_request.lora_name` is set correctly per request |
-| GPU at 100% but throughput flat | CUDA kernel serialization or PCIe bottleneck | `nsys profile --trace=cuda,nvtx <cmd>` | Enable NVLink; reduce tensor parallel communication overhead |
-| GPU at < 30% during decode | Batch too small; memory-bandwidth underutilized | `nvidia-smi dmon -s u -d 1` | Increase `--max-num-seqs`; implement request queuing to fill batches |
-| Latency spikes every ~60s | Python GC pause or log flush | `py-spy record --pid <PID> -o trace.svg` | `gc.disable()` in critical path; reduce log verbosity |
-| `torch.cuda.CUDAError: device-side assert` | Vocabulary index out of range in sampling | Check tokenizer config matches model | Verify `--tokenizer` path matches model; check for vocabulary mismatch |
-| vLLM won't start with quantized model | Quantization format mismatch | Check error: `quantization config mismatch` | Ensure `--quantization` flag matches checkpoint format exactly |
-| Health check failing intermittently | Worker process crashed and restarted | `journalctl -u vllm -n 100` | Check for OOM kills in kernel log; add memory headroom |
-| Throughput regression after upgrade | New vLLM version changed defaults | Diff vLLM changelogs for flag changes | Pin to known-good version; compare `--max-num-batched-tokens` defaults |
-| LoRA adapter not loading | Wrong adapter rank or base model mismatch | Check: `ValueError: LoRA rank mismatch` | Ensure adapter was trained on same base model and same `lora_rank` |
-| All requests returning 429 | Rate limiting or admission control triggered | Check `vllm:num_requests_rejected` | Tune admission control threshold; scale out replicas |
-| Degraded quality after FP8 migration | FP8 calibration data not representative | Run: `lm_eval --tasks wikitext` | Re-calibrate FP8 with production-representative data |
-| High memory usage on CPU | KV block swapping to CPU RAM overwhelming it | `free -h` on serving node | Disable swapping (`--swap-space 0`) or increase node RAM |
-| NCCL timeout errors | Inter-GPU communication failure | `NCCL_DEBUG=INFO vllm serve ...` | Check NVLink / InfiniBand health; verify all GPUs on same fabric |
-| Slow first request after idle | CUDA kernel JIT compilation on cold path | Time first vs second request | Pre-warm with synthetic requests; CUDA graphs handle most hot paths |
-
----
-
-## K.7 Deployment Topology Quick Reference
-
-Common deployment patterns and their recommended configurations.
-
-### Single-Node, Single-GPU (Development / Small Models)
-
-```
-vllm serve <model> \
-  --dtype bfloat16 \
-  --gpu-memory-utilization 0.90 \
-  --max-num-seqs 32 \
-  --enable-prefix-caching \
-  --enable-chunked-prefill
-```
-- Use case: models up to 13B, local development, single-user demo
-- Expected throughput: 500–2,000 tokens/s depending on model size
-
-### Single-Node, Multi-GPU (Production Small Cluster)
-
-```
-vllm serve <model> \
-  --tensor-parallel-size 8 \
-  --quantization fp8 \
-  --gpu-memory-utilization 0.90 \
-  --max-num-seqs 256 \
-  --enable-prefix-caching \
-  --enable-chunked-prefill \
-  --attention-backend flashinfer
-```
-- Use case: 70B models on 8× H100
-- Expected throughput: 5,000–15,000 tokens/s
-
-### Multi-Node, Disaggregated (High-Scale Production)
-
-```
-# Prefill nodes (2 nodes, 8× H100 each)
-vllm serve <model> --role prefill \
-  --tensor-parallel-size 8 \
-  --pipeline-parallel-size 2 \
-  --quantization fp8
-
-# Decode nodes (4 nodes, 8× H100 each)
-vllm serve <model> --role decode \
-  --tensor-parallel-size 8 \
-  --pipeline-parallel-size 4 \
-  --quantization fp8 \
-  --max-num-seqs 512
-```
-- Use case: 405B models, 10,000+ RPS
-- See Chapter 18 for full disaggregated setup
-
----
-
-*This appendix is a living reference. Flag defaults and recommended values change with vLLM releases. Always verify against the installed version's `vllm serve --help` output and release notes.*
+*— Appendix K covers `std::mdspan` as standardised in C++23 (core) and C++26
+(`submdspan`, `std::linalg`). The Kokkos reference implementation
+(github.com/kokkos/mdspan) backports all features to C++17.*

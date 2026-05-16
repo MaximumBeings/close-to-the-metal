@@ -1706,3 +1706,106 @@ inference costs for repetitive workloads.*
 4. The multimodal projector maps ViT embeddings from the CLIP embedding space to the LLM embedding space. Why can't you simply concatenate raw pixel values to the text embedding instead? *(Section 29.1)*
 
 5. `llama-server --mmproj llava-v1.5-7b-mmproj-f16.gguf` runs image encoding on CPU. For a batch of 8 images (576 tokens each), estimate the encoding latency on a modern CPU vs on a GPU, and explain why the projector is CPU-resident by default in llama.cpp. *(Section 29.5)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**LLaVA-1.5: CLIP ViT-L/14 at 336x336, 576 visual tokens. Batch of 16 image+text requests. Prompt=128 tokens, LLaMA-3 8B (32 layers, 32 KV heads, d_k=128, BF16).**
+
+**Total prefill tokens per request:**
+```
+visual_tokens = 576
+text_tokens = 128
+total_per_request = 576 + 128 = 704 tokens
+total_batch = 16 x 704 = 11,264 tokens
+```
+
+**KV cache bytes (LLaMA-3 8B, 32 layers, 32 KV heads, d_k=128, BF16):**
+```
+KV_per_token = 2 (K&V) x 32 layers x 32 heads x 128 dim x 2 bytes
+             = 2 x 32 x 32 x 128 x 2
+             = 524,288 bytes = 512 KB per token
+
+KV_per_request = 704 x 512 KB = 352 MB
+KV_total_batch = 16 x 352 MB = 5,632 MB = 5.5 GB
+```
+
+This fits comfortably on an A100 80 GB (weights ~16 GB + KV 5.5 GB = 21.5 GB).
+
+---
+
+### Question 2
+**16 identical images with prefix caching. How does vLLM reduce prefill FLOPs and KV cache?**
+
+**Without prefix caching:**
+All 16 requests run full prefill on 576 visual tokens each. Total visual prefill = 16 x 576 = 9,216 visual tokens computed independently.
+
+**With prefix caching:**
+The 576 visual tokens produce identical KV blocks (same image -> same pixel values -> same CLIP embeddings -> same projected tokens -> same KV blocks after hashing). vLLM's prefix cache detects that all 16 requests share an identical 576-token visual prefix.
+
+**Result:**
+- **First request:** Full prefill of 576 visual tokens (cache miss, blocks computed and cached).
+- **Requests 2-16:** Prefix cache HIT on the 576 visual blocks. Zero prefill FLOPs for visual tokens.
+
+**FLOPs reduction:**
+```
+Without caching: 16 x 576 = 9,216 visual token prefill steps
+With caching:    1 x 576 = 576 visual token prefill steps  (+ 15 cache hits)
+Reduction: 15/16 = 93.75% fewer visual prefill FLOPs
+```
+
+**KV cache reduction:**
+Instead of 16 separate copies of 576-token KV blocks (16 x 288 MB = 4.6 GB for visual portion), there is 1 shared copy (288 MB), plus 15 reference-counted pointers. Shared KV savings: 4.6 - 0.288 = 4.3 GB.
+
+---
+
+### Question 3
+**Video: 1 fps, 60 s clip, 256 visual tokens/frame. Total = 15,360 visual tokens. `max_model_len=16384`. Fits?**
+
+```
+total_tokens = 15,360 (visual) + ~50 (text prompt) = ~15,410 tokens
+```
+
+15,410 < 16,384 -- **barely fits**. However, this leaves only 974 tokens for the model's output (16,384 - 15,410 = 974). For a video understanding task that might require long explanations, this is insufficient.
+
+**Configuration change needed:**
+Increase `max_model_len` to at least 18,000-20,000 to give adequate output budget:
+```
+vllm serve --max-model-len 20000 --model llava-video-7b
+```
+
+Also consider reducing frame rate: 0.5 fps -> 30 frames -> 7,680 visual tokens, leaving 8,704 tokens for output. Or use a video model trained with token compression (e.g., 64 visual tokens per frame via adaptive pooling).
+
+---
+
+### Question 4
+**Why you cannot concatenate raw pixel values to text embedding instead of using the multimodal projector:**
+
+**Dimension mismatch:** A 336x336 RGB image has 336x336x3 = 338,688 pixel values. The LLM embedding space has dimension d_model (e.g., 4,096 for LLaMA-3 8B). There is no way to directly concatenate a 338,688-dim pixel vector with a 4,096-dim token embedding.
+
+**Semantic mismatch:** Even if you reshaped pixels into patches of 4,096 floats, the LLM's embedding space encodes semantic token relationships learned via language modeling. Raw pixel values are in a completely different representational space -- pixel intensity values have no semantic meaning compatible with word embeddings.
+
+**Why the projector works:** CLIP ViT encodes the image into a learned embedding space optimized for visual-semantic alignment (trained on image-text pairs). The multimodal projector (a small MLP or cross-attention module) then translates from CLIP's embedding space to the LLM's embedding space. This translation is learned end-to-end, teaching the model to interpret visual features in the context of language semantics.
+
+---
+
+### Question 5
+**`--mmproj llava-v1.5-7b-mmproj-f16.gguf` runs image encoding on CPU. Batch of 8 images (576 tokens each).**
+
+**CPU latency estimate:**
+CLIP ViT-L/14 has ~307M parameters. On a modern CPU (e.g., Intel Xeon at ~100 GFLOPS for FP16):
+- ViT forward pass per image: ~2 x 307M x 14 (patches) FLOPs ~= 8.6 GFLOPS per image
+- CPU time per image: 8.6 GFLOPS / 100 GFLOPS = 86 ms per image
+- Batch of 8 (sequential on CPU): 8 x 86 ms = 688 ms
+
+**GPU latency estimate:**
+Same ViT on a GPU (e.g., A100 at 312 TFLOPS FP16):
+- 8.6 GFLOPS / 312,000 GFLOPS = 0.028 ms per image
+- Batch of 8: ~0.2 ms (GPU batches all 8 images simultaneously)
+
+**Why projector is CPU-resident by default in llama.cpp:**
+llama.cpp targets edge/laptop deployment where a discrete GPU with large VRAM is unavailable or where the GPU is entirely used for the LLM weights. On Apple Silicon with unified memory, the "GPU" and "CPU" share memory anyway, so the CLIP forward pass can run on the ANE (Apple Neural Engine) or GPU metal backend. For CPU-only machines, the projector must run on CPU -- there is no alternative. The llama.cpp design prioritizes portability over peak throughput, accepting CPU-resident image encoding as the baseline for compatibility with devices that have no GPU.
+

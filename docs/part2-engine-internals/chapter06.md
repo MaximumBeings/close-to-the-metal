@@ -1456,3 +1456,142 @@ same block manager, demonstrating:
 4. Prefix caching stores the KV blocks for a "system prompt" of 512 tokens that 1 000 users share. What is the total KV cache saving (in bytes, using the block parameters above) compared to recomputing the prefix every time? *(Section 6.6)*
 
 5. The block manager calls `can_append_slot(seq)` before each decode step. Describe all the conditions under which this call returns False, and what the scheduler does in each case. *(Section 6.4)*
+
+
+---
+
+## Worked Solutions
+
+---
+
+### Solution 1 — Naïve KV cache waste for 32 sequences at average 512 tokens
+
+**Given:** max_seq_len=4096, d_model=4096, 32 sequences, FP16 (2 bytes), average length=512
+
+**Step 1 — Per-sequence allocation (naïve: always allocate max).**
+
+$$\text{bytes/seq} = \text{max\_seq\_len} \times d_{\text{model}} \times 2\text{(K+V)} \times 2\text{ bytes}$$
+$$= 4{,}096 \times 4{,}096 \times 2 \times 2 = 67{,}108{,}864 \text{ bytes} = 64 \text{ MB}$$
+
+**Step 2 — Total for 32 sequences.**
+
+$$32 \times 64 \text{ MB} = 2{,}048 \text{ MB} = \textbf{2 GB}$$
+
+**Step 3 — Actual usage at average 512 tokens.**
+
+$$\text{actual/seq} = 512 \times 4{,}096 \times 2 \times 2 = 8{,}388{,}608 \text{ bytes} = 8 \text{ MB}$$
+$$\text{total actual} = 32 \times 8 \text{ MB} = 256 \text{ MB}$$
+
+**Step 4 — Wasted memory.**
+
+$$\text{waste} = 2{,}048 \text{ MB} - 256 \text{ MB} = 1{,}792 \text{ MB} = \textbf{1.75 GB} \quad (\approx 87.5\% \text{ wasted})$$
+
+This extreme waste is what motivated PagedAttention. Rather than pre-allocating 64 MB per sequence regardless of actual length, vLLM allocates 16-token blocks on demand — only 8 MB per average-length sequence is actually allocated.
+
+---
+
+### Solution 2 — Physical block size computation
+
+**Given:** block_size=16, 32 KV heads, d_k=128, FP16 (2 bytes)
+
+**Step 1 — One block holds key AND value tensors for 16 tokens.**
+
+$$\text{block\_bytes} = \text{block\_size} \times n_{\text{kv\_heads}} \times d_k \times 2\text{(K+V)} \times 2\text{ bytes}$$
+$$= 16 \times 32 \times 128 \times 2 \times 2 = 262{,}144 \text{ bytes} = \textbf{256 KB}$$
+
+**Step 2 — Practical implications.**
+
+With an A100 80 GB and 26 GB of weights + 2 GB activations:
+
+$$\text{Available for KV} = (80 \times 0.90) - 26 - 2 = 72 - 28 = 44 \text{ GB}$$
+$$\text{Number of blocks} = \frac{44 \times 1024^3}{262{,}144} = 175{,}104 \text{ blocks}$$
+
+$$\text{Max tokens} = 175{,}104 \times 16 = 2{,}801{,}664 \text{ tokens}$$
+
+At 4,096 tokens/user: 2,801,664 / 4,096 ≈ **684 concurrent users** (theoretical max with 90% GPU utilization).
+
+---
+
+### Solution 3 — CoW savings for beam search with width 4
+
+**Given:** 4 beams, 200-token prefix, block_size=16, 32 KV heads, d_k=128, FP16
+
+**Step 1 — Blocks for 200-token prefix.**
+
+$$\text{blocks for prefix} = \lceil 200 / 16 \rceil = 13 \text{ blocks}$$
+$$\text{bytes} = 13 \times 262{,}144 = 3{,}407{,}872 \text{ bytes} \approx 3.25 \text{ MB}$$
+
+**Step 2 — Without CoW: 4 full copies.**
+
+Each of the 4 beams has its own independent copy of the 200-token KV cache:
+
+$$4 \times 13 \times 262{,}144 = 13{,}631{,}488 \text{ bytes} \approx \textbf{13 MB}$$
+
+**Step 3 — With CoW: shared prefix + per-beam divergence blocks.**
+
+The 200-token prefix is shared (ref_count=4). Each beam only allocates one new block for the first diverged token:
+
+$$\text{shared prefix: } 13 \times 262{,}144 = 3.25 \text{ MB}$$
+$$\text{4 divergence blocks: } 4 \times 1 \times 262{,}144 = 1 \text{ MB}$$
+$$\text{total with CoW} = 3.25 + 1 = \textbf{4.25 MB}$$
+
+**Step 4 — Saving.**
+
+$$\text{CoW saving} = 13 - 4.25 = \textbf{8.75 MB} \quad (67\% \text{ reduction})$$
+
+As beam search progresses and beams diverge further, each new decode step potentially triggers a CoW only if two beams share a physical block — not on every step. Once beams diverge, their blocks become independent and no further copies are needed.
+
+---
+
+### Solution 4 — Prefix caching savings for 1,000 shared-prefix users
+
+**Given:** 512-token system prompt, 1,000 users, block_size=16, 32 KV heads, d_k=128, FP16
+
+**Step 1 — Blocks for 512-token prefix.**
+
+$$\text{blocks} = 512 / 16 = 32 \text{ complete blocks}$$
+
+**Step 2 — KV bytes for those 32 blocks.**
+
+$$32 \times 262{,}144 = 8{,}388{,}608 \text{ bytes} = 8 \text{ MB per user}$$
+
+**Step 3 — Total savings for 1,000 users.**
+
+Without prefix caching, each user recomputes the 512-token prompt from scratch:
+
+$$1{,}000 \times 8 \text{ MB} = 8{,}000 \text{ MB} = \textbf{7.8 GB of redundant KV computation}$$
+
+With prefix caching: the 512-token KV is computed **once** and shared (read-only) by all 1,000 users. The physical blocks are never duplicated — only block-table pointer entries differ per user.
+
+**Step 4 — Compute savings.**
+
+512 tokens × 32 layers × (FLOPS per prefill token) is also avoided. For a typical LLM with ~2 × 13B = 26 GFLOPs per full forward pass, the 512-token prefill represents significant GPU time saved 1,000 times over.
+
+---
+
+### Solution 5 — can_append_slot failure conditions and scheduler responses
+
+**What we need:** All conditions causing False, and scheduler actions.
+
+**The can_append_slot check** happens before each decode step, for every running sequence.
+
+**Condition 1: The tail block is shared (ref_count > 1).**
+
+This occurs when the sequence is a Copy-on-Write copy of another sequence (e.g., beam search fork). The tail block cannot be written without first creating a private copy.
+
+*Scheduler action:* Attempt a CoW — allocate a new physical block, copy the shared block's content into it, update the block table. If a free block is available, CoW succeeds and append proceeds. If not, fall through to Condition 2.
+
+**Condition 2: The current tail block is full AND no free blocks are available.**
+
+The sequence needs a new block (tail is full at 16 tokens), but the GPU block pool is exhausted.
+
+*Scheduler action:* Preemption. The sequence is moved from `running` → `swapped` or `waiting`, depending on policy:
+- **SWAP policy:** KV blocks are transferred to CPU DRAM (using PCIe bandwidth). Sequence waits in `swapped` queue and is resumed when GPU memory is available.
+- **RECOMPUTE policy:** KV blocks are freed immediately. The sequence is re-queued in `waiting` and must redo its prefill from scratch when resumed.
+
+**Condition 3: The sequence would exceed max_num_blocks_per_seq.**
+
+vLLM caps KV cache usage per sequence to prevent one runaway request from consuming the entire pool.
+
+*Scheduler action:* Terminate the sequence with `finish_reason = "length"`.
+

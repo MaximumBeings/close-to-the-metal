@@ -1883,3 +1883,120 @@ Chapter 24 moves from general inference optimization into a specialized and incr
 6. Medusa heads predict future tokens independently from a single shared hidden state. Explain precisely why this independence assumption limits acceptance rate compared to EAGLE, and describe the specific architectural change EAGLE makes to address this limitation.
 7. Draw the tree attention mask for a 5-node speculation tree with the following parent relationships: root → B1, root → B2, B1 → C1, B1 → C2. Which pairs of nodes can NOT attend to each other, and why does this asymmetric masking allow a single forward pass to verify all branches simultaneously?
 8. EAGLE-2 introduces adaptive speculation depth, stopping early when predicted acceptance probability falls below a threshold θ. Describe the trade-off in choosing θ: what happens to throughput and average accepted tokens per step as θ → 0 vs. θ → 1? What empirical signal would you use to tune θ in production?
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**If we sample from draft distribution (instead of residual) on rejection -- what breaks:**
+
+The rejection sampling proof establishes P(out=t) = p_i(t) by using the residual distribution max(0, p_i(t) - q_i(t)) / Z when a token is rejected. This residual exactly corrects for tokens where draft q_i(t) > p_i(t).
+
+**If we sample fresh from q_i(t) instead:**
+Output distribution becomes: P(accept)*p_i(t) + P(reject)*q_i(t).
+This is NOT equal to p_i(t) in general. Tokens where q_i(t) > p_i(t) (over-predicted by draft) appear more often than the target intends.
+
+**Why this matters:** The lossless guarantee -- that output distribution is identical to the target model -- is broken. Output would be biased toward the draft model's preferences, with different style, factuality, or safety properties.
+
+---
+
+### Question 2
+**Expected tokens/step and speedup:**
+
+Formula: E[accepted] = (1 - alpha^(K+1)) / (1 - alpha). Speedup = E[accepted] / (1 + K*c).
+
+**Config A: alpha=0.82, K=5, c=0.08:**
+```
+E[tokens] = (1 - 0.82^6) / 0.18 = (1 - 0.3040) / 0.18 = 3.867 tokens/step
+speedup = 3.867 / (1 + 5*0.08) = 3.867 / 1.40 = 2.76x
+```
+
+**Config B: alpha=0.90, K=3, c=0.05:**
+```
+E[tokens] = (1 - 0.90^4) / 0.10 = (1 - 0.6561) / 0.10 = 3.439 tokens/step
+speedup = 3.439 / (1 + 3*0.05) = 3.439 / 1.15 = 2.99x
+```
+
+Config B is better (2.99x vs 2.76x). For code completion at batch=1: choose Config B. Code has high token predictability (alpha 0.88-0.95), and a cheaper draft model (c=0.05) with fewer speculation steps minimizes overhead per step.
+
+---
+
+### Question 3
+**Estimating alpha: 1,000 steps with K=4, 380 steps accepted exactly 1 token.**
+
+"Accepted exactly 1 token" = first draft token was rejected. Probability of first rejection = 1 - alpha.
+```
+1 - alpha ~= 380 / 1000 = 0.38
+alpha ~= 0.62
+```
+
+This is a low acceptance rate. At alpha=0.62, K=4: E[tokens] = (1 - 0.62^5) / 0.38 = 0.884/0.38 = 2.33 tokens/step -- marginal speedup. Investigate whether the draft model was fine-tuned on the target domain.
+
+---
+
+### Question 4
+**Why `--draft-p-min 0.8` improves effective alpha:**
+
+This filter only proposes draft tokens where q_i(t) >= 0.8. The acceptance criterion is min(1, p_i(t)/q_i(t)). When q_i(t) is high (draft is confident), both models tend to agree (p_i(t)/q_i(t) close to 1), so acceptance rate is high. Filtering out low-confidence drafts removes cases where the draft would propose unlikely tokens with low acceptance probability.
+
+Trade-off: fewer speculation steps on average (aborts early when uncertain), but the tokens that ARE drafted are accepted at higher rate. Net speedup improves when alpha gain outweighs K reduction -- typical for code and structured text.
+
+---
+
+### Question 5
+**Draft = Llama 3.3 70B, Target = Llama 3.1 405B. c ~= 0.17, alpha=0.88, K=4.**
+
+```
+E[tokens] = (1 - 0.88^5) / 0.12 = (1 - 0.5277) / 0.12 = 3.94 tokens/step
+speedup = 3.94 / (1 + 4*0.17) = 3.94 / 1.68 = 2.35x
+```
+
+**Recommendation: Generally NOT recommended.** c=0.17 is very high -- 4 draft steps cost 68% of a target step. Memory requirement: 70B + 405B ~= 950 GB BF16, requiring 12+ H100s simultaneously. 
+
+Better alternative: Llama 3.1 8B draft (c ~= 0.02). Even at lower alpha ~= 0.75: E[tokens] = (1-0.75^5)/0.25 = 3.24, speedup = 3.24/(1+0.08) = 3.0x -- comparable speedup with far less memory overhead.
+
+---
+
+### Question 6
+**Why Medusa's independence assumption limits alpha vs EAGLE:**
+
+Medusa predicts tokens at t+1, t+2, ..., t+K from a **single shared hidden state h_t** at position t. Each head predicts its token independently: P_k(t+k | h_t), ignoring what tokens were predicted at intermediate positions.
+
+This limits alpha because P(token_{t+2} | context, token_{t+1}) depends strongly on token_{t+1}. Medusa's head 2 sees only h_t, not the intermediate prediction -- it cannot condition on it. When verified against the target model (which conditions autoregressively), predictions for positions 2+ are inconsistent more often.
+
+**EAGLE's fix:** EAGLE's draft head receives [h_t, embed(predicted_{t+1})] before predicting t+2 -- one step of autoregressive conditioning. This dramatically increases match with target model distribution, raising alpha from ~0.75 (Medusa) to ~0.88 (EAGLE) on typical benchmarks.
+
+---
+
+### Question 7
+**Tree attention mask for root->B1, root->B2, B1->C1, B1->C2:**
+
+Each token attends only to its ancestors on its branch path:
+```
+         root  B1  B2  C1  C2
+root:    [1,   0,  0,  0,  0]
+B1:      [1,   1,  0,  0,  0]
+B2:      [1,   0,  1,  0,  0]
+C1:      [1,   1,  0,  1,  0]
+C2:      [1,   1,  0,  0,  1]
+```
+
+Pairs that CANNOT attend: B2<->B1, B2<->C1, B2<->C2, C1<->C2 (no ancestor relationship).
+
+This allows a single forward pass: all 5 tokens are processed simultaneously. Each token's output logits verify that specific branch position against the target model -- instead of 5 sequential autoregressive calls.
+
+---
+
+### Question 8
+**EAGLE-2 adaptive depth: trade-off in choosing theta:**
+
+**theta -> 0:** Speculate even when uncertain. Low-confidence drafts rejected often -> avg accepted ~= 1 token/step. Speculation overhead adds cost with little benefit.
+
+**theta -> 1:** Only speculate when near-certain. High alpha on those steps, but speculation rarely triggers. Again avg accepted ~= 1 token/step.
+
+**Optimal theta (empirically 0.5-0.8):** Speculate when moderately confident, achieve high alpha on those steps, skip when uncertain (save overhead).
+
+**Production tuning signal:** Monitor avg_accepted_tokens_per_step and speculation_overhead_fraction. Compute net throughput = avg_accepted / (1 + overhead_fraction) as theta varies. The optimal theta maximizes this ratio. Use A/B testing with live traffic -- tuning on synthetic benchmarks may not reflect production token distributions.
+

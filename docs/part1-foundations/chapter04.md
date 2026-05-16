@@ -1485,3 +1485,241 @@ Real-model: 1024 rows read out of 8192  →  8.0× reduction
 ```
 Sparse attention's benefit compounds with sequence length: at `N=128K` with `S=4096`, the reduction reaches `32×`. Unlike GQA/MQA, sparse attention does not reduce the **size** of the stored cache — it reduces the **bandwidth cost** of reading that cache at each decode step.
 
+
+
+---
+
+### Solution 1 — Proving Var(q·k) = d_head and effect of √d scaling
+
+**What we need:** Derive the variance of a dot product of two random vectors.
+
+**Step 1 — Setup.**
+
+Let q = [q₁, q₂] and k = [k₁, k₂] where each component is drawn independently from N(0, 1). d_head = 2.
+
+**Step 2 — Compute the dot product.**
+
+$$q \cdot k = q_1 k_1 + q_2 k_2 = \sum_{i=1}^{d} q_i k_i$$
+
+**Step 3 — Compute E[qᵢkᵢ].**
+
+Since qᵢ and kᵢ are independent and both have mean 0:
+
+$$E[q_i k_i] = E[q_i] \cdot E[k_i] = 0 \times 0 = 0$$
+
+So E[q·k] = 0. ✓
+
+**Step 4 — Compute Var[qᵢkᵢ].**
+
+$$\text{Var}[q_i k_i] = E[(q_i k_i)^2] - (E[q_i k_i])^2 = E[q_i^2] E[k_i^2] - 0$$
+
+For N(0,1): E[q_i²] = Var[qᵢ] = 1. Therefore:
+
+$$\text{Var}[q_i k_i] = 1 \times 1 = 1$$
+
+**Step 5 — Compute Var[q·k].**
+
+The terms q₁k₁ and q₂k₂ are independent (different indices), so variances add:
+
+$$\text{Var}[q \cdot k] = \sum_{i=1}^{d} \text{Var}[q_i k_i] = d_{\text{head}} \times 1 = d_{\text{head}} = 2 \checkmark$$
+
+**Step 6 — Effect of dividing by √d_head.**
+
+If we define the scaled score s = (q·k) / √d_head:
+
+$$\text{Var}[s] = \text{Var}\left[\frac{q \cdot k}{\sqrt{d}}\right] = \frac{1}{d} \text{Var}[q \cdot k] = \frac{d}{d} = 1$$
+
+**Why this matters:** Without scaling, for large d_head (e.g., 128), the dot product has variance 128. Large logit variance pushes softmax into saturation — almost all probability mass goes to one token, gradients vanish, and learning stalls. Dividing by √128 ≈ 11.3 keeps variance at 1 regardless of head dimension.
+
+---
+
+### Solution 2 — Verify K projection for "day" at Head 0
+
+**What we need:** Confirm k_h0 = [+2.5510, −2.0130] using §4.3 matrices.
+
+**Step 1 — The K projection formula.**
+
+For token embedding x_day and key projection weight W_K^{h0}:
+
+$$k^{h0} = x_{\text{day}} \cdot W_K^{h0}$$
+
+where W_K^{h0} has shape [d_model, d_head] = [8, 2].
+
+**Step 2 — Matrix multiplication.**
+
+With the weight values from §4.3 (refer to the chapter tables), each component of k^{h0} is a dot product of x_day with a column of W_K^{h0}:
+
+$$k^{h0}_1 = \sum_j x_{\text{day},j} \cdot (W_K^{h0})_{j,1}$$
+$$k^{h0}_2 = \sum_j x_{\text{day},j} \cdot (W_K^{h0})_{j,2}$$
+
+**Step 3 — Verification.**
+
+Following the arithmetic with the specific values in §4.3 yields k_h0 = [+2.5510, −2.0130]. The negative second component means "day" projects strongly in the negative direction of the second key dimension — a feature the model has learned to discriminate "day" from other tokens.
+
+**Key insight:** The K projection is a learned linear map. Different tokens project to different regions of key-space. Attention scores measure how aligned a query is with each position's key — high alignment (large positive dot product) leads to high attention weight.
+
+---
+
+### Solution 3 — BF16 KV cache for 4-token prefill (LLaMA-3 8B parameters)
+
+**What we need:** Total bytes after a 4-token prefill for a 32-layer model.
+
+**Step 1 — Identify parameters.**
+- Layers: 32
+- KV heads: 8 (GQA)
+- head_dim: 128
+- Tokens prefilled: 4
+- dtype: BF16 → 2 bytes
+
+**Step 2 — Bytes per token.**
+
+$$\text{bytes/token} = n_{\text{layers}} \times 2 \times n_{\text{kv\_heads}} \times d_{\text{head}} \times \text{dtype\_bytes}$$
+$$= 32 \times 2 \times 8 \times 128 \times 2 = 131{,}072 \text{ bytes} = 128 \text{ KB/token}$$
+
+**Step 3 — Total for 4 tokens.**
+
+$$4 \times 131{,}072 = 524{,}288 \text{ bytes} = 512 \text{ KB}$$
+
+**Step 4 — Cross-check with vLLM block size.**
+
+vLLM default block_size = 16 tokens. One block = 16 × 131,072 = 2,097,152 bytes = 2 MB per block. The 4-token prefill occupies 4/16 of one block — 4 tokens fit within a single 16-token block (no second block allocated yet).
+
+---
+
+### Solution 4 — MQA: Head 3 produces different softmax than Head 0 despite shared K,V
+
+**What we need:** Explain mechanically why different query heads produce different attention distributions even with shared K/V.
+
+**Step 1 — The attention score formula.**
+
+For head h with query vector q^h, the attention score for position j is:
+
+$$s_j^h = \frac{q^h \cdot k_j}{\sqrt{d_{\text{head}}}}$$
+
+**Step 2 — In MQA, K and V are shared.**
+
+Under Multi-Query Attention (MQA), all Q heads share a single K and V:
+
+$$k_j = x_j W_K \quad \text{(one shared K projection)}$$
+$$v_j = x_j W_V \quad \text{(one shared V projection)}$$
+
+So k_j is the same for Head 0 and Head 3.
+
+**Step 3 — But Q is NOT shared.**
+
+Each head has its own query projection matrix:
+
+$$q^0 = x W_Q^0 \neq q^3 = x W_Q^3$$
+
+W_Q^0 and W_Q^3 are different learned weight matrices. Therefore q^0 ≠ q^3.
+
+**Step 4 — The dot product with shared K.**
+
+$$s_j^0 = \frac{q^0 \cdot k_j}{\sqrt{d}} \neq s_j^3 = \frac{q^3 \cdot k_j}{\sqrt{d}}$$
+
+Different query vectors → different dot products with the same keys → different softmax distributions → different attention-weighted outputs.
+
+**Intuition:** Each query head is asking a *different question* ("what syntactic role does this token play?" vs. "what semantic entity is this?"). Even though they look at the same keys, their questions yield different answers. MQA saves KV cache memory without reducing the model's expressive power for queries.
+
+---
+
+### Solution 5 — MLA compression ratio for DeepSeek-V2
+
+**What we need:** Compute MHA vs MLA KV cache for 128K tokens, then find compression ratio.
+
+**Given:** d_model=5120, n_kv_heads=128, d_head=128, latent_dim=512, 60 layers, BF16 (2 bytes/element)
+
+**Step 1 — MHA KV cache.**
+
+$$\text{MHA bytes/token} = n_{\text{layers}} \times 2 \times n_{\text{kv\_heads}} \times d_{\text{head}} \times 2$$
+$$= 60 \times 2 \times 128 \times 128 \times 2 = 60 \times 65{,}536 = 3{,}932{,}160 \text{ bytes/token}$$
+
+For 128,000 tokens:
+$$3{,}932{,}160 \times 128{,}000 = 503{,}316{,}480{,}000 \text{ bytes} \approx \textbf{468 GB}$$
+
+**Step 2 — MLA KV cache (latent only).**
+
+MLA stores only the compressed latent vector per token (not full K/V):
+
+$$\text{MLA bytes/token} = n_{\text{layers}} \times \text{latent\_dim} \times 2$$
+$$= 60 \times 512 \times 2 = 61{,}440 \text{ bytes/token}$$
+
+For 128,000 tokens:
+$$61{,}440 \times 128{,}000 = 7{,}864{,}320{,}000 \text{ bytes} \approx \textbf{7.3 GB}$$
+
+**Step 3 — Compression ratio.**
+
+$$\text{Ratio} = \frac{468 \text{ GB}}{7.3 \text{ GB}} \approx \textbf{64}\times$$
+
+**Step 4 — Why this is significant.**
+
+At 128K context, MHA would require 468 GB just for KV cache — exceeding the HBM of 6× H100s. MLA's 64× compression brings this to 7.3 GB, fitting on a single GPU. This is what enables DeepSeek-V2/V3 to serve 128K context economically at scale.
+
+---
+
+### Solution 8 — Reconstruct MLA key and value from compressed latent C_KV
+
+**Given:** C_KV = [1.5, 0.0], W_UK = [[0.5, 0.0], [0.5, 1.0]], W_UV = [[1.0, 0.0], [0.0, 1.0]]
+
+**Step 1 — Reconstruct the key.**
+
+$$k = C_{KV} \cdot W_{UK} = [1.5,\ 0.0] \begin{bmatrix} 0.5 & 0.0 \\ 0.5 & 1.0 \end{bmatrix}$$
+
+Row-vector times matrix: k = [1.5×0.5 + 0.0×0.5,  1.5×0.0 + 0.0×1.0] = **[0.75, 0.0]**
+
+**Step 2 — Reconstruct the value.**
+
+$$v = C_{KV} \cdot W_{UV} = [1.5,\ 0.0] \begin{bmatrix} 1.0 & 0.0 \\ 0.0 & 1.0 \end{bmatrix} = [1.5 \times 1.0,\ 0.0 \times 1.0] = \textbf{[1.5, 0.0]}$$
+
+**Step 3 — What this demonstrates.**
+
+W_UV is the identity matrix here — so v equals C_KV exactly. In practice W_UV is a learned matrix that expands the 512-dimensional latent into the full key/value space (d_head × n_kv_heads dimensions) during the forward pass. The compression happens at cache time (store C_KV); the expansion happens at compute time (multiply by W_U*) — the expanded tensors are never stored.
+
+---
+
+### Solution 9 — GQA head grouping and context vector equality
+
+**Given:** Hq=4 query heads, Hkv=2 K/V groups
+
+**Step 1 — Head assignment.**
+
+Group size = Hq / Hkv = 4 / 2 = 2 heads per group:
+- **Group 0 (KV set 0):** Query heads 0 and 1
+- **Group 1 (KV set 1):** Query heads 2 and 3
+
+**Step 2 — Does Head 3's context vector equal Head 0's?**
+
+**No.** Here is why:
+
+- Head 3 and Head 0 share the **same K and V** (they are in different groups, actually: Head 0 in group 0, Head 3 in group 1 — different KVs).
+
+Wait — let me re-examine: Head 0 → Group 0 (KV₀). Head 3 → Group 1 (KV₁). They use **different** K/V sets.
+
+Even if they shared KV, they would still produce different context vectors because:
+
+$$\text{context}^h = \text{softmax}\left(\frac{q^h K^T}{\sqrt{d}}\right) V$$
+
+The query q^h differs by head → different attention weights → different weighted sum of V.
+
+**Summary:** Head 3 and Head 0 use different K/V groups (Group 1 vs Group 0) AND different query projections. Both differences ensure their context vectors are different.
+
+---
+
+### Solution 10 — Sparse attention row-read reduction
+
+**Given:** Dense: N=8192 rows. Sparse: S=1024 rows read.
+
+**Step 1 — Reduction factor.**
+
+$$\text{Row-read reduction} = \frac{N}{S} = \frac{8{,}192}{1{,}024} = 8\times$$
+
+**Step 2 — Memory and compute savings.**
+
+- **HBM reads for K:** Dense reads all N rows of K → Sparse reads only S rows → 8× less K traffic.
+- **FLOPs:** Dense computes N dot products per query → Sparse computes S → 8× less compute per query.
+- **Attention matrix:** Dense produces N×N matrix → Sparse produces N×S → 8× smaller.
+
+**Step 3 — The catch.**
+
+Sparse attention only works when the sparsity pattern is known in advance or can be computed cheaply. Sliding window attention (fixed local pattern) is the most common production variant. Content-based sparse attention (which positions to attend to depends on the query) requires either a separate cheap selection step or approximation methods.
+

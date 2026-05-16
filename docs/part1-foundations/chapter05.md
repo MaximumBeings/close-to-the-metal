@@ -1021,3 +1021,194 @@ In the llama.cpp source, the FA kernel is in `ggml-cuda/flash-attn.cu` and calle
 
 5. FlashDecoding splits K/V into P=16 groups and runs 16 CUDA blocks in parallel. Each block computes a local `(O_p, m_p, l_p)`. Describe the reduction step: what is the formula for combining these 16 partial results into a single correct output, and why is it equivalent to a single global online softmax?
 
+
+
+---
+
+## Worked Solutions
+
+---
+
+### Solution 1 — FlashAttention IO complexity analysis
+
+**Given:** N=512, d=64, FP32 (4 bytes/element), SRAM M=192 KB
+
+**Part (a) — Size of the N×N attention matrix.**
+
+$$\text{S matrix size} = N \times N \times \text{bytes} = 512 \times 512 \times 4 = 1{,}048{,}576 \text{ bytes} = \textbf{1 MB}$$
+
+**Part (b) — Total HBM traffic for standard (non-Flash) attention.**
+
+Standard attention performs these HBM operations:
+
+| Operation | Bytes |
+|-----------|-------|
+| Load Q from HBM | N×d×4 = 512×64×4 = 131,072 |
+| Load K from HBM | 131,072 |
+| Write S = QKᵀ to HBM | N²×4 = 1,048,576 |
+| Load S for softmax | 1,048,576 |
+| Write P = softmax(S) to HBM | 1,048,576 |
+| Load P for PV matmul | 1,048,576 |
+| Load V from HBM | 131,072 |
+| Write O = PV to HBM | 131,072 |
+| **Total** | **≈ 4,267,008 bytes ≈ 4.1 MB** |
+
+The dominant terms are the four passes over the N×N matrix S (4 × 1 MB = 4 MB).
+
+**Part (c) — FlashAttention IO reduction factor.**
+
+FlashAttention never materializes the full S or P matrices. SRAM block size B (tokens per block):
+
+$$B = \left\lfloor \frac{M}{4 \times d \times \text{dtype\_bytes}} \right\rfloor = \left\lfloor \frac{192{,}000}{4 \times 64 \times 4} \right\rfloor = \left\lfloor \frac{192{,}000}{1{,}024} \right\rfloor = 187 \text{ tokens/block}$$
+
+FlashAttention loads K/V in ⌈N/B⌉ = ⌈512/187⌉ = 3 passes:
+
+| Operation | Bytes |
+|-----------|-------|
+| Load Q (once) | 131,072 |
+| Load K (3 passes) | 3 × 131,072 = 393,216 |
+| Load V (3 passes) | 393,216 |
+| Write O (once) | 131,072 |
+| **Total** | **≈ 1,048,576 bytes ≈ 1 MB** |
+
+$$\text{Reduction factor} = \frac{4.1 \text{ MB}}{1.0 \text{ MB}} \approx \textbf{4.1}\times$$
+
+For larger N the benefit grows: the N² terms scale quadratically while FlashAttention's IO scales as O(N) — at N=8192 the reduction exceeds 40×.
+
+---
+
+### Solution 2 — Online softmax trace for x = [1, 3, 2, 5, 4]
+
+**What we need:** Trace each update step, verify final l matches true sum.
+
+**Online softmax update rule** (processing one element at a time):
+
+When new element x_new arrives:
+- `m_new = max(m_old, x_new)`
+- `l_new = l_old × exp(m_old − m_new) + exp(x_new − m_new)`
+
+**Initial state:** m = −∞, l = 0
+
+| Step | x | m_old | m_new | l_old × exp(m_old−m_new) | + exp(x−m_new) | l_new |
+|------|---|-------|-------|--------------------------|----------------|-------|
+| 1 | 1 | −∞ | 1 | 0 × exp(−∞) = 0 | exp(1−1) = 1.0000 | **1.0000** |
+| 2 | 3 | 1 | 3 | 1.0000 × exp(1−3) = 1.0000 × 0.1353 = 0.1353 | exp(3−3) = 1.0000 | **1.1353** |
+| 3 | 2 | 3 | 3 | 1.1353 × exp(3−3) = 1.1353 × 1 = 1.1353 | exp(2−3) = 0.3679 | **1.5032** |
+| 4 | 5 | 3 | 5 | 1.5032 × exp(3−5) = 1.5032 × 0.1353 = 0.2034 | exp(5−5) = 1.0000 | **1.2034** |
+| 5 | 4 | 5 | 5 | 1.2034 × exp(5−5) = 1.2034 × 1 = 1.2034 | exp(4−5) = 0.3679 | **1.5713** |
+
+**Final:** m = 5, l = 1.5713
+
+**Verification:** True sum = Σᵢ exp(xᵢ − 5):
+$$e^{1-5} + e^{3-5} + e^{2-5} + e^{5-5} + e^{4-5}$$
+$$= e^{-4} + e^{-2} + e^{-3} + e^{0} + e^{-1}$$
+$$= 0.0183 + 0.1353 + 0.0498 + 1.0000 + 0.3679 = \textbf{1.5713} \checkmark$$
+
+The running sum l is numerically stable because we always subtract the current maximum m — preventing large positive exponents that would overflow float32.
+
+---
+
+### Solution 3 — Why naïve block-wise softmax gives wrong results
+
+**What we need:** Explain the error and give a concrete numerical example.
+
+**The correct softmax** requires a *global* denominator:
+
+$$\text{softmax}(x_i) = \frac{e^{x_i}}{\sum_{j=1}^{N} e^{x_j}}$$
+
+**Naïve block-wise softmax** computes softmax *independently within each block*, then concatenates:
+
+**Example:** x = [1, 3, 2, 5, 4] split into Block 1 = [1, 3] and Block 2 = [2, 5, 4]
+
+**Block 1 local softmax:**
+$$\text{denom}_1 = e^1 + e^3 = 2.718 + 20.086 = 22.804$$
+$$p_1 = [2.718/22.804,\ 20.086/22.804] = [0.1192,\ 0.8808] \quad \text{sum} = 1.000$$
+
+**Block 2 local softmax:**
+$$\text{denom}_2 = e^2 + e^5 + e^4 = 7.389 + 148.413 + 54.598 = 210.400$$
+$$p_2 = [0.0351,\ 0.7053,\ 0.2596] \quad \text{sum} = 1.000$$
+
+**Naïve concatenation:** [0.1192, 0.8808, 0.0351, 0.7053, 0.2596]
+
+**Sum = 2.000** — instead of 1.0!
+
+**Correct softmax** (global denominator = 1.5713 × e⁵ = 1.5713 × 148.413 = 233.107):
+$$[e^{-4}, e^{-2}, e^{-3}, e^{0}, e^{-1}] / 1.5713 = [0.0117, 0.0862, 0.0317, 0.6364, 0.2340]$$
+Sum = 1.000 ✓
+
+The naïve approach treats each block as an independent distribution. The block with the large value (e^5 = 148) dominates the true global denominator but is unknown to Block 1. Block 1's tokens receive inflated probabilities because they are normalized against a denominator that ignores the much larger values in Block 2.
+
+---
+
+### Solution 4 — Rescaling factor if key 1 score were 20 instead of 10
+
+**What we need:** Compute α = exp(m_old − m_new) and check FP32 representability.
+
+**Setup from Worked Example B:**
+- Block 1 had m₁ = 2 (maximum score seen so far)
+- Block 2 arrives with new maximum score = 20 (hypothetically)
+
+**Step 1 — Rescaling factor.**
+
+When we encounter a new maximum m_new = 20 and old maximum m_old = 2:
+
+$$\alpha = \exp(m_{\text{old}} - m_{\text{new}}) = \exp(2 - 20) = e^{-18}$$
+
+**Step 2 — Numerical value.**
+
+$$e^{-18} = \frac{1}{e^{18}} = \frac{1}{65{,}659{,}969} \approx 1.52 \times 10^{-8}$$
+
+**Step 3 — FP32 representability check.**
+
+FP32 minimum positive normal: ≈ 1.18 × 10⁻³⁸
+
+$$1.52 \times 10^{-8} \gg 1.18 \times 10^{-38} \implies \textbf{Yes, fully representable in FP32}$$
+
+**Step 4 — When does underflow occur?**
+
+FP32 underflows (rounds to 0) below ~1.18 × 10⁻³⁸, which corresponds to:
+
+$$e^{-x} < 1.18 \times 10^{-38} \implies x > \ln(1/1.18 \times 10^{-38}) \approx 87.3$$
+
+So if m_new − m_old > 87.3, α would underflow to 0 in FP32. In practice this would mean a token with score 87+ units above the previous maximum. For typical LLM logits (range −10 to +50), this is unlikely — but for adversarially crafted inputs or poorly scaled models, it can happen. FlashAttention's online softmax handles this gracefully because even if α = 0 due to underflow, the previous partial sum is simply discarded (the new block completely dominates).
+
+---
+
+### Solution 5 — FlashDecoding parallel reduction across P=16 groups
+
+**What we need:** Describe the reduction formula and why it is equivalent to global online softmax.
+
+**Step 1 — Each group's output.**
+
+FlashDecoding splits the K/V sequence into P=16 groups of equal size. Each group p runs a local FlashAttention forward pass, producing:
+
+- **O_p**: partial output vector (weighted sum of V within group p)
+- **m_p**: local maximum score seen in group p  
+- **l_p**: local denominator (sum of exp(score − m_p) within group p)
+
+**Step 2 — Global maximum.**
+
+$$m_{\text{global}} = \max_{p=1}^{P} m_p$$
+
+**Step 3 — Rescale each group's denominator.**
+
+To combine partial sums with different normalizations, each l_p must be rescaled relative to the global maximum:
+
+$$l_p^{\text{rescaled}} = l_p \times \exp(m_p - m_{\text{global}})$$
+
+**Step 4 — Global denominator.**
+
+$$l_{\text{global}} = \sum_{p=1}^{P} l_p^{\text{rescaled}} = \sum_{p=1}^{P} l_p \exp(m_p - m_{\text{global}})$$
+
+**Step 5 — Combine partial outputs.**
+
+$$O_{\text{final}} = \frac{1}{l_{\text{global}}} \sum_{p=1}^{P} l_p^{\text{rescaled}} \times O_p$$
+
+$$= \frac{\sum_p l_p \exp(m_p - m_{\text{global}}) \cdot O_p}{\sum_p l_p \exp(m_p - m_{\text{global}})}$$
+
+**Step 6 — Why this equals a single global online softmax.**
+
+This is mathematically identical to what online softmax would compute if it processed all P×(N/P) = N elements sequentially. Each (O_p, m_p, l_p) triple is a self-contained "macro-element" in the online softmax recurrence. The parallel reduction is the same mathematical operation as the sequential online merge — just applied to P groups simultaneously instead of one element at a time.
+
+**Performance gain:** FlashDecoding runs P=16 CUDA thread blocks in parallel on a single GPU. For long-context decode where N is large (e.g., 64K tokens), each block handles 4K tokens — all 16 blocks run simultaneously, then the 16 partial results are reduced in one fast kernel. Throughput scales with P × block parallelism rather than being bottlenecked by a single sequential pass over N.
+

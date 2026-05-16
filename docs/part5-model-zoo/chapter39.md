@@ -876,3 +876,237 @@ Human-in-the-loop evaluation remains essential for major model changes, safety-s
 4. Numerical correctness testing compares logits between baseline and candidate with `allclose(atol=1e-3)`. 0.2% of logit positions exceed the tolerance. At what threshold of failing positions would you block a deployment, and why? *(Section 39.7)*
 
 5. Output diffing on a canary deployment shows 3% of responses changed. How do you decide whether these changes are regressions or improvements, given you cannot manually review all 3% of changes? *(Section 39.8)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1 (Section 39.12 Foundational)
+**vLLM upgrade v0.4 -> v0.5. Smoke tests pass. Perplexity: 4.1 vs baseline 4.0. Should you promote?**
+
+**Do not promote yet.** A 2.5% perplexity increase (4.1 vs 4.0) is statistically meaningful -- perplexity is exponential in cross-entropy, so even small changes compound across long generations.
+
+**Additional checks before deciding:**
+
+1. **Downstream task benchmarks:** Run the eval suite on representative tasks (MMLU, HumanEval for code, summarization quality). Perplexity is a proxy; downstream task accuracy is what actually matters to users.
+
+2. **Statistical significance:** Is the 4.1 vs 4.0 difference within measurement variance? Run the perplexity eval 3 times with different random seeds for decoding and check the standard deviation. If SD > 0.1, the 4.1 may not be significantly different from 4.0.
+
+3. **Regression on known-sensitive prompts:** Run the full golden eval set. Check if specific categories (math, code, instruction following) regressed more than others.
+
+4. **Output diffing:** Run 1,000 identical prompts through both versions with `temperature=0`. If >1% of outputs differ, investigate which changed and whether the changes are improvements or regressions.
+
+5. **A/B shadow test:** Route 1% of traffic to the v0.5 deployment and compare LLM judge scores against v0.4 baseline for 48 hours before making a promotion decision.
+
+---
+
+### Question 2 (Section 39.12 Systems)
+**LLM judge score drops 4.2 -> 3.9 after BF16 -> INT4. Latency improved 40%. Is the trade-off acceptable?**
+
+**Framework for deciding:**
+
+**Step 1 -- Quantify the quality drop:**
+3.9 / 4.2 = 92.9% of baseline quality. A 7.1% quality reduction is meaningful for user-facing products.
+
+**Step 2 -- Segment the quality drop:**
+Run the eval separately on: (a) factual Q&A, (b) reasoning/math, (c) creative writing, (d) instruction following. INT4 quantization tends to hurt long-chain reasoning more than factual recall. If the 7.1% drop is concentrated in reasoning tasks but those are only 10% of your traffic, the weighted quality impact is only 0.7%.
+
+**Step 3 -- Collect user signals:**
+Run a 5% traffic A/B test: INT4 vs BF16. Measure: (a) thumbs up/down rate, (b) conversation continuation rate, (c) session abandonment rate. A 7.1% LLM judge score drop often does not translate to the same magnitude of user-perceived quality drop.
+
+**Step 4 -- Cost-quality frontier:**
+If the 40% latency improvement enables serving 40% more requests on the same hardware, this directly reduces $/request by 28% (1 - 1/1.4). For a $100K/month deployment, that's $28K/month saved. If user satisfaction drops by 2% (acceptable), this trade-off is favorable.
+
+**Decision:** Acceptable if the quality drop is <5% on user-facing metrics AND the traffic segment affected by quality degradation (typically complex reasoning) is <15% of total traffic. Otherwise, consider INT8 quantization (typically <2% quality loss, ~20% latency improvement) as a middle ground.
+
+---
+
+### Question 3 (Section 39.12 Deep Dive)
+**Why temperature=0.0 is required for regression testing but not production.**
+
+**In regression testing:**
+The goal is to detect changes in model behavior between two versions. With `temperature > 0`, outputs are stochastic -- the same model on the same prompt will produce different outputs on different runs. This makes it impossible to attribute output differences to the model version change vs. random sampling noise.
+
+`temperature=0.0` uses greedy decoding (always select the highest-probability next token), making the output **deterministic** for a given input and model. You can compare two runs byte-for-byte and any difference is attributable to model or engine changes, not sampling randomness.
+
+**What breaks with temperature=0.7 in regression suite:**
+- Two runs of the SAME model version produce different outputs.
+- Output diff reports show "regressions" that are just sampling variance.
+- True regressions (actual model behavior changes) are masked by noise.
+- Statistical tests become necessary and require large sample sizes (thousands of prompts per category) to detect real changes above the noise floor.
+
+**In production:**
+`temperature > 0` is appropriate because users benefit from diverse, creative responses and exact determinism is not a goal. The stochasticity makes the model feel more "human" and prevents identical responses to repeated queries.
+
+---
+
+### Question 4 (Section 39.12 Applied)
+**200 prompts, candidate mean=3.85, baseline mean=4.10, SD=0.8. Is the drop statistically significant?**
+
+**Two-sample t-test (assuming 200 prompts per model):**
+
+Standard error of the difference in means:
+```
+SE = sqrt((SD_baseline^2/n) + (SD_candidate^2/n))
+   = sqrt((0.8^2/200) + (0.8^2/200))
+   = sqrt(0.0032 + 0.0032)
+   = sqrt(0.0064)
+   = 0.08
+```
+
+t-statistic:
+```
+t = (mean_baseline - mean_candidate) / SE
+  = (4.10 - 3.85) / 0.08
+  = 0.25 / 0.08
+  = 3.125
+```
+
+For n=200 (large sample), the t-distribution approaches normal. t=3.125 corresponds to p < 0.002 (two-tailed). The drop is **statistically significant** at p < 0.01 level.
+
+**Effect size (Cohen's d):**
+```
+d = (4.10 - 3.85) / 0.80 = 0.25 / 0.80 = 0.3125
+```
+
+A Cohen's d of 0.31 is a small-to-medium effect. Statistically significant but practically, the magnitude of degradation is modest.
+
+**Recommendation:** Block the deployment if the score drop exceeds a pre-defined threshold (e.g., 0.20 points). At 0.25 drop with statistical significance, this warrants investigation of which prompt categories drove the regression before promoting.
+
+---
+
+### Question 5 (Section 39.12 Systems)
+**Canary strategy: new model +0.05 HumanEval, -0.02 MMLU. Traffic: 60% coding, 40% general.**
+
+**Step 1 -- Compute expected weighted quality change:**
+```
+weighted_change = 0.60 x (+0.05) + 0.40 x (-0.02)
+               = 0.030 - 0.008
+               = +0.022 net improvement
+```
+
+The new model is expected to be net-positive (+2.2%) on the production traffic mix. This suggests promoting, but with caution about the MMLU regression.
+
+**Step 2 -- Canary deployment strategy:**
+- Start at 5% traffic to the new model, 95% to baseline.
+- Segment the canary: route 5% of *coding requests* and 5% of *general requests* separately.
+- Run for 7 days minimum to collect statistically sufficient samples from both segments.
+
+**Step 3 -- Measurement:**
+Track separately:
+- Coding requests (60% of traffic): HumanEval-style task completion rate, code execution success rate, user thumbs up/down on code responses.
+- General knowledge requests (40% of traffic): factual accuracy (can spot-check vs ground truth), user satisfaction signals.
+
+**Step 4 -- Decision criteria:**
+- Promote if: coding segment shows improvement AND general segment degradation is within pre-defined tolerance (e.g., < 3% user satisfaction drop).
+- Rollback if: general segment shows >5% thumbs-down increase.
+- Continue canary at 10%, 25%, 50% before full rollout if both segments are within tolerance.
+
+**Step 5 -- Safeguard:**
+Keep the baseline model running on 50% of traffic for 14 days after full rollout to enable instant rollback if late-breaking issues emerge (e.g., hallucinations in specific domains not covered by MMLU).
+
+---
+
+### Question 6 (End-of-chapter)
+**Perplexity 8.2 -> 9.7 after INT8 KV cache. Acceptable? What benchmark to run?**
+
+Perplexity increase of 18.3% (9.7/8.2 = 1.183) is substantial -- this is a large quality degradation from KV quantization alone. INT8 KV cache typically causes <2% perplexity increase on well-calibrated implementations; an 18% increase suggests calibration issues or the model is particularly sensitive to KV precision.
+
+**Not acceptable without further investigation.** Run: **MMLU** (factual accuracy), **HumanEval** (code correctness), and a domain-specific task benchmark matching your production use case. If these show <2% accuracy drop despite the perplexity increase, the perplexity metric may be misleading. If accuracy drops >5%, disable INT8 KV cache or switch to FP8 KV (better precision).
+
+---
+
+### Question 7 (End-of-chapter)
+**Shadow A/B: 12,000 candidate + 108,000 baseline samples. Sufficient to detect 5% difference at 95% confidence?**
+
+**Power calculation for two-proportion test:**
+Assume LLM judge score is binary (good/bad) with baseline rate p_baseline = 0.75 (75% "good" responses). Detect 5% difference: p_candidate = 0.80 or 0.70.
+
+Effect size h = 2 * arcsin(sqrt(p2)) - 2 * arcsin(sqrt(p1))
+= 2 * arcsin(sqrt(0.80)) - 2 * arcsin(sqrt(0.75))
+= 2 * 1.107 - 2 * 1.047 = 2.214 - 2.094 = 0.12
+
+For alpha=0.05 (95% confidence), beta=0.20 (80% power):
+n per group = (z_alpha/2 + z_beta)^2 / h^2 = (1.96 + 0.84)^2 / 0.12^2 = 7.84 / 0.0144 = 544 per group.
+
+With 12,000 candidate samples and 108,000 baseline samples, **both groups far exceed the required 544**. The sample size is more than sufficient to detect a 5% difference at 95% confidence. The unequal sample sizes (10% vs 90% traffic split) reduce statistical efficiency slightly but with 12,000 candidate samples, power remains >99%.
+
+---
+
+### Question 8 (End-of-chapter)
+**Smoke suite: 50 prompts, 4 minutes. Full quality suite: 5,000 prompts, 6 hours. CI/CD pipeline design:**
+
+**Pipeline stages:**
+
+```
+Stage 1 (PR gate, ~5 min): Smoke suite (50 prompts)
+  - Runs on every PR before merge
+  - Gate: block merge if any smoke test fails
+  - Threshold: 0/50 failures allowed
+
+Stage 2 (Pre-deploy, ~4 min): Smoke suite again on staging
+  - Verifies no environment-specific regression
+  - Gate: block deploy if any failure
+
+Stage 3 (Canary deploy, runs overnight): Full quality suite (5,000 prompts)
+  - Runs after 5% canary deployment is live
+  - Compares against baseline golden responses
+  - Gate: rollback canary if mean LLM judge score drops >0.10 points
+  - Timeline: starts running when canary traffic begins, completes in 6 hours
+
+Stage 4 (Post-promotion, weekly): Full quality suite on 100% traffic
+  - Scheduled weekly regression check
+  - Catches drift that accumulates post-deployment
+  - Alert (non-blocking) if score drops >0.05 from deployment baseline
+```
+
+**Key design decisions:**
+- Smoke suite on every PR: fast feedback, catches obvious breakage.
+- Full suite only post-canary: too slow for PR gates. Run it where it matters most -- after deployment, with real traffic patterns.
+- Thresholds differ by stage: strict (0/50) for smoke, permissive (0.10 delta) for full suite.
+
+---
+
+### Question 9 (End-of-chapter)
+**Numerical logit check: 0.2% of positions fail allclose(atol=1e-3). Threshold for blocking deployment?**
+
+**Block if >0.1% of logit positions fail.** The 0.2% failure rate exceeds this threshold, so **block the deployment**.
+
+**Reasoning:**
+- Logit differences of >1e-3 at 0.2% of positions mean roughly 1 in 500 token predictions is meaningfully different between the baseline and candidate models.
+- Over a 1,000-token generation, this affects ~2 token predictions on average.
+- The practical impact depends on WHICH positions fail: if failures cluster on high-probability tokens (where the model is confident), the output is likely identical. If failures occur on low-probability "pivot" tokens (where the model choice is marginal), outputs could diverge significantly.
+
+**Threshold rationale:**
+- 0.01%: nearly perfect numerical match, safe to proceed.
+- 0.05%: acceptable for most deployments; monitor output diff as secondary check.
+- 0.1%: review failing positions; proceed if they are low-probability tokens.
+- 0.2% (this case): **block** -- too many deviations to be confident outputs are equivalent. Investigate the source of numerical drift (mixed precision in a new layer, different CUDA kernel selection).
+
+---
+
+### Question 10 (End-of-chapter)
+**Output diffing: 3% of canary responses changed. How to decide regressions vs improvements?**
+
+**Strategy: Automated triage + sample review.**
+
+**Step 1 -- LLM judge scoring at scale.**
+For all changed responses, run an LLM judge (GPT-4 or Claude) that receives: (original prompt, baseline response, candidate response) and scores which is better. At 3% change rate with 100K daily requests = 3,000 changed responses/day -- too many for manual review, but LLM judge can score all at ~$0.01/comparison = $30/day.
+
+```python
+for prompt, base_resp, cand_resp in changed_responses:
+    verdict = judge.compare(prompt, base_resp, cand_resp)
+    # Returns: "baseline_better", "candidate_better", "equivalent"
+```
+
+**Step 2 -- Aggregate verdicts.**
+If >60% of changed responses are judged "candidate_better" or "equivalent" -> likely improvements/neutral, proceed.
+If >30% are judged "baseline_better" -> regressions present, block rollout.
+
+**Step 3 -- Categorical breakdown.**
+Cluster the changed responses by topic (using the routing classifier or simple keyword matching) to find regression-prone categories. A 3% change rate might be: 5% changed for coding prompts (improvement: more correct code) + 1% for general (neutral). Category-level analysis reveals whether the changes are beneficial.
+
+**Step 4 -- Human sample review.**
+Sample 100 changed responses across categories for manual human review. Calibrate the LLM judge against human judgments to ensure judge accuracy.
+

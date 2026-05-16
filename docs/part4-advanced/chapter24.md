@@ -846,3 +846,106 @@ and match thinking budget to task difficulty to avoid paying for unnecessary com
 4. A reasoning model's `<think>` tokens should not be streamed to the user but should be included in the KV cache for subsequent turns. Describe the token masking and KV cache inclusion logic required. *(Section 24.3)*
 
 5. Compare the TTFT and total latency for a 70B reasoning model with 8 000 thinking tokens vs a 7B standard model with 200 output tokens on an A100. Which has lower TTFT? Which costs less per correct answer? *(Section 24.5)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**Reasoning model: 8,000 thinking + 200 answer tokens = 8,200 total. Standard: 200 tokens.**
+
+**KV cache consumption:**
+For a 70B model (32 layers, 8 KV heads, d=128, BF16), KV cost = 327 KB/token.
+```
+Reasoning: 8,200 x 327 KB = 2.68 GB per request
+Standard:    200 x 327 KB = 65.4 MB per request
+Ratio: 41x more KV cache for reasoning model
+```
+
+**GPU time (memory-bandwidth-bound decode):**
+Reasoning: 8,200 decode steps x 70 ms/step = 574 s
+Standard: 200 decode steps x 10 ms/step (7B model) = 2 s
+GPU time ratio for same task: 287x (70B reasoning vs 7B standard)
+
+**Cost per request:**
+Reasoning model: ~574 GPU-seconds. Standard 7B: ~2 GPU-seconds.
+If the reasoning model is 10x more accurate on hard tasks: cost-per-correct-answer may be lower for hard tasks where the standard model fails frequently.
+
+---
+
+### Question 2
+**Two ways CoT reasoning changes vLLM's scheduling behavior:**
+
+**Change 1 -- Much longer KV cache lifetime per request.**
+A reasoning request holds KV blocks for 8,000+ decode steps. At any time, reasoning "whale" requests consume a disproportionate share of the KV block pool. The scheduler may preempt them if the pool exhausts, forcing costly recomputation of thinking tokens.
+
+**Change 2 -- Unpredictable generation length.**
+Standard requests have bounded max_tokens. Reasoning models generate thinking chains of wildly variable length (200 to 50,000+ tokens). The scheduler cannot accurately predict KV block requirements at admission time. vLLM handles this by incrementally allocating blocks and using preemption as a safety valve, but this increases scheduling overhead compared to predictable workloads.
+
+---
+
+### Question 3
+**Early stopping as a sampling callback:**
+
+```python
+THINK_END_TOKEN_ID = tokenizer.encode("</think>")[0]
+
+def thinking_stop_callback(request_id, outputs):
+    for output in outputs:
+        if output.token_ids and output.token_ids[-1] == THINK_END_TOKEN_ID:
+            return True  # signal vLLM to stop generation
+        # Confidence-based: stop if top-1 prob > threshold AND min length met
+        if output.logprobs and len(output.token_ids) > 500:
+            top_prob = max(math.exp(lp) for lp in output.logprobs[-1].values())
+            if top_prob > 0.95:
+                return True
+    return False
+
+sampling_params = SamplingParams(
+    max_tokens=32768,
+    stop_token_ids=[THINK_END_TOKEN_ID],
+    # stop=["</think>"] also works via built-in stop string
+)
+```
+
+The most reliable signal is the </think> delimiter the model generates naturally. Confidence-based stopping works as a fallback for models without explicit thinking delimiters.
+
+---
+
+### Question 4
+**Token masking and KV cache inclusion for thinking tokens:**
+
+**Not streaming to user:**
+Apply a filter in the SSE streaming path:
+```
+- Buffer all tokens after <think>
+- Do not yield buffered tokens to the SSE output stream  
+- After </think> is seen, resume yielding answer tokens
+```
+
+**KV cache inclusion (automatic):**
+Thinking tokens are part of the sequence from the KV cache perspective. When the model generates </think> and transitions to answer generation, all thinking tokens are already in KV blocks. The model attends to the full thinking chain when generating the answer -- no special handling needed. vLLM automatically includes all generated tokens in KV blocks regardless of whether they are streamed to the user.
+
+**Multi-turn:** Store the full response (including thinking tokens) for multi-turn context. Include them in subsequent turns' KV cache -- the model benefits from its own prior reasoning.
+
+---
+
+### Question 5
+**TTFT and total latency: 70B reasoning (8K thinking) vs 7B standard (200 tokens) on A100.**
+
+**TTFT comparison:**
+- Reasoning 70B: TTFT for first *answer* token = prefill of input + 8,000 decode steps.
+  - 500-token input prefill: ~50 ms. 8,000 decode steps x 70 ms = 560 s.
+  - TTFT for answer: ~560 seconds.
+- Standard 7B: prefill 500 tokens: ~5 ms. First decode: ~10 ms. TTFT ~= 15 ms.
+
+The 7B standard model has ~37,000x lower TTFT. Reasoning models are unsuitable for real-time interactive applications requiring sub-second response.
+
+**Total latency:**
+- Reasoning 70B: 560 s + 200 x 70 ms = ~574 s total
+- Standard 7B: 15 ms + 200 x 10 ms = ~2 s total
+
+**Cost per correct answer:**
+If reasoning model is 10x more accurate on hard math/coding tasks, and costs 287x more GPU time, cost-per-correct-answer is 287/10 = 28.7x higher. But if standard model achieves <5% accuracy on hard tasks (vs reasoning model's 50%), the reasoning model's cost-per-correct-answer is actually lower for those tasks (cost 28.7x, correctness 10x better: 2.87x cost per correct answer, not 28.7x). The choice depends entirely on task difficulty and accuracy requirements.
+

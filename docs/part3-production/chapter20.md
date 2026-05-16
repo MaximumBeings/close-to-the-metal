@@ -599,3 +599,128 @@ and benchmark rankings are inputs to that calculation, not ends in themselves.
 4. Quantising a 70B model from BF16 to FP8 doubles throughput (same GPU count). Monthly on-demand cost is $45 000. Ignoring quality effects, compute the new cost and the annual saving. *(Section 20.2)*
 
 5. You have 50 000 daily active users with an average of 3 requests/user/day, each generating 800 tokens. Compute the daily token volume and, using the $/million-token figure from question 1, the daily and monthly cost. *(Section 20.1)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**Setup:** 4× A100 80GB at $3.20/GPU-hr, 70% average utilization, 730 hrs/month, 1,800 tok/s average throughput.
+
+**Step 1 — Monthly GPU cost:**
+```
+monthly_cost = 4 GPUs × $3.20/hr × 730 hrs = $9,344/month
+```
+
+**Step 2 — Monthly token volume:**
+```
+tokens_per_month = 1,800 tok/s × 730 hrs × 3,600 s/hr
+                 = 1,800 × 2,628,000
+                 = 4,730,400,000 tokens ≈ 4.73 billion tokens
+```
+
+**Step 3 — $/million tokens:**
+```
+cost_per_million = $9,344 / (4,730.4 million tokens) × 1,000,000
+                 = $9,344 / 4,730.4
+                 ≈ $1.98 per million tokens
+```
+
+**Note:** The 70% utilization figure does not change the cost (you pay for the GPU regardless of utilization) but it does reduce the effective token volume. If utilization were 100%, throughput × 1/0.70 ≈ 2,571 tok/s and cost would drop to ~$1.38/M tokens.
+
+---
+
+### Question 2
+**Setup:** Prefix caching, 65% hit rate, cache hits reduce prefill compute by 80%, prefill = 40% of GPU time.
+
+**Step 1 — Identify affected compute.**
+Prefill accounts for 40% of total GPU time. Prefix caching only affects prefill.
+
+**Step 2 — Effective prefill reduction from caching.**
+With 65% cache hit rate and 80% reduction per hit:
+```
+prefill_saved_fraction = 0.65 × 0.80 = 0.52  (52% of prefill compute saved)
+```
+
+**Step 3 — GPU utilization reduction.**
+The saved prefill compute as a fraction of total GPU time:
+```
+utilization_reduction = 0.52 × 0.40 = 0.208  (20.8% of total GPU time freed)
+```
+
+**Interpretation:**
+A deployment running at 80% GPU utilization would drop to ~63% utilization with prefix caching enabled (80% × (1 − 0.208) ≈ 63%). Alternatively, for the same utilization level, you can serve 20.8% more requests — or reduce GPU count proportionally to maintain cost-efficiency.
+
+---
+
+### Question 3
+**Setup:** Spot A100 = $1.10/hr, on-demand = $3.20/hr, interruption rate = 15%/hr, 200 req/min, 2 s retry deadline.
+
+**Expected additional latency from interruptions:**
+
+**Step 1 — Interruption frequency.**
+15% per hour = average interruption every 1/0.15 = 6.67 hours.
+Per minute: 0.15/60 = 0.0025 interruptions/minute.
+
+**Step 2 — Requests affected per interruption.**
+When an interruption occurs, in-flight requests on the pod must retry. Average time to retry on a new pod:
+- Kubernetes reschedule + pod cold start ≈ 120 s (model load)
+- This exceeds the 2 s retry deadline.
+So affected requests fail the 2 s deadline.
+
+**Step 3 — Affected requests per minute.**
+At 200 req/min and 0.0025 interruptions/min:
+Expected requests in flight at interruption: 200 req/min × (avg request duration). Assuming 5 s average request duration:
+```
+in_flight_requests = 200 × (5/60) ≈ 16.7 requests per interruption
+expected_failures_per_minute = 16.7 × 0.0025 ≈ 0.042 requests/min
+```
+
+**Step 4 — Latency impact.**
+0.042 requests/minute × 120 s (cold start penalty) = 5.04 s/min wasted in aggregate.
+Per-request additional latency: 5.04 s/min / 200 req/min ≈ **25 ms average additional latency** per request.
+
+This 25 ms average penalty is acceptable for most production workloads. However, spot instances require robust request retry logic at the gateway layer and graceful shutdown hooks on the pods.
+
+---
+
+### Question 4
+**Setup:** BF16 → FP8, throughput doubles, monthly on-demand = $45,000.
+
+**Step 1 — New cost after FP8 quantization.**
+Doubling throughput means you need half the GPUs for the same request volume:
+```
+new_monthly_cost = $45,000 / 2 = $22,500
+```
+
+**Step 2 — Annual saving:**
+```
+monthly_saving = $45,000 − $22,500 = $22,500
+annual_saving = $22,500 × 12 = $270,000
+```
+
+**Reality check:** FP8 quantization on H100 typically delivers 1.5–2× throughput gain (not always exactly 2×). The actual saving would be between $180,000 and $270,000 annually. Always measure actual quality degradation (perplexity, downstream task accuracy) before deploying FP8 in production — some tasks show measurable quality loss that may offset cost savings.
+
+---
+
+### Question 5
+**Setup:** 50,000 DAU, 3 requests/user/day, 800 tokens/request.
+
+**Step 1 — Daily token volume:**
+```
+daily_tokens = 50,000 × 3 × 800 = 120,000,000 = 120 million tokens/day
+```
+
+**Step 2 — Daily cost (using Q1's $1.98/M tokens):**
+```
+daily_cost = 120 × $1.98 = $237.60/day
+```
+
+**Step 3 — Monthly cost:**
+```
+monthly_cost = $237.60 × 30 = $7,128/month
+```
+
+**Note:** This assumes the Q1 deployment (4× A100, 1,800 tok/s) can handle the peak load. Peak QPS = 120M tokens / (24 × 3,600 s) = 1,389 tok/s average, well within the 1,800 tok/s capacity at 70% utilization. However, real traffic has peaks — if the 50K DAU all use the app in a 4-hour window, peak throughput could be 3.5× the average (4,861 tok/s), requiring ~3 additional GPU nodes during peak hours. Use scheduled autoscaling to add capacity during peak hours.
+

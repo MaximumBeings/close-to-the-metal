@@ -77,7 +77,7 @@ This is not a hypothetical. Every technique described is in production somewhere
 - **Chapter 15** covers multi-GPU tensor parallelism, now expanded with expert parallelism and pipeline bubble analysis. **Chapter 15.5** extends this to Flash Decoding and context parallelism, which together unlock attention at 100K+ token contexts.
 - **Chapter 16** covers observability. **Chapter 17** covers benchmarking methodology. **Chapter 18** covers disaggregated prefill/decode.
 - **Chapter 19** covers Kubernetes and KubeRay auto-scaling. **Chapter 20** covers cost engineering. **Chapter 21** covers API security.
-- **Appendix K** provides an operational decision tree and troubleshooting guide for common production failure modes.
+- **Appendix H** provides an operational decision tree and troubleshooting guide for common production failure modes.
 
 ---
 
@@ -135,7 +135,7 @@ This book will not become obsolete when the next model family ships. The chapter
 
 Every chapter that introduces a system concept has a companion code file in the `code/` directory: a Python demo (`*_demo.py`) and, where applicable, a C++ demo (`*_demo.cpp`). Each demo file is self-contained, has no external dependencies beyond the Python standard library or a C++ compiler, and contains assertions that verify the key worked examples from the chapter text.
 
-Running `python3 chapter_06/paged_attention_demo.py` should feel like re-reading the chapter at 10× speed — the same numbers, the same concepts, the same edge cases, but now interactive and verifiable. The C++ files compile with `g++ -O2 -std=c++17` unless otherwise noted; the CUDA files (Appendix J) require `nvcc`.
+Running `python3 chapter_06/paged_attention_demo.py` should feel like re-reading the chapter at 10× speed — the same numbers, the same concepts, the same edge cases, but now interactive and verifiable. The C++ files compile with `g++ -O2 -std=c++17` unless otherwise noted; the CUDA files (Appendix L) require `nvcc`.
 
 The code is intentionally not production code. It is educational code: clear rather than clever, readable rather than fast, honest about the simplifications it makes. When you are ready to write production code, the chapter will have pointed you to the right vLLM source files, the right llama.cpp functions, and the right papers.
 
@@ -143,7 +143,7 @@ The code is intentionally not production code. It is educational code: clear rat
 
 ## Acknowledgements
 
-This book was written during a period when LLM inference engineering was transforming from a specialized curiosity into a mainstream engineering discipline. The open-source communities around vLLM and llama.cpp made this book possible — every technique described here has been implemented, debugged, and documented by engineers who published their work. The papers in Appendix I represent years of insight that this book attempts to make accessible without losing the rigour.
+This book was written during a period when LLM inference engineering was transforming from a specialized curiosity into a mainstream engineering discipline. The open-source communities around vLLM and llama.cpp made this book possible — every technique described here has been implemented, debugged, and documented by engineers who published their work. The papers in Appendix X represent years of insight that this book attempts to make accessible without losing the rigour.
 
 The LinkedIn scenario in Chapter 1 is fictional, but the number — $1.2M per month for a real-time text service at scale — is grounded in conversations with engineers who have lived it. The $108K target is grounded in the same conversations. The gap between those two numbers is the reason this book exists.
 
@@ -206,18 +206,18 @@ If you are searching for a specific answer rather than reading linearly, use thi
 | **How do I evaluate whether my serving setup is correct and stays correct?** | Ch 39 (Evaluation and Regression Testing) |
 | **What are the mathematical foundations — softmax, attention, backprop?** | Appendix A |
 | **How do I install vLLM and llama.cpp from scratch?** | Appendix B |
-| **What do all the vLLM EngineArgs flags mean?** | Appendix C |
-| **What does every llama.cpp CLI flag do?** | Appendix D |
-| **I want copy-paste production configs — Dockerfiles, YAML, nginx** | Appendix E |
-| **What are tiled GEMM, prefix scan, convolution in CUDA C++?** | Appendix J |
-| **How do I run llama.cpp on Android or Apple Silicon — and what about MLX?** | Appendix M |
-| **How do I run llama.cpp on a Raspberry Pi or NVIDIA Jetson?** | Appendix N |
-| **How do I build a CI/CD pipeline for LLM inference — canary deploys, model eval gates, load testing?** | Appendix O |
+| **What do all the vLLM EngineArgs flags mean?** | Appendix D |
+| **What does every llama.cpp CLI flag do?** | Appendix E |
+| **I want copy-paste production configs — Dockerfiles, YAML, nginx** | Appendix F |
+| **What are tiled GEMM, prefix scan, convolution in CUDA C++?** | Appendix L |
+| **How do I run llama.cpp on Android or Apple Silicon — and what about MLX?** | Appendix Q |
+| **How do I run llama.cpp on a Raspberry Pi or NVIDIA Jetson?** | Appendix R |
+| **How do I build a CI/CD pipeline for LLM inference — canary deploys, model eval gates, load testing?** | Appendix S |
 | **How do I serve BGE or E5 embedding models and rerankers for RAG?** | Appendix T |
-| **How do I run vLLM on an AMD MI300X instead of NVIDIA?** | Appendix U |
-| **How do I calibrate and quantize my own model to AWQ, GPTQ, FP8, or GGUF?** | Appendix V |
-| **How does PyTorch work under the hood — dtypes, strides, inference mode, torch.compile, custom ops?** | Appendix W |
-| **How do I build an inference server directly in C++ using libtorch without a Python runtime?** | Appendix X |
+| **How do I run vLLM on an AMD MI300X instead of NVIDIA?** | Appendix P |
+| **How do I calibrate and quantize my own model to AWQ, GPTQ, FP8, or GGUF?** | Appendix U |
+| **How does PyTorch work under the hood — dtypes, strides, inference mode, torch.compile, custom ops?** | Appendix C |
+| **How do I build an inference server directly in C++ using libtorch without a Python runtime?** | Appendix J |
 
 ---
 

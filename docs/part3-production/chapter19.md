@@ -873,3 +873,200 @@ the controller handle everything below.
 4. KubeRay scales the Ray cluster underlying vLLM. What additional metric would you expose to the HPA beyond `vllm_active_sequences` to handle burst traffic with cold-start penalty? *(Section 19.9)*
 
 5. Write the PromQL cost attribution expression that converts GPU-hours to dollars for a vLLM deployment across multiple model namespaces. *(Section 19.11)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1 (Section 19.12)
+**Setup:** Pod ready-time = 120 s, `scaleUp.stabilizationWindowSeconds = 60 s`.
+
+**Timeline from traffic spike:**
+
+```
+T=0    Traffic spike detected. HPA sees target metric exceeded.
+T=60   Stabilization window expires. HPA issues scale-up decision.
+       (HPA waited 60 s to confirm the spike is sustained, not a blip.)
+T=60   Kubernetes schedules new pods.
+T=60–90  Scheduler finds nodes, pulls container image (if cached: ~5 s; cold: ~30 s).
+T=90   Container starts. Model loading begins.
+T=90–210 Model loading takes 120 s (120 s ready-time).
+T=210  Pod reports Ready. Traffic routed to new pod.
+```
+
+**Minimum response time to a traffic spike:**
+```
+60 s (stabilization) + 120 s (pod ready) = 180 s minimum
+```
+Plus image pull time (5–30 s) and Kubernetes scheduling (~5 s): **realistic minimum 190–215 seconds** from spike to new capacity.
+
+**Implication:** Any workload that spikes and subsides within 3 minutes will not benefit from HPA scale-up. Pre-warm pods or use predictive scaling for known traffic patterns.
+
+---
+
+### Question 2 (Section 19.12)
+**Setup:** Decode HPA target = 60 active sequences/pod. Need 500 slots. Cache hit rate = 60%.
+
+**With 60% cache hit rate:**
+Requests that hit the semantic cache never reach the decoder. Effective decoder demand:
+```
+decoder_requests = 500 × (1 − 0.60) = 200 concurrent slots needed
+```
+
+Pods needed:
+```
+pods = ceil(200 / 60) = ceil(3.33) = 4 decoder pods
+```
+
+**With 20% cache hit rate:**
+```
+decoder_requests = 500 × (1 − 0.20) = 400 slots
+pods = ceil(400 / 60) = ceil(6.67) = 7 decoder pods
+```
+
+**Change from 60% → 20% hit rate:** 3 additional pods required. At $3.20/GPU-hr, that's an additional $230/day cost just from cache miss rate degradation. This quantifies the financial value of maintaining high cache hit rates.
+
+---
+
+### Question 3 (Section 19.12)
+**Why `terminationGracePeriodSeconds` = `max_sequence_length × inter_token_latency`:**
+
+When Kubernetes signals a pod to terminate (SIGTERM), vLLM must finish all in-flight requests before shutting down. An in-flight request may be in mid-generation — it has already received its prompt (prefill done), and its KV cache is allocated.
+
+If the pod is killed before generation completes:
+- The user receives a truncated or empty response.
+- The KV cache (up to `max_sequence_length` blocks) is lost without producing a useful output.
+
+**The correct grace period:**
+```
+grace = max_sequence_length × ITL
+```
+Example: `max_sequence_length=2048`, ITL=20 ms → grace = 2048 × 0.02 = 40.96 s ≈ 41 s.
+
+This ensures the worst-case in-flight request (one that just started generating at the moment of SIGTERM) has time to complete before the pod is force-killed.
+
+**Why 30 s is wrong:** A 30 s fixed grace period accommodates sequences of at most 30/0.02 = 1,500 tokens. Requests with `max_tokens=2048` will be cut off. The correct value must be derived from the actual model performance characteristics, not a fixed constant.
+
+---
+
+### Question 4 (Section 19.12)
+**Setup:** US, EU, AP clusters. User in Singapore, AP at 95%, overflow to US. AP→US RTT=180 ms.
+
+**Cost of re-prefilling in US vs. AP network latency:**
+
+Assuming a 10K-token prompt and a prefill throughput of ~15,000 tok/s per pod:
+```
+prefill_time = 10,000 / 15,000 ≈ 0.667 s = 667 ms (on US prefill GPU)
+```
+
+**Additional latency from overflow:**
+- Network transmission of 10K tokens (JSON, ~40 KB at ~4 bytes/token): 40 KB over ~100 Mbps connection = 3.2 ms (negligible).
+- AP → US RTT: 180 ms (one way; round-trip adds another 180 ms for response).
+- Re-prefill in US: 667 ms.
+
+**Total overflow penalty ≈ 667 + 180 ms RTT = 847 ms additional TTFT** vs. serving locally at AP (~667 ms → TTFT = 667 ms if AP not overloaded).
+
+**When does overflow routing make sense?**
+When AP is at 95% capacity, the queuing delay at AP (waiting for a slot) exceeds the overflow cost of 847 ms. If AP queue depth means requests wait 2 s before prefill begins, routing to US costs 847 ms — still faster by >1 s. For short prompts where prefill is <100 ms, overflow rarely makes sense (the 180 ms network latency alone exceeds local latency).
+
+---
+
+### Question 5 (End-of-chapter)
+**HPA with `targetAverageValue: 20` for `vllm_active_sequences_per_pod`.**
+Current pods: [18, 22, 19, 25]. Total = 84, 4 pods.
+
+**HPA desired replicas formula:**
+```
+desiredReplicas = ceil(currentReplicas × currentMetricValue / desiredMetricValue)
+currentMetricValue = average = (18+22+19+25) / 4 = 84/4 = 21
+desiredReplicas = ceil(4 × 21 / 20) = ceil(4.2) = 5
+```
+
+Yes, the HPA **scales up** to 5 pods (from 4). The average exceeds the target, triggering a scale-out.
+
+---
+
+### Question 6
+**Pod readiness probe at T=20 s but model needs 75 s total (45 s load + 30 s CUDA warm-up):**
+
+The readiness probe passes at T=20 s (perhaps an HTTP health check returns 200 OK after the HTTP server starts, before the model is fully loaded). Kubernetes immediately routes traffic to the pod.
+
+**What goes wrong:**
+- Requests arrive between T=20 and T=75 s. The model is not yet loaded or CUDA graphs not yet captured.
+- vLLM will either queue requests (if the engine is partially initialized) or return 500 errors.
+- CUDA graph capture during this period receives live traffic, potentially causing OOM or capture failures if the batch sizes vary during warm-up.
+
+**Fix:** Configure a startup probe that tests the actual inference endpoint:
+```yaml
+startupProbe:
+  httpGet:
+    path: /v1/models    # returns models only after engine is ready
+    port: 8000
+  failureThreshold: 30
+  periodSeconds: 5      # 30 × 5 = 150 s startup window
+```
+Set the readinessProbe to probe `/health` after the startupProbe succeeds, ensuring the model is fully loaded and CUDA graphs captured before traffic is admitted.
+
+---
+
+### Question 7
+**`preemptionPolicy: Never` + spot instance reclaimed.**
+
+Kubernetes **cannot preempt** higher-priority pods to reschedule the vLLM pod (because `preemptionPolicy: Never` means the pod will not evict others). When the spot node is reclaimed:
+
+1. Kubernetes taints the node with `node.kubernetes.io/not-ready`.
+2. The vLLM pod receives SIGTERM (if `terminationGracePeriodSeconds` allows, it drains current requests; otherwise SIGKILL).
+3. Kubernetes adds the pod to the pending queue. It cannot evict other pods to find space.
+4. The pod stays pending until a new node is available (either spot price drops, or cluster autoscaler provisions a new node).
+
+**Minimize request loss:**
+- Set `terminationGracePeriodSeconds` = max_sequence_length × ITL to drain in-flight requests.
+- Use PodDisruptionBudget to ensure at least N−1 replicas remain serving during node eviction.
+- Enable vLLM's graceful shutdown: `--graceful-shutdown-timeout 60` so in-flight sequences complete before the pod exits.
+- Use multi-AZ placement with `topologySpreadConstraints` so a single spot instance reclaim doesn't take down the only active replica.
+
+---
+
+### Question 8
+**Additional metric beyond `vllm_active_sequences` for burst traffic with cold-start penalty:**
+
+`vllm_pending_request_queue_depth` (or `vllm:num_requests_waiting`) — the number of requests waiting in the scheduler queue before prefill begins.
+
+**Why this is better for cold-start-aware scaling:**
+Active sequences only reflect currently running requests — they don't capture incoming demand that hasn't been admitted yet. A growing queue signals that demand exceeds current capacity *before* the pod's metric becomes saturated.
+
+Configure HPA to scale when:
+```
+vllm_pending_request_queue_depth > 10  (for 30 s)
+```
+This fires the scale-up signal earlier (when the queue starts building) rather than after active sequences are saturated, giving the 75 s cold-start time to complete before the queue grows further.
+
+---
+
+### Question 9
+**PromQL cost attribution for GPU-hours to dollars:**
+
+```promql
+sum by (namespace, model) (
+  rate(vllm:gpu_seconds_total[1h]) * on(namespace) group_left()
+  kube_pod_labels{label_cost_per_gpu_hour="3.20"}
+) * 3.20
+```
+
+Or more practically, using node-level GPU metrics:
+```promql
+sum by (namespace) (
+  rate(DCGM_FI_DEV_GPU_UTIL[1h]) / 100
+  * on(node) group_left()
+  kube_node_labels{label_gpu_cost_per_hour="3.20"}
+) * 3.20
+```
+
+This gives dollars per hour per namespace. Multiply by 730 for monthly cost:
+```promql
+sum by (namespace) (
+  rate(vllm:gpu_seconds_total[730h]) * 3.20 / 3600
+)
+```
+

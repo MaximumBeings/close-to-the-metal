@@ -863,3 +863,168 @@ known schemas.
    the draft model's candidate tokens in parallel with the draft model's
    forward pass. What problem does this solve? What assumption about the
    acceptance rate of constrained draft tokens does this optimization rely on?
+
+
+---
+
+## Worked Solutions
+
+---
+
+### Solution 1 — "null" token in IN_NUMBER_VALUE state
+
+**Situation:** FSM state = IN_NUMBER_VALUE (expecting digits or `.`). Token "null" has logit 1.8.
+
+**Step 1 — Masking.**
+
+The FSM determines that "null" is not a valid continuation in the current state. The constrained decoding system applies:
+
+$$\text{logit}_{\text{null}} \leftarrow -\infty$$
+
+**Step 2 — Post-masking probability.**
+
+$$p_{\text{null}} = \frac{e^{-\infty}}{Z} = \frac{0}{Z} = 0$$
+
+The token "null" has **zero probability** of being selected regardless of its original logit value.
+
+**Step 3 — Is this semantically correct?**
+
+**Yes.** In JSON, an integer field (`"age"`) cannot have a `null` value unless the schema explicitly allows `null` as an alternative type (e.g., `{"type": ["integer", "null"]}`). If the schema says `"age"` is an integer:
+
+- `{"age": null}` → invalid JSON per the schema
+- `{"age": 25}` → valid
+
+The constraint correctly prevents the model from generating schema-violating JSON, even though "null" might be a reasonable completion in unconstrained generation.
+
+**Common confusion:** If the schema were `{"age": {"type": ["integer", "null"]}}`, then "null" SHOULD be allowed. The FSM state machine must reflect the full schema — different schemas produce different FSMs, even for the same JSON field name.
+
+---
+
+### Solution 2 — Tokenizer alignment: handling both "true" and "t","r","u","e"
+
+**The problem:**
+
+Grammar requires the string `true`. The vocabulary has:
+- Token ID 4321: `"true"` (single token for the entire word)
+- Token IDs 500,510,520,530: `"t"`, `"r"`, `"u"`, `"e"` (individual characters)
+
+**What goes wrong with character-only FSM:**
+
+If the FSM is built on character-level transitions:
+- State: `START` → sees `"t"` → transitions to `SAW_T`
+- State: `SAW_T` → sees `"r"` → transitions to `SAW_TR`
+- etc.
+
+When the tokenizer actually produces the single token `"true"` (ID 4321), the FSM doesn't know how to handle it — it's waiting for `"t"` first. The system either rejects the valid token or generates incorrect text by forcing character-by-character generation even when the tokenizer would naturally emit a multi-character token.
+
+**The correct approach (token-level FSM):**
+
+Build the FSM's transition table indexed by **token IDs**, not characters:
+
+```python
+# At state IN_BOOLEAN, valid next tokens:
+valid_tokens = set()
+for token_id, token_text in vocabulary.items():
+    # "true" can be produced by the single token OR by starting "t" (then r, u, e)
+    if "true".startswith(token_text.strip()):
+        valid_tokens.add(token_id)
+    # Also check if this token IS "true" entirely
+    if token_text.strip() == "true":
+        valid_tokens.add(token_id)
+```
+
+The FSM pre-computes which token IDs are valid at each state using the full vocabulary. At runtime, the mask directly maps state → set of allowed token IDs.
+
+---
+
+### Solution 3 — Outlines vs lazy enforcement for 10,000 unique schemas
+
+**Comparison:**
+
+| Property | Outlines (pre-computation) | lm-format-enforcer (lazy) |
+|----------|---------------------------|---------------------------|
+| Setup per schema | Full FSM build + token mask precompute | None |
+| Per-step cost | O(1) lookup in precomputed table | O(|valid_tokens|) re-evaluation |
+| Memory per schema | ~10–100 MB (token mask for each state) | ~0 |
+| Cache miss cost | Cold schema: expensive first build | Every schema is "cold" |
+
+**For 10,000 unique schemas:**
+
+- **Outlines:** First request with schema X → build FSM → ~500 ms latency spike. Cache the FSM for future requests with the same schema. With 10,000 unique schemas each used once: 10,000 × 500 ms = 5,000 seconds of latency penalty spread across requests. Memory: 10,000 schemas × 50 MB = 500 GB → impractical to cache all.
+
+- **lm-format-enforcer (lazy):** Evaluate constraints on-the-fly at each decode step. No upfront cost. Each decode step: ~1–5 ms for constraint evaluation. For a 100-token response: 100 × 3 ms = 300 ms overhead per request — regardless of whether the schema is new or cached.
+
+**Verdict:** For 10,000 unique schemas, **lazy evaluation (lm-format-enforcer) is clearly preferable** — no cold-start penalty, no unbounded memory usage, predictable per-step cost. Outlines is better when a small number of schemas are used repeatedly (cache hit rate > 95%).
+
+---
+
+### Solution 4 — FSM for 50 tool names in a function-calling system
+
+**Task:** The JSON field `"name"` must equal one of 50 specific tool names.
+
+**Step 1 — Trie structure for tool names.**
+
+Build a prefix trie over all 50 names:
+
+```
+"" → "get_" → "get_weather"
+                → "get_forecast"
+     "send_" → "send_email"
+                → "send_message"
+     "search_" → ...
+```
+
+Each node in the trie is a potential FSM state.
+
+**Step 2 — FSM state space.**
+
+States:
+- `AFTER_NAME_KEY` (just emitted `"name": "`)
+- One state per trie node (prefix of valid names)
+- `COMPLETE_NAME_j` for each of the 50 complete names (accepting states)
+
+Minimum states: 1 + (sum of all characters across all tool name prefixes). For 50 names of average length 12: roughly 1 + 50×12/2 (sharing prefixes) ≈ **300 states minimum**, often many fewer due to shared prefixes.
+
+**Step 3 — Transitions.**
+
+At each state, only tokens that extend the current prefix toward a valid name are allowed. For example, at state `SAW_PREFIX_"get_"`, allowed tokens are those whose text continues with "weather", "forecast", or any other valid suffix.
+
+**Step 4 — Token ID pre-computation.**
+
+For each (state, token_id) pair: precompute whether that token is a valid continuation. Store as a dictionary: `{state: frozenset(valid_token_ids)}`. Lookup at decode time: O(1).
+
+---
+
+### Solution 5 — SGLang speculative constrained decoding
+
+**What SGLang does:**
+
+The draft model proposes K tokens speculatively (e.g., K=4). These K tokens are validated in parallel by both:
+1. **The verifier model** (correctness check — are these tokens the verifier would have chosen?)
+2. **The FSM** (constraint check — are these tokens grammatically valid per the schema?)
+
+**Parallel FSM validation:**
+
+The FSM processes all K draft tokens simultaneously, computing the constraint validity of each position:
+
+```python
+draft_tokens = [42, 95, 7, 221]  # proposed by draft model
+current_state = fsm.current_state
+for i, token in enumerate(draft_tokens):
+    if not fsm.is_valid(current_state, token):
+        # reject from position i onwards
+        accept_mask[i:] = False
+        break
+    current_state = fsm.transition(current_state, token)
+```
+
+**Compound rejection:**
+
+A draft token is rejected if either:
+- The verifier would not have produced it (standard speculative decoding rejection)
+- The FSM marks it as invalid (constraint violation)
+
+**Throughput benefit:**
+
+Without speculative decoding: 1 token per forward pass. With K=4 speculation: average 2–3 tokens accepted per verifier pass. Constraint violations slightly reduce acceptance rate (the draft model may not always respect the grammar), but the net speedup is still 1.5–2.5× for typical JSON generation tasks.
+

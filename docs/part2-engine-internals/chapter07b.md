@@ -452,3 +452,142 @@ Continuous batching eliminates the GPU idle time inherent in static batching by 
 4. You enable chunked prefill with chunk_size=256 on a system receiving 500-token prompts. How many iterations does each new request spend in the prefill phase? What is the per-iteration step-time overhead compared to a decode-only step?
 
 5. A production system has batch utilization of 0.42 with `max_num_seqs=64`. Traffic is high (waiting queue never empty). What is the most likely cause, and what flag should you adjust first?
+
+
+---
+
+## Worked Solutions
+
+---
+
+### Solution 1 — 3,000-token prompt with max_num_batched_tokens=2,048
+
+**What we need:** Will this request be admitted? What happens next?
+
+**Step 1 — Without chunked prefill.**
+
+The scheduler tries to fit the entire 3,000-token prefill into one step. But:
+
+$$3{,}000 > 2{,}048 \implies \text{Cannot admit — exceeds per-step token budget}$$
+
+The request stays in the waiting queue. Next iteration: still 3,000 tokens — still blocked. The request will **never** be admitted without chunked prefill because its full prefill always exceeds the budget.
+
+**Step 2 — With chunked prefill enabled.**
+
+The scheduler splits the prefill:
+- Step 1: 2,048 tokens of the prompt (leaving 952 tokens remaining)
+- Step 2: remaining 952 tokens → prefill complete, decode begins
+
+With chunked prefill: request is admitted immediately, first token generated after 2 steps.
+
+**Step 3 — Practical recommendation.**
+
+Always enable chunked prefill (`--enable-chunked-prefill`) when serving users with potentially long prompts. Without it, a single 3,000-token request can block the queue indefinitely if no step can accommodate it.
+
+---
+
+### Solution 2 — P99 latency penalty from preemptions (RECOMPUTE policy)
+
+**Given:** 50 preemptions/min, average preempted length=200 tokens, prefill throughput=3,000 tok/s
+
+**Step 1 — Recompute cost per preempted request.**
+
+Under the RECOMPUTE policy, all KV blocks are freed and the sequence must redo its entire prefill from scratch when resumed:
+
+$$\text{recompute time} = \frac{200 \text{ tokens}}{3{,}000 \text{ tok/s}} = 0.0667 \text{ s} = \textbf{66.7 ms}$$
+
+**Step 2 — What the user experiences.**
+
+The user's request was mid-decode at token 150 (for example). After preemption and recomputation:
+- Prompt is re-processed (66.7 ms added)
+- Decode resumes from where it left off
+
+The additional 66.7 ms shows up as an elongated inter-token gap — the user sees the stream pause and then resume.
+
+**Step 3 — Aggregate impact.**
+
+50 preemptions/min × 66.7 ms = 3,333 ms of recompute per minute. If 200 concurrent users are active, each preemption affects one user's P99. A P99 spike of ~70 ms would be observable as a "stutter" in the streaming output.
+
+**Mitigation:** Switch to SWAP policy (transfers KV to CPU instead of discarding) for workloads with expensive prefills, accepting the PCIe latency (~0.3 ms per 2.5 MB of KV) instead of the full recompute cost.
+
+---
+
+### Solution 3 — KV memory comparison: llama.cpp vs vLLM for 8 sequences × 512 tokens
+
+**Assumptions:** 32 layers, 8 KV heads, head_dim=128, FP16; max_context=4,096; block_size=16
+
+**vLLM (dynamic allocation):**
+
+$$\text{blocks needed} = 8 \text{ seqs} \times \lceil 512/16 \rceil = 8 \times 32 = 256 \text{ blocks}$$
+$$\text{bytes} = 256 \times 256 \text{ KB} = 65{,}536 \text{ KB} = \textbf{64 MB}$$
+
+vLLM only allocates blocks for *actual* token count. 512 tokens × 8 sequences = actual usage.
+
+**llama.cpp (contiguous preallocated):**
+
+llama.cpp uses a single contiguous KV cache buffer sized for `n_ctx` (max context) × all sequences:
+
+$$\text{bytes} = n_{\text{ctx}} \times n_{\text{layers}} \times n_{\text{kv\_heads}} \times d_{\text{head}} \times 2 \times 2$$
+$$= 4{,}096 \times 32 \times 8 \times 128 \times 2 \times 2 = 536{,}870{,}912 \text{ bytes} = \textbf{512 MB}$$
+
+This is for one continuous context. For 8 parallel sequences, llama.cpp needs 8 parallel contexts:
+
+$$8 \times 512 \text{ MB} = \textbf{4,096 MB = 4 GB}$$
+
+**Comparison:**
+
+$$\frac{\text{llama.cpp}}{\text{vLLM}} = \frac{4{,}096 \text{ MB}}{64 \text{ MB}} = \textbf{64}\times \text{ more memory}$$
+
+vLLM's PagedAttention uses 64× less memory for this workload. This is why vLLM can serve hundreds of concurrent users on a single GPU while llama.cpp server mode is better suited for smaller concurrent loads.
+
+---
+
+### Solution 4 — Chunked prefill iterations and step overhead for 500-token prompt
+
+**Given:** chunk_size=256, prompt_length=500
+
+**Step 1 — Number of prefill iterations.**
+
+$$\text{iterations} = \lceil 500/256 \rceil = 2 \text{ iterations}$$
+
+- Iteration 1: 256 tokens processed
+- Iteration 2: 244 tokens processed → prefill complete → first decode step
+
+**Step 2 — Per-iteration step-time overhead vs decode-only.**
+
+A decode-only step processes `batch_size` tokens (e.g., 32 decode sequences × 1 token = 32 tokens). A chunked prefill step processes 256 prefill tokens + 32 decode tokens = 288 tokens.
+
+The step-time overhead is roughly proportional to extra tokens:
+
+$$\text{relative overhead} = \frac{288 - 32}{32} = \frac{256}{32} = 8\times \text{ more tokens per step}$$
+
+In wall-clock time: prefill compute is cheaper per-token than decode for large batches (prefill is compute-bound, decode is memory-bound), but the extra 256 tokens still add ~0.5–2 ms to each step depending on the model size and hardware.
+
+---
+
+### Solution 5 — Low batch utilization (0.42) with full waiting queue
+
+**Given:** Utilization=0.42, max_num_seqs=64, queue never empty
+
+**Step 1 — What 0.42 utilization means.**
+
+On average, only 42% of the 64 possible slots are active at any time = ~27 active sequences. With high traffic and a full queue, the system should be serving as many sequences as possible — yet it isn't.
+
+**Step 2 — Most likely causes.**
+
+*Primary cause:* **KV cache block exhaustion.** The GPU block pool is being depleted by the 64 sequences' combined KV usage, forcing preemptions or rejection of new requests. This keeps the *active* count lower than `max_num_seqs`.
+
+*Secondary cause:* High prefill latency bottleneck. Large prefills occupy the token budget, preventing decode sequences from progressing, leading to stale output and users abandoning connections.
+
+**Step 3 — Fix.**
+
+Try these in order:
+
+1. **Reduce `--gpu-memory-utilization`** (e.g., from 0.90 to 0.80): Allocates less memory to the KV pool but reduces OOM-induced preemptions. Counterintuitively, this can increase throughput by reducing preemption overhead.
+
+2. **Reduce `--max-num-seqs`** to 48: Fewer concurrent sequences means each gets more KV blocks. Utilization may drop (fewer slots) but actual throughput (tokens/second) may increase.
+
+3. **Enable chunked prefill**: Prevents large prefills from starving decode sequences, improving steady-state throughput.
+
+4. **Profile with `--disable-log-stats false`**: Check `num_preemptions_total` and `gpu_cache_usage_perc` to confirm block exhaustion is the cause.
+

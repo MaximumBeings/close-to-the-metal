@@ -1697,3 +1697,100 @@ Close to the metal means understanding the hardware, the kernels, the schedulers
 4. Triton Inference Server can run a model ensemble: embedding model → LLM → re-ranker. Describe the data flow and what Triton's dynamic batcher does for each model in the ensemble. *(Section 33.6)*
 
 5. A startup asks: "We want the fastest path to production for a RAG chatbot on AWS with 4 A100s." Rank vLLM, TRT-LLM, and llama.cpp for this use case and justify your ranking. *(Section 33.1)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**Deploying a 7B model on-device on an iPhone 15. Which engine? Which quantization?**
+
+**Engine: MLC-LLM** (with Core ML backend) or **llama.cpp** (with Metal backend).
+
+**Why MLC-LLM:**
+MLC-LLM compiles the model to Apple's Core ML or Metal Performance Shaders (MPS) using TVM. It produces a native iOS framework bundle that apps can embed, achieving best-in-class throughput on Apple Neural Engine (ANE) for models that fit within the ANE's compute graph constraints.
+
+**Why llama.cpp is also valid:**
+llama.cpp with Metal backend is simpler to deploy and widely used for on-device inference on Apple Silicon. It achieves 20-30 tok/s for a 7B Q4_K_M model on iPhone 15 -- sufficient for most applications.
+
+**Quantization format: Q4_K_M (4-bit k-means, mixed precision)**
+- 7B Q4_K_M: ~4.5 GB -- fits within iPhone 15's 6 GB RAM budget (leaving 1.5 GB for OS and app).
+- Q4_K_M has better perplexity than Q4_0 at the same file size due to k-means grouping.
+- Do NOT use FP16 (14 GB -- exceeds iPhone 15 RAM) or Q8_0 (7.7 GB -- too large).
+
+---
+
+### Question 2
+**TRT-LLM: compile at specific batch/seq length. vLLM: CUDA graphs at runtime. Trade-off for high-variance sequence length distribution:**
+
+**TRT-LLM:**
+Compilation produces a static engine optimized for the exact (max_batch_size, max_seq_len) bounding box. For a distribution with high variance:
+- Short sequences (common): engine runs at the padded max_seq_len, wasting compute on padding.
+- Sequences exceeding max_seq_len: **rejected** -- the engine cannot process them without recompilation.
+- Runtime re-compilation is expensive (minutes to hours for large models). Teams typically ship multiple engine variants (short, medium, long) with a routing layer to select the appropriate engine.
+
+**vLLM CUDA graphs:**
+Graphs are captured for a set of discrete batch sizes (1, 2, 4, 8, 16, ...) at startup. Sequences outside the captured shapes fall back to eager mode. For high-variance distributions:
+- vLLM handles arbitrary sequence lengths via PagedAttention (no padding to max_seq_len).
+- Decode steps at any sequence length use the closest captured CUDA graph, with eager fallback for outliers.
+- No recompilation needed -- adapts dynamically.
+
+**Verdict for high-variance distributions:** vLLM is significantly more practical. TRT-LLM requires upfront knowledge of the sequence length distribution to compile appropriate engines. vLLM's runtime graph approach handles variance automatically at the cost of occasional eager-mode overhead.
+
+---
+
+### Question 3
+**MLC-LLM compiled to WebGPU. Three largest performance gaps vs vLLM on server GPU:**
+
+**Gap 1 -- Raw compute throughput.**
+WebGPU is a browser-safe abstraction over the GPU. It cannot access CUDA-specific features (Tensor Cores, NVLink, BF16 hardware acceleration, FlashAttention kernels). A server H100 delivers ~1,979 TFLOPS BF16; a browser WebGPU context on the same H100 might deliver 200-400 GFLOPS due to driver overhead, shader compilation, and missing hardware intrinsics. Performance gap: ~5-10x.
+
+**Gap 2 -- Memory bandwidth.**
+vLLM runs in the CUDA runtime with direct HBM access via cuBLAS/cuDNN. WebGPU must marshal data through the browser's GPU command queue with synchronization barriers between JavaScript and GPU threads. KV cache access -- the primary memory bottleneck -- suffers additional latency from browser-imposed memory safety checks. Gap: 2-5x on bandwidth-bound decode.
+
+**Gap 3 -- Multi-GPU and batching.**
+vLLM uses NCCL for tensor parallelism across multiple GPUs, enabling 405B model serving. WebGPU is limited to a single GPU context with no multi-GPU collective support. Maximum model size is limited to what fits on one GPU accessible to the browser. Batch sizes are also limited by browser memory quotas (~2-4 GB GPU memory typically available to browser tabs).
+
+---
+
+### Question 4
+**Triton Inference Server: embedding -> LLM -> re-ranker pipeline. Data flow and dynamic batcher:**
+
+**Data flow:**
+1. **Input:** Client sends a JSON request with a text query to Triton's HTTP/gRPC endpoint.
+2. **Embedding model** (e.g., BGE-M3): receives the text, tokenizes it, runs the embedding forward pass, outputs a dense vector of shape (1, 768). Dynamic batcher accumulates multiple requests and runs batched embedding inference.
+3. **LLM** (e.g., LLaMA-3 7B via TRT-LLM backend): receives the embedded query vector plus retrieved documents (passed via pipeline step). Generates text responses. Triton's TRT-LLM backend handles in-flight batching.
+4. **Re-ranker** (e.g., cross-encoder): receives (query, response) pairs, scores each, returns the highest-scoring response to the client.
+
+**Dynamic batcher behavior per model:**
+- **Embedding model:** Fast, compute-cheap. Dynamic batcher waits up to `max_queue_delay_microseconds` (e.g., 5 ms) or `preferred_batch_size` (e.g., 32) before dispatching a batch. Most embeddings are batched efficiently.
+- **LLM:** The TRT-LLM backend uses its own in-flight batching (iteration-level scheduling). Triton's dynamic batcher is largely bypassed -- the backend scheduler handles concurrency.
+- **Re-ranker:** Similar to embedding model -- fast batching with `preferred_batch_size`.
+
+---
+
+### Question 5
+**Startup asking: fastest path to production for RAG chatbot on AWS with 4 A100s. Rank vLLM, TRT-LLM, llama.cpp:**
+
+**Ranking: vLLM > llama.cpp > TRT-LLM for this use case.**
+
+**1st: vLLM**
+- Native AWS support (works with SageMaker, EC2, EKS).
+- Built-in OpenAI-compatible API -- plug into any RAG framework (LangChain, LlamaIndex) immediately.
+- Prefix caching: for RAG, the system prompt + retrieved documents often share a common prefix across requests -- huge TTFT improvement out of the box.
+- Multi-GPU TP=4 for 4 A100s is a one-flag change (`--tensor-parallel-size 4`).
+- Time to first deployment: 1-2 days.
+
+**2nd: llama.cpp**
+- Simpler stack, no CUDA environment to manage.
+- But: does not natively support TP=4 without manual setup.
+- Does not match vLLM's batch efficiency at scale (no continuous batching for multiple concurrent RAG queries).
+- Time to first deployment: 1 day, but performance ceiling is lower.
+
+**3rd: TRT-LLM**
+- Highest raw throughput on H100/A100 when tuned.
+- But: compilation time (hours per model variant), complex setup, no built-in OpenAI-compatible API without wrapping with Triton Inference Server.
+- Not the right tool for a startup that needs production in days, not weeks.
+- Time to first deployment: 1-2 weeks.
+
