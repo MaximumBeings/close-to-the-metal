@@ -414,39 +414,118 @@ response = client.chat.completions.create(
 
 ---
 
-## 35.9 Chapter Summary
+## 35.9 Qwen3 — What Changed from Qwen2.5
 
-Qwen's strengths: the widest model size range (0.5B–235B) from a single architecture family, the most efficient multilingual tokenizer for CJK languages (2–3× fewer tokens vs. Llama for Chinese), production-quality MoE variants, and the Qwen2.5-VL series for multimodal workloads.
+Qwen3 (released April 2025) introduced several changes with direct serving implications.
 
-Key serving rules: always specify `--chat-template qwen` in llama.cpp; use GPTQ-Int4 for 72B on 2× H100; leverage Qwen's tokenization efficiency for Chinese workloads; enable `--enable-prefix-caching` for repeated-image VLM workloads.
+### 35.9.1 Dual-Mode Generation
+
+Every Qwen3 model — from 0.6B to 235B — supports both fast non-thinking and slow thinking modes within the same weights. The switch is a chat-template parameter, not a separate model checkpoint:
+
+```python
+# Non-thinking mode (fast, for FAQ and simple queries)
+text = tokenizer.apply_chat_template(
+    messages, tokenize=False,
+    add_generation_prompt=True,
+    enable_thinking=False,          # ← controls the mode
+)
+
+# Thinking mode (slower, better for reasoning and math)
+text = tokenizer.apply_chat_template(
+    messages, tokenize=False,
+    add_generation_prompt=True,
+    enable_thinking=True,
+)
+```
+
+In thinking mode the model emits a `<think>...</think>` block before its final answer. Budget: 8,000–32,000 tokens for the reasoning trace depending on model size. This means a single thinking-mode request can consume 10–30× the KV cache of a standard request. Route thinking-mode requests to a dedicated pool with `--max-model-len 32768` and lower `--max-num-seqs` to avoid OOM.
+
+### 35.9.2 Qwen3 MoE Architecture (235B-A22B)
+
+Qwen3's flagship 235B model activates only 22B parameters per forward pass. The routing granularity changed from Qwen2.5's design:
+
+```
+Qwen2.5-57B-A14B:  64 experts per FFN layer, route top-8 (coarse-grained)
+  Each expert = 1/8 of a full FFN → 8 activated = one full FFN equivalent
+
+Qwen3-235B-A22B:  128 experts per FFN layer, route top-1 (fine-grained)
+  Each expert is smaller; only 1 expert activated per token per layer
+  
+  Serving implication:
+  - Full weights: 235B × 2 bytes = 470 GB → requires FP8 to fit 4× H100
+  - Active compute per token: ~22B parameters
+  - Throughput comparable to a 22B dense model, not 235B
+```
+
+### 35.9.3 Qwen3-30B-A3B — The Edge MoE
+
+Qwen3 added a 30B-parameter MoE with only 3B active parameters per token. At GGUF Q4\_K\_M (7.5 bits/param average):
+
+```
+Full weights:    30B × 0.5 bytes ≈ 15 GB  (fits on 16 GB VRAM or Apple M-series)
+Active compute:  3B per forward pass
+Speed (M3 Max):  ~55 tok/s — faster than Qwen2.5-7B at similar quality
+```
+
+This is the recommended replacement for Qwen2.5-7B in the FAQ pool of the Chapter 38 architecture if you are running on Apple Silicon edge nodes.
+
+---
+
+## 35.10 Benchmark Comparisons Across Model Families
+
+At the time of writing (May 2026), key benchmarks place the Qwen family as follows:
+
+```
+MMLU-Pro (5-shot, rigorous general knowledge):
+  Qwen2.5-72B:         79.2%
+  Llama-3.1-70B:       73.3%
+  DeepSeek-V3 (671B):  81.2%
+
+C-Eval (Chinese knowledge and reasoning):
+  Qwen2.5-72B:         90.1%   ← clear Qwen advantage
+  Llama-3.1-70B:       70.5%
+  DeepSeek-V3 (671B):  91.8%
+
+HumanEval (Python code):
+  Qwen2.5-Coder-32B:   92.1%
+  DeepSeek-V3 (671B):  89.9%
+  Llama-3.1-70B:       80.5%
+
+MATH-500 (competition mathematics, thinking mode):
+  Qwen3-32B (thinking): 97.2%
+  DeepSeek-R1 (671B):   97.3%
+  Llama-3.1-70B:        76.0%
+```
+
+**Practical selection rules:**
+
+- Chinese, Japanese, Korean workloads: Qwen at any size tier beats Llama by a wide margin due to tokeniser and training data composition.
+- English general assistant: Qwen2.5-72B and Llama-3.1-70B are within 2–3% on English benchmarks; choose by hardware fit and licensing.
+- Code generation: Qwen2.5-Coder-32B is the strongest open-weights code model under 70B at time of writing.
+- Complex reasoning and math: Qwen3-thinking or DeepSeek-R1; the quality gap over non-thinking models is large (>20pp on MATH-500).
+
+---
+
+## 35.11 Chapter Summary
+
+Qwen's strengths: the widest model size range (0.5B–235B) from a single architecture family, the most efficient multilingual tokenizer for CJK languages (2–3× fewer tokens vs. Llama for Chinese), production-quality MoE variants including the 30B-A3B edge model, dual-mode reasoning in Qwen3, and the Qwen2.5-VL series for multimodal workloads.
+
+Key serving rules: always specify `--chat-template qwen` in llama.cpp; use GPTQ-Int4 for 72B on 2× H100; route thinking-mode requests to a dedicated pool with a higher `max_model_len`; enable `--enable-prefix-caching` for repeated-image VLM workloads.
 
 ### Where We Go Next
 
 Chapter 36 covers Kimi — Moonshot AI's production system designed specifically for ultra-long contexts (up to 1M tokens), and Moon-Cache, their hierarchical KV caching system.
 
-
----
-
-## Chapter Summary
-
-- **Qwen model family**: Alibaba's production model series ranging from 0.5B to 72B parameters; variants include Qwen-VL (vision), Qwen-Coder (code), and QwQ (reasoning).
-- **Long context support**: Qwen2.5 models support 128K context natively using YaRN RoPE interpolation; serving requires `--max-model-len 131072` and sufficient KV cache budget.
-- **Multilingual performance**: Qwen models are trained on a higher fraction of Chinese and multilingual data than LLaMA; tokeniser vocabulary (152K) is significantly larger.
-- **GQA architecture**: Qwen2.5 uses grouped query attention with 8 KV heads for most sizes, significantly reducing KV cache vs full MHA.
-- **Model family engineering**: Qwen publishes intermediate checkpoints (0.5B, 1.5B, 3B, 7B, 14B, 32B, 72B) enabling cost-quality router construction across the entire family.
-- **vLLM serving**: Qwen2.5 models use standard vLLM configuration; `--trust-remote-code` is not required for Qwen2.5; FP8 quantization is supported on H100.
-- **Qwen-VL**: uses a ViT encoder with 2D RoPE for image patches; visual tokens are 256–1024 per image depending on resolution.
-
 ---
 
 ## Self-Check Questions
 
-1. Qwen2.5-72B uses 8 GQA KV heads and d_k = 128 with 80 transformer layers. Compare the KV cache memory per token versus a standard MHA model with 64 KV heads at the same d_k. *(Section 35.2)*
+1. Qwen2.5-72B uses 8 GQA KV heads and d_k = 128 with 80 transformer layers. Compare the KV cache memory per token versus a standard MHA model with 64 KV heads at the same d_k. *(Section 35.1)*
 
-2. Qwen2.5 has a vocabulary of 152 064 tokens. LLaMA-3 has 128 256. For a Chinese-language prompt of 500 characters, estimate the token count for each tokeniser and explain the difference. *(Section 35.3)*
+2. Qwen2.5 has a vocabulary of 152,064 tokens. LLaMA-3 has 128,256. For a Chinese-language prompt of 500 characters, estimate the token count for each tokeniser and explain the difference. *(Section 35.2)*
 
-3. You are building a cost router over the Qwen family (7B, 14B, 32B, 72B). For a request mix that is 60% simple queries, 30% medium, and 10% complex, design a two-stage cascade using only two models. *(Section 35.5)*
+3. You are building a cost router over the Qwen family (7B, 14B, 32B, 72B). For a request mix that is 60% simple queries, 30% medium, and 10% complex, design a two-stage cascade using only two models. *(Section 35.3)*
 
-4. Qwen-VL processes a 1024×1024 image with a ViT encoder that produces 1024 visual tokens. A chat session has 5 images. Compute the total token count and whether this fits in a 32K context window. *(Section 35.6)*
+4. Qwen2.5-VL-7B processes a 1024×1024 image. Using the token budget table in §35.8.1, compute how many visual tokens are generated and whether a 10-image document fits in a 32K context window alongside a 512-token user question. *(Section 35.8)*
 
-5. `--rope-scaling '{"type":"yarn","factor":4.0}'` is required to serve Qwen2.5 at 128K context. What does factor 4.0 mean, and what perplexity degradation should you expect at position 100K vs position 1K? *(Section 35.4)*
+5. Qwen3-235B-A22B has 128 fine-grained experts and activates 1 per token per FFN layer. Compare its memory footprint and per-token compute cost to Qwen2.5-72B dense (BF16). At what GPU count does each model become feasible to serve without quantisation? *(Section 35.9)*

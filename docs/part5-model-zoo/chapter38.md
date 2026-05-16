@@ -412,6 +412,64 @@ The LinkedIn scenario is not hypothetical. Every technique in this book is deplo
 
 ---
 
+## 38.8.1 Deployment Sequencing — Why Order Matters
+
+The optimizations in this book do not compose in arbitrary order. Each layer assumes the previous is measured and stable. The sequence below minimises rework and makes regressions easy to attribute:
+
+```
+Phase 1 — Foundation (Week 1–2)
+  ① Self-hosted vLLM, single GPU, choose starting model
+     Establish: baseline TTFT, throughput, error rate
+     Gate: P95 TTFT < 5 s, zero OOM crashes over 48 h
+
+Phase 2 — Core Hardware Efficiency (Week 3–4)
+  ② Quantization: INT4 or FP8 on every model in the pool
+     Gate: perplexity delta < 2% vs BF16 on a held-out eval set
+  ③ Tune max_num_seqs and max_model_len for your traffic profile
+     Gate: GPU utilization > 60% at median load
+
+Phase 3 — Traffic Shaping (Month 2)
+  ④ Traffic routing: deploy 0.5B classifier, route FAQ to 7B model
+     Gate: routing accuracy > 95% on 1,000 labelled examples
+  ⑤ Semantic caching: Redis + embedding lookup at gateway
+     Gate: cache hit rate > 20% (below this the latency overhead outweighs savings)
+
+Phase 4 — Request-Level Optimizations (Month 3)
+  ⑥ Prefix caching (--enable-prefix-caching) for RAG pool
+     Gate: ≥ 30% of RAG requests share a 100+ token prefix
+  ⑦ Speculative decoding on the agentic pool
+     Gate: draft acceptance rate > 0.70 over 10,000 sampled requests
+  ⑧ Disaggregated prefill: dedicated prefill nodes for RAG pool
+     Gate: RAG prefill latency > 40% of total request latency
+
+Phase 5 — Infrastructure Efficiency (Month 4)
+  ⑨ KubeRay autoscaling on vllm:num_requests_running metric
+     Gate: traffic peak:trough ratio > 2× over a 7-day window
+  ⑩ Spot + reserved capacity mix (60% spot / 40% reserved)
+     Gate: stable load forecast for the reserved commitment period
+```
+
+The arithmetic in §38.3 applies these phases left to right. Deploying speculative decoding before quantization is not wrong, but it obscures whether quality regressions came from the quantization or the draft model acceptance rate.
+
+---
+
+## 38.8.2 Operational Guardrails Before Each Promotion
+
+Define your rollback condition *before* promoting any layer to 100% of traffic. The cost of a badly-defined rollback condition is discovered at 2 a.m.:
+
+| Layer | Primary Metric | Rollback Trigger |
+|---|---|---|
+| Traffic routing | Routing accuracy on labelled set | < 93% on 500-query eval |
+| Semantic cache | Human-judged quality on cache hits | Any confirmed quality regression |
+| Prefix caching | TTFT for cache-cold requests | TTFT increase > 20% vs baseline |
+| Speculative decoding | Perplexity on held-out set | > 2% perplexity increase |
+| Quantization | Perplexity vs BF16 baseline | > 2% perplexity increase |
+| Auto-scaling | P99 TTFT during scale-up events | P99 > 2× steady-state SLA |
+
+Keep the previous configuration running in parallel for 24 hours after full promotion. Rollback is a load-balancer redirect — no redeployment required. Chapter 39 covers the eval harness that automates this gate checking, and Appendix O covers the canary deployment infrastructure that makes parallel running operationally simple.
+
+---
+
 ## 38.9 Chapter Summary
 
 Every inference optimization is a bet on what the traffic distribution will look like. The best production systems make many small correct bets simultaneously: a semantic cache for repeated queries, a small model for simple queries, a large model only when needed, quantization everywhere feasible, and continuous monitoring to catch when the bets stop paying off.
@@ -430,31 +488,14 @@ The $1.2M → $108K journey required no magic — just systematic application of
 
 ---
 
-## Chapter Summary
-
-- **The $1.2M → $108K journey**: 11 optimization layers applied systematically to the LinkedIn-scale scenario yield an 11× cost reduction with no new hardware and no model change.
-- **Layer 1 — Continuous batching**: eliminates idle GPU time from static batching; 2–3× throughput improvement at 50K concurrent users.
-- **Layer 2 — quantization (FP8)**: 1.8× throughput gain on H100 with negligible quality loss.
-- **Layer 3 — PagedAttention**: eliminates KV cache fragmentation; enables the batch sizes needed for subsequent optimizations.
-- **Layer 4 — Prefix caching**: 65% cache hit rate on system prompts reduces prefill compute by ~40%.
-- **Layer 5 — Tensor parallelism**: 4-GPU TP on NVLink scales compute linearly; 3.8× effective throughput on 4× A100.
-- **Layer 6 — Speculative decoding**: n-gram spec decode at acceptance rate 0.82 gives 2.1× decode speedup on repetitive outputs.
-- **Layer 7 — Model routing**: 60% of queries routed to 7B model; average cost per token drops by 45%.
-- **Layer 8 — Semantic caching**: 35% hit rate on a FAQ-heavy product; effective throughput increase of 54%.
-- **Layer 9 — Disaggregated prefill**: decouples prefill and decode scaling; enables independent autoscaling of each phase.
-- **Layer 10 — Spot + reserved mix**: 60% spot / 40% reserved capacity reduces compute cost by 38%.
-- **Layer 11 — Autoscaling**: HPA on `vllm_active_sequences` eliminates overprovisioning; average utilization rises from 28% to 73%.
-
----
-
 ## Self-Check Questions
 
 1. The baseline deployment runs 40× A100 GPUs at $3.20/hr at 28% average utilization. Compute the monthly cost (730 hrs). What is the effective $/GPU-hr of useful compute at 28% utilization? *(Section 38.1)*
 
-2. Layers 1–4 (continuous batching, FP8, PagedAttention, prefix caching) are applied first. If each layer multiplies throughput independently by the factors listed above, compute the combined throughput multiplier and new GPU count needed to serve the same load. *(Section 38.2)*
+2. Layers 1–3 (traffic routing, semantic caching, quantization) are applied first. Using the cost multipliers in §38.3, compute the combined monthly cost after all three and verify it matches the §38.3 figure. *(Section 38.3)*
 
-3. Model routing (Layer 7) sends 60% of requests to a 7B model and 40% to the 70B model. The 7B model costs 1/10th per token. Compute the weighted average cost per token relative to using only the 70B model. *(Section 38.5)*
+3. Model routing sends 60% of requests to a 7B model and 40% to the 70B model. The 7B model costs 1/10th per token. Compute the weighted average cost per token relative to using only the 70B model. *(Section 38.5)*
 
-4. The HPA scales from 4 pods to 16 pods during a traffic spike. Each pod takes 75 s to start (model load + CUDA graph capture). Traffic doubles in 90 s. How many requests queue during the scale-up lag, assuming 500 req/s arrival rate? *(Section 38.11)*
+4. The HPA scales from 4 pods to 16 pods during a traffic spike. Each pod takes 75 s to start (model load + CUDA graph capture). Traffic doubles in 90 s. How many requests queue during the scale-up lag, assuming 500 req/s arrival rate? *(Section 38.8.1)*
 
-5. You are presenting the $108K monthly cost to the CFO. She asks: "Could we reach $50K/month?" Using the remaining headroom from the 11 layers applied, identify two additional techniques from the book and estimate the additional cost reduction each could achieve. *(Section 38.12)*
+5. You are presenting the $108K monthly cost to the CFO. She asks: "Could we reach $50K/month?" Using the deployment sequencing in §38.8.1, identify two techniques not yet fully applied and estimate the additional cost reduction each could achieve. *(Section 38.8.2)*

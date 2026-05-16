@@ -148,6 +148,38 @@ def chain_of_thought(s, question):
 
 The two generation calls share the accumulated KV cache — the second call does not re-prefill the first response.
 
+### SGLang Server Deployment
+
+For production multi-user serving, launch SGLang as a server rather than using the Python API directly:
+
+```bash
+# Install
+pip install sglang[all]
+
+# Launch server (Llama-3.1-70B, 4× H100, TP=4)
+python -m sglang.launch_server \
+    --model-path meta-llama/Meta-Llama-3.1-70B-Instruct \
+    --tp 4 \
+    --port 30000 \
+    --host 0.0.0.0 \
+    --enable-flashinfer          # faster attention kernel
+    --chunked-prefill-size 8192  # long-prompt chunking
+```
+
+The SGLang server exposes an OpenAI-compatible REST API. Structured generation is available via the `regex` parameter on any `/v1/chat/completions` call:
+
+```bash
+curl http://localhost:30000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Meta-Llama-3.1-70B-Instruct",
+    "messages": [{"role": "user", "content": "Extract: John Smith, 2024-03-15"}],
+    "regex": "\\{\"name\": \".+\", \"date\": \"\\d{4}-\\d{2}-\\d{2}\"\\}"
+  }'
+```
+
+**Routing between SGLang and vLLM:** If your system has mixed workloads — structured extraction alongside open-ended chat — you can run SGLang for the extraction pool and vLLM for the chat pool, routing at the gateway level based on whether a `regex` or `json_schema` parameter is present in the request.
+
 ---
 
 ## 33b.3  TRT-LLM Deep Dive (Engine Selection Angle)
@@ -216,6 +248,40 @@ Runtime library (mlc_llm.LLMEngine)
 
 llama.cpp remains faster on Apple Silicon due to its highly-optimized Metal kernels. MLC-LLM's advantage is API consistency across targets, not raw speed.
 
+### 33b.4.1 MLC-LLM WebGPU — Browser Deployment
+
+MLC-LLM is the only inference engine with a production-quality WebGPU backend. This means running a quantised LLM entirely inside a browser tab, with no server-side compute:
+
+```javascript
+// Install: npm install @mlc-ai/web-llm
+import { CreateMLCEngine } from "@mlc-ai/web-llm";
+
+// Engine downloads the model weights into the browser's cache on first load
+// (~2 GB for a Q4 Llama-3.2-3B, stored in IndexedDB)
+const engine = await CreateMLCEngine(
+  "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+  { initProgressCallback: (progress) => console.log(progress) }
+);
+
+const reply = await engine.chat.completions.create({
+  messages: [{ role: "user", content: "Explain gradient descent." }],
+});
+console.log(reply.choices[0].message.content);
+```
+
+**What models fit in a browser session:**
+
+| Model | Quantisation | Download size | Peak GPU RAM | Works on |
+|---|---|---|---|---|
+| Llama-3.2-1B | Q4F16 | 0.7 GB | 1.2 GB | Most modern laptops |
+| Llama-3.2-3B | Q4F16 | 1.8 GB | 2.9 GB | Laptop with 4 GB GPU |
+| Phi-3-mini-4k | Q4F16 | 2.2 GB | 3.5 GB | Laptop with 4 GB GPU |
+| Llama-3.1-8B | Q4F32 | 4.3 GB | 6.0 GB | Desktop with 8 GB GPU |
+
+The model weights are cached in `IndexedDB` — subsequent page loads skip the download. WebGPU is available in Chrome 113+, Edge 113+, and Safari 18+ (with feature flag on older versions).
+
+**When to use WebGPU inference:** Privacy-sensitive applications where you cannot send user data to a server; offline-capable tools; demos that need zero server infrastructure. The throughput ceiling (10–20 tok/s on a laptop GPU) makes it unsuitable for high-throughput production use, but for single-user browser tools it is compelling.
+
 ---
 
 ## 33b.5  Ollama — The Developer UX Engine
@@ -281,7 +347,63 @@ START: I need to serve an LLM
 
 ---
 
-## 33b.7  Running the Benchmark Yourself
+## 33b.7  Production Migration Paths
+
+Most teams do not choose an engine once and stay there. The typical progression:
+
+```
+Stage 1 — Development (days 1–30)
+  Tool: Ollama
+  Why:  One command, zero configuration, instant feedback
+  Limit: Single-user; move on when concurrency > 5
+
+Stage 2 — Internal production (months 1–6)
+  Tool: vLLM
+  Why:  PagedAttention, continuous batching, LoRA, broad model support
+  Limit: Not at the hardware throughput ceiling
+
+Stage 3 — Cost-optimised production (months 6+)
+  Fork A: Structured output workloads → add SGLang pool for extraction
+  Fork B: Fixed NVIDIA hardware, throughput is primary → TRT-LLM
+  Fork C: Heterogeneous hardware or browser target → MLC-LLM
+```
+
+**Migration from Ollama → vLLM:**
+
+The API is OpenAI-compatible in both cases. The migration is a client URL change plus installing the model differently:
+
+```bash
+# Before (Ollama)
+ollama pull llama3.1:8b
+# client points to http://localhost:11434/v1
+
+# After (vLLM)
+vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
+# client points to http://localhost:8000/v1
+# Everything else (request format, streaming, function calls) is identical
+```
+
+Watch for one difference: Ollama silently truncates requests that exceed `num_ctx`; vLLM raises an error if `max_model_len` is exceeded. Set `--max-model-len` explicitly in vLLM to match the context length you tested with in Ollama.
+
+**Migration from vLLM → SGLang (structured extraction pool):**
+
+Route only the structured-output traffic to SGLang; keep vLLM for everything else. The gateway check is simple:
+
+```python
+def route_request(body: dict) -> str:
+    # SGLang if caller wants constrained output
+    if body.get("response_format") or body.get("guided_regex"):
+        return "http://sglang-server:30000"
+    return "http://vllm-server:8000"
+```
+
+**Migration from vLLM → TRT-LLM:**
+
+This is a recompile, not a reconfigure. Reserve a 4-hour maintenance window, build the engine, benchmark against your production traffic profile, then redirect the load balancer. Keep the vLLM instances running in standby for 24 hours as a rollback target.
+
+---
+
+## 33b.8  Running the Benchmark Yourself
 
 The companion code (`engine_comparison_demo.py` / `.cpp`) implements:
 

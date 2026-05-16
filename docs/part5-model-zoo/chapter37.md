@@ -417,37 +417,80 @@ Chapter 25 applied directly to a model's built-in capability.
 
 ---
 
+## 37.8.1 Nemotron Reward Models
+
+NVIDIA released Nemotron-4-340B-Reward alongside the main Nemotron-4 models. It is a 340B-parameter model with a **scalar linear head** replacing the final token embedding — it produces a single reward score rather than token logits.
+
+**Architecture difference:**
+
+```
+Standard LLM final layer:
+  Hidden state h (d_model) → Linear(d_model, vocab_size) → logits
+
+Reward model final layer:
+  Hidden state h (d_model) → Linear(d_model, 1) → scalar reward score ∈ ℝ
+```
+
+The model produces one float per input sequence. It is calibrated so a score above 4.0 indicates a high-quality assistant response on the Helpfulness, Harmlessness, and Honesty axes.
+
+**Serving reward models is prefill-only** — there is no decode step. Every request is processed exactly once. This has two implications:
+
+1. Prefill throughput (compute-bound, not memory-bound) is the metric that matters, not decode tokens/s.
+2. PagedAttention's KV eviction logic is irrelevant — sequences are processed once and discarded.
+
+```bash
+# Launch as prefill-only vLLM endpoint
+vllm serve nvidia/Nemotron-4-340B-Reward \
+    --tensor-parallel-size 8 \
+    --max-model-len 4096 \
+    --quantization fp8 \
+    --max-num-seqs 64      # larger batch saturates compute for prefill-bound workload
+```
+
+```
+WORKED EXAMPLE 37.2 — Reward Model Throughput
+──────────────────────────────────────────────────────────────────
+Model:      Nemotron-4-340B-Reward, 8× H100 SXM5, FP8
+Batch:      32 sequences, average sequence length 1,024 tokens
+GPU count:  8 × H100
+
+Prefill FLOPs per token ≈ 2 × N_params = 2 × 340B = 680 GFLOPs/token
+FLOPs for batch: 32 × 1,024 × 680G = 22.3 PFLOPs
+
+Peak H100 FP8 compute: 8 × 1,979 TFLOPS = 15.83 PFLOPS
+Time at 100% MFU: 22.3 / 15.83 = 1.41 s
+
+At realistic MFU of 50%: ~2.8 s per batch of 32
+Throughput: 32 / 2.8 ≈ 11 requests/second
+
+Use case: RLHF data labelling with 8 candidates per prompt →
+  11 req/s × 60 s = 660 scored responses/minute
+  660 / 8 candidates = 82 evaluated prompts/minute
+──────────────────────────────────────────────────────────────────
+```
+
+**Engine shape constraints (TRT-LLM):** Because reward model requests are prefill-only, the `--max-output-len` can be set to 1 (just the scalar head output). This reduces the compiled engine size and eliminates wasted KV cache allocation for decode phases that will never occur.
+
+---
+
 ## 37.9 Chapter Summary
 
-TensorRT-LLM's compilation approach yields 2–4× higher throughput than vLLM at the cost of 30–60 minute compile times and hardware/configuration lock-in. FP8 doubles compute over BF16 on H100; 2:4 structured sparsity doubles it again. Nemotron models are optimized for this full stack. Use TRT-LLM when throughput is the primary metric and the model/hardware configuration is stable.
+TensorRT-LLM's compilation approach yields 2–4× higher throughput than vLLM at the cost of 30–60 minute compile times and hardware/configuration lock-in. FP8 doubles compute over BF16 on H100; 2:4 structured sparsity doubles it again. Nemotron models — including the 340B reward model — are optimised for this full stack. Use TRT-LLM when throughput is the primary metric and the model/hardware configuration is stable; accept vLLM's flexibility for everything else.
 
 ### Where We Go Next
 
 Chapter 38 is the final chapter of the book — the Production Synthesis. We revisit the LinkedIn scenario from Chapter 1 and trace the path from $1.2M/month to $108K/month by applying every technique across all 37 chapters.
 
-
----
-
-## Chapter Summary
-
-- **Nemotron and NVIDIA's ecosystem**: Nemotron models are designed to run on TensorRT-LLM (TRT-LLM) with Triton Inference Server, leveraging NVIDIA-proprietary optimizations for H100/H200.
-- **TRT-LLM engine compilation**: TRT-LLM compiles a model into a static CUDA engine at specific batch sizes and sequence lengths; serving requires building an engine file before deployment.
-- **FP8 quantization with TRT-LLM**: `trtllm-build` with `--gemm-plugin fp8` generates FP8 weight + FP8 activation kernels for H100 Tensor Cores; typical speedup is 1.8–2.3× over BF16.
-- **2:4 structured sparsity**: H100 supports 2:4 weight sparsity natively (2 non-zero values per 4-element group); combined with FP8, this can achieve 3–4× throughput vs FP16 dense.
-- **Triton Inference Server integration**: TRT-LLM engines are served via `tritonserver` with `tensorrtllm_backend`; Triton handles batching, multi-model ensembles, and gRPC/REST APIs.
-- **Nemotron reward models**: Nemotron-4-340B-Reward is used for RLHF reward scoring; it runs as a prefill-only endpoint with a scalar linear head.
-- **Engine shape constraints**: TRT-LLM engines compiled for `maxBatchSize=64, maxInputLen=2048` fail for batch size 65 or input length 2049; padding or runtime switching is required.
-
 ---
 
 ## Self-Check Questions
 
-1. You build a TRT-LLM engine with `--max-batch-size 32 --max-input-len 2048 --max-output-len 512`. A request arrives with input length 2 200. What happens? *(Section 37.2)*
+1. You build a TRT-LLM engine with `--max-batch-size 32 --max-input-len 2048 --max-output-len 512`. A request arrives with input length 2,200. What happens, and what are your options? *(Section 37.2)*
 
-2. FP8 on H100 delivers 3 958 TOPS vs 1 979 TFLOPS for BF16. A Nemotron-8B model does 8 × 10¹⁰ FLOPs per forward pass at batch 1. Compute the theoretical minimum decode latency in FP8 vs BF16. *(Section 37.3)*
+2. FP8 on H100 delivers 1,979 TFLOPS vs 989 TFLOPS for BF16. A Nemotron-70B model does 1.4 × 10¹⁴ FLOPs per forward pass at batch 1. Compute the theoretical minimum per-token decode latency in FP8 vs BF16. *(Section 37.3)*
 
-3. 2:4 structured sparsity prunes 50% of weights. After sparsification, FP8 quantization is applied. Compute the memory footprint of a 70B model after both transformations, starting from FP16. *(Section 37.4)*
+3. 2:4 structured sparsity prunes 50% of weights. After sparsification, FP8 quantization is applied. Compute the memory footprint of a 70B model after both transformations, starting from BF16. *(Section 37.4)*
 
-4. Triton Inference Server routes requests to a TRT-LLM backend ensemble: tokeniser → LLM → de-tokeniser. The LLM backend has `dynamic_batching` enabled with `preferred_batch_size [8, 16, 32]`. A burst of 20 requests arrives. Describe the batching behavior. *(Section 37.5)*
+4. Triton Inference Server routes requests to a TRT-LLM backend ensemble: tokeniser → LLM → de-tokeniser. The LLM backend has `dynamic_batching` enabled with `preferred_batch_size [8, 16, 32]`. A burst of 20 requests arrives simultaneously. Describe the batching behavior and what happens to the remaining 4 requests. *(Section 37.7)*
 
-5. Nemotron-4-340B-Reward runs as a prefill-only endpoint. At batch size 32 with average sequence length 1 024, and assuming H100 FP8 at 3 958 TOPS, estimate the reward scoring throughput in requests/second. *(Section 37.6)*
+5. Nemotron-4-340B-Reward runs as a prefill-only endpoint. Using the worked example in §37.8.1, verify the 11 req/s estimate by computing the FLOPs for batch=32, seq=1024 against H100 FP8 peak throughput. Then compute how the throughput changes if average sequence length drops to 256 tokens. *(Section 37.8.1)*
