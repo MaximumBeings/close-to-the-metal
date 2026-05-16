@@ -5,12 +5,14 @@
 ---
 
 **What you will understand after this chapter:**
+
 - How Qwen's architecture differs from Llama (tokenizer, attention, positional encoding)
 - How to choose the right Qwen size for a given workload and budget
 - Multilingual serving challenges: tokenizer differences, language-specific batching
 - How to serve Qwen2.5/Qwen3 efficiently with vLLM and llama.cpp
 
 **What you need first:**
+
 - Chapter 3 (Tokens and Batching), Chapter 10 (Quantization), Chapter 14 (vLLM Knobs)
 
 ---

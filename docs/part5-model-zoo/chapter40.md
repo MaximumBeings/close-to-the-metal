@@ -159,6 +159,7 @@ The key properties of this design:
 ### ZMQ Socket Topology
 
 V1 uses ZeroMQ sockets because they provide:
+
 - **Backpressure-free message passing** — the scheduler can queue requests without blocking the API server
 - **Cross-process zero-copy** for large tensor metadata (via shared memory for the largest payloads)
 - **Non-blocking polling** — the scheduler can check for new requests while the GPU is executing
@@ -516,6 +517,7 @@ The scheduler parameter `--max-num-batched-tokens` controls the maximum tokens a
 ### The Scheduler Overhead Problem
 
 Every time the scheduler runs, it pays a fixed overhead:
+
 - Inspect queues: O(running_queue size)
 - Allocate KV blocks for new tokens: O(batch size)
 - Build and send ZMQ message: ~5–15μs
@@ -566,6 +568,7 @@ Multi-Step Worker Loop (conceptual)
 ### Choosing K
 
 The optimal K depends on:
+
 - **Target latency SLO**: Higher K means the scheduler sees outputs less frequently, increasing P99 inter-token latency by up to K × step_time
 - **Decode batch size**: At small batch sizes (< 16), the GPU is under-utilized per step; K can be large. At large batch sizes, each step saturates the GPU; K=1 may already be efficient
 - **Stop condition frequency**: If many sequences emit EOS within K steps, the actual batch size collapses mid-flight, wasting the reserved KV blocks

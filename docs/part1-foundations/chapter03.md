@@ -60,6 +60,7 @@ Vocabulary sizes vary:
 | Qwen2                | tiktoken (BPE)    | 151,936         |
 
 A larger vocabulary means:
+
 - Longer strings are covered by single tokens → **shorter sequences** → faster inference, cheaper KV cache.
 - The embedding table and final LM-head projection matrix are larger → more VRAM overhead.
 

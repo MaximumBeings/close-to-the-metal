@@ -75,6 +75,7 @@ MSE = E[(x − Q(x))²]
 ```
 
 The optimality conditions are:
+
 - **Centroid condition**: cᵢ = E[x | tᵢ < x ≤ t_{i+1}] (centroid is the conditional mean)
 - **Boundary condition**: tᵢ = (cᵢ₋₁ + cᵢ) / 2 (boundary is the midpoint between adjacent centroids)
 

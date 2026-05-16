@@ -122,6 +122,7 @@ The answer is **yes**.
 ### 5.3.2 Online Softmax: The Intuition
 
 We maintain two quantities:
+
 - **m**: the maximum value seen so far
 - **l**: the sum `Σᵢ exp(xᵢ - m)` for all elements seen so far
 
@@ -289,6 +290,7 @@ softmax values (= exp(xᵢ-6) / 1.5780):
 ### 5.3.6 Proof of Correctness by Induction
 
 We prove: after processing `x₁, ..., xₙ`:
+
 - **(a)** `mₙ = max(x₁, ..., xₙ)` — the true global maximum
 - **(b)** `lₙ = Σᵢ₌₁ᴺ exp(xᵢ - mₙ)` — the true sum
 

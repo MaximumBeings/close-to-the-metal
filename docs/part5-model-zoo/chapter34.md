@@ -5,12 +5,14 @@
 ---
 
 **What you will understand after this chapter:**
+
 - How Multi-head Latent Attention (MLA) compresses the KV cache by 5–13× without quality loss
 - How DeepSeek's 256-expert MoE routes tokens and why only 2 experts fire per token
 - Why FP8 training/inference is practical now and what it gains on H100/H200
 - How to serve DeepSeek-V2/V3/R1 with vLLM and llama.cpp
 
 **What you need first:**
+
 - Chapter 4 (Attention Mechanics) — KV cache structure and GQA
 - Chapter 10 (Quantization) — FP8 basics
 - Chapter 15 (Multi-GPU Serving) — tensor parallelism
@@ -198,6 +200,7 @@ For a 70B model: $d_{\text{model}} = 8192$, $d_{\text{ffn}} = 28{,}672$ — the 
 ```
 
 DeepSeek-V3 specifics:
+
 - **256 routed experts** + **1 shared expert** (always active)
 - **Top-2 routing**: each token activates exactly 2 of the 256 routed experts
 - **Expert size**: each expert is a small FFN (~1/4 the size of a standard 7B FFN)

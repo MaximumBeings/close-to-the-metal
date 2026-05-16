@@ -837,15 +837,20 @@ the controller handle everything below.
 
 - **KubeRay** — Kubernetes operator that manages Ray clusters via `RayCluster` and `RayService`
   CRDs, enabling distributed vLLM workloads on Kubernetes.
+
 - **llm.d** — Kubernetes CRD standard for declarative LLM serving; `LLMDeployment` expresses
   model, hardware, SLA, and disaggregation requirements in a single manifest.
+
 - **RayService** — KubeRay CRD that wraps a RayCluster with zero-downtime upgrade semantics
   and traffic shifting.
+
 - **ServiceMonitor** — Prometheus Operator CRD that tells Prometheus which pods to scrape.
 - **terminationGracePeriodSeconds** — Kubernetes setting that controls how long a pod has to
   drain in-flight requests before being forcibly killed.
+
 - **HPA (Horizontal Pod Autoscaler)** — Kubernetes controller that adjusts replica count based
   on observed metrics; for LLM serving, driven by custom metrics via the Prometheus Adapter.
+
 - **Node affinity** — Kubernetes scheduling constraint that pins pods to nodes matching
   specified labels; used to route prefill workers to compute-dense GPUs and decode workers
   to bandwidth-wide GPUs.

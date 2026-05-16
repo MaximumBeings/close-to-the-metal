@@ -20,8 +20,10 @@ lost.  This chapter gives you the tools to reason precisely about that trade-off
 - How GGUF's block-wise quantization schemes (Q4_K_M, Q5_K_S, Q8_0) work at
   the bit level — including the exact layout of scales, super-scales, and
   minimums used by the `_K` variants.
+
 - How vLLM's GPTQ, AWQ, and FP8 paths quantize, where they store the
   calibration data, and what the runtime dequantization path looks like.
+
 - How KV cache quantization (INT8/FP8) differs from weight quantization and
   what it costs in accuracy.
 
@@ -29,10 +31,13 @@ By the end of this chapter you will be able to:
 
 - Compute the exact bits-per-weight and memory footprint of any GGUF quant
   type for a given model.
+
 - Explain the difference between round-to-nearest quantization, GPTQ
   (Hessian-weighted), and AWQ (activation-aware).
+
 - Predict the latency improvement from a given quantization scheme using the
   roofline model from Chapter 2.
+
 - Describe the accuracy degradation profile of each scheme and when to choose
   which.
 
@@ -919,6 +924,7 @@ python convert_hf_to_gguf.py meta-llama/Meta-Llama-3-8B --outtype f16
 ## 10.10 Code Listing  `[FOUNDATIONAL]`
 
 See `code/chapter_10/quantization_demo.py` for:
+
 - FP16/BF16/INT8/INT4 quantization error curves across weight distributions
 - GGUF Q8_0, Q4_0, and Q4_K block packing/unpacking simulation
 - GPTQ error propagation (simplified, without full Hessian)

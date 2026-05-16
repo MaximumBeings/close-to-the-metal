@@ -58,6 +58,7 @@ Is the median prompt length > 4 K tokens?
 ```
 
 **Quick TTFT checklist**:
+
 - [ ] Chunked prefill enabled for prompts > 4 K tokens
 - [ ] Prefix caching enabled if system prompt is shared
 - [ ] `--max-num-batched-tokens` tuned to fill GPU
@@ -331,6 +332,7 @@ The 20 most important vLLM engine arguments. All flags are passed to `vllm serve
 | `--disable-log-stats` | `False` | Suppress per-step statistics logging | Enable in production to reduce logging overhead (saves ~2% throughput) | Ch 16 |
 
 **Notes**:
+
 - vLLM V1 enables chunked prefill and prefix caching by default. V0 does not.
 - `--quantization fp8` requires H100 or newer; on A100, use `awq` or `gptq`.
 - `--tensor-parallel-size` must evenly divide `num_attention_heads` and `num_key_value_heads`.

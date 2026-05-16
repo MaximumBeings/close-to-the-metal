@@ -643,6 +643,7 @@ curl http://localhost:8080/completion \
 ### 28.3.3  Pre-built Grammars
 
 llama.cpp ships several grammars in `grammars/`:
+
 - `json.gbnf` — valid JSON
 - `json_arr.gbnf` — JSON array at top level
 - `list.gbnf` — newline-separated list
@@ -696,10 +697,12 @@ HTTP listener thread
 ```
 
 The inference loop runs a **continuous batching** scheduler:
+
 - Requests enter the queue as they arrive.
 - Each iteration, the scheduler assembles a batch from:
   - New prefill tokens from the head of the queue
   - One decode token per active generation slot
+
 - A single `llama_decode` call processes the combined batch.
 - Finished sequences are evicted; new ones fill their slots.
 
@@ -864,10 +867,13 @@ When llama.cpp loads a GGUF file, the default path is `mmap`:
 ```
 
 Benefits of mmap:
+
 - **Fast startup**: the OS does not read the entire file on load; pages are faulted in
   on first access.
+
 - **Shared memory**: if two processes load the same model, the OS shares the physical
   pages (no duplication in RAM).
+
 - **Graceful swap**: if the system runs low on RAM, the OS can evict model pages to disk
   and reload them on demand without explicit file I/O.
 
@@ -2055,8 +2061,10 @@ target_include_directories(my_llm_app PRIVATE ${llama_SOURCE_DIR}/include)
 ### 28.8.2  Thread Safety
 
 The llama.cpp API has well-defined thread safety rules:
+
 - `llama_model` is **read-only after loading** — multiple threads can call model
   query functions concurrently.
+
 - `llama_context` is **not thread-safe** — one thread at a time per context.
 - Multiple `llama_context` objects sharing one `llama_model` are safe to use from
   different threads simultaneously.

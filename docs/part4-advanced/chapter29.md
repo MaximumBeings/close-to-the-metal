@@ -162,6 +162,7 @@ LLaVA (Large Language and Vision Assistant) is the reference architecture for mo
 open VLMs.
 
 **LLaVA-1.5:**
+
 - Vision encoder: CLIP ViT-L/14@336
 - Projection: 2-layer MLP
 - LLM: Vicuna-7B or Vicuna-13B
@@ -169,6 +170,7 @@ open VLMs.
 - Training: instruction-tune only (LLM + projection; ViT frozen)
 
 **LLaVA-1.6 (LLaVA-NeXT):**
+
 - Vision encoder: CLIP ViT-L/14@336 (unchanged)
 - Projection: MLP with pixel shuffle
 - LLM: Mistral-7B, Llama-3-8B, or Llama-3-70B
@@ -186,6 +188,7 @@ InternVL (International Vision-Language Model) pushes the vision encoder to 6B p
 while keeping the language model swappable.
 
 **InternVL2-8B:**
+
 - Vision encoder: InternViT-300M (8B variant uses 6B encoder)
 - Projection: MLP
 - LLM: InternLM2-8B (based on Llama architecture)
@@ -213,6 +216,7 @@ Qwen2-VL-7B handles images from 28×28 to 2048×2048 natively.
 ### 29.3.4  MiniCPM-V
 
 MiniCPM-V 2.6 (8B total) achieves near-GPT-4V performance at 8B scale through:
+
 - Dual-vision encoder: SigLIP + compression via a lightweight Q-Former
 - Token compression: 64 tokens per slice (vs. 576 for raw CLIP)
 - Slice strategy: any aspect ratio → 1–9 slices + thumbnail
@@ -545,14 +549,17 @@ python -m vllm.entrypoints.openai.api_server \
 ```
 
 **Limitations:**
+
 - Applies to prefix-injection models (LLaVA, Qwen-VL, Pixtral) only — not Llama 3.2
   Vision's cross-attention architecture (separate KV buffer per request)
+
 - The image must appear at the beginning of the prompt (prefix position) to be cacheable
 - Video tokens benefit similarly: a 60-frame video reused across 10 questions incurs
   prefill cost once, not ten times
 
 **Measured impact in production:**
 For a document QA workload (same PDF page, 20 different questions):
+
 - Without visual prefix cache: 20 × 1024 token prefill = 20,480 tokens/batch
 - With visual prefix cache: 1024 + 19 × 50 (question only) = 2,000 tokens/batch
 - **10× reduction in prefill compute** for repeated-image workloads
@@ -1642,6 +1649,7 @@ Use a padding strategy (letterbox) or dynamic tiling (LLaVA-1.6, InternVL2) inst
 
 The CLIP vision encoder in llama.cpp LLaVA is almost always F16 (the `mmproj` file).
 If you quantize the LLM to Q4_K_M but serve the F16 CLIP, the memory split is:
+
 - LLM: ~4.4 GB (Q4_K_M)
 - CLIP: ~0.6 GB (F16)
 

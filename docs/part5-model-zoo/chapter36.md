@@ -5,12 +5,14 @@
 ---
 
 **What you will understand after this chapter:**
+
 - Why standard KV cache management breaks down beyond 32K tokens
 - How Moon-Cache implements hierarchical HBM → DRAM → NVMe KV storage
 - The economics of long-context serving: cost per million tokens at 128K vs. 1M
 - How to configure vLLM for 128K+ contexts in production
 
 **What you need first:**
+
 - Chapter 6 (PagedAttention), Chapter 11 (Chunked Prefill), Chapter 18 (Disaggregated Serving)
 
 ---
@@ -37,6 +39,7 @@ A standard vLLM deployment runs fine at context lengths up to 32K tokens. Beyond
 ```
 
 For a 70B BF16 model:
+
 - At 128K context: KV = 40.9 GB per sequence (just KV, before weights)
 - At 1M context:   KV = 320 GB per sequence — exceeds most GPU clusters
 
@@ -293,6 +296,7 @@ The availability of 128K+ models does not eliminate RAG. The choice is architect
 ```
 
 **Rule of thumb for production:**
+
 - < 100 pages of documents: long-context model (simpler, no retrieval errors)
 - 100–1,000 pages: hybrid — retrieve top-20 chunks, stuff into 32K context
 - > 1,000 pages: RAG required (no context window handles this economically)

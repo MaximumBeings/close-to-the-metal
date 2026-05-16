@@ -5,12 +5,14 @@
 ---
 
 **What you will understand after this chapter:**
+
 - What makes Nemotron architecturally suited for NVIDIA hardware
 - How TensorRT-LLM compiles a model into an execution engine
 - FP8 and 2:4 structured sparsity — what the hardware does and what you gain
 - Throughput comparison: TRT-LLM vs. vLLM vs. llama.cpp for the same model
 
 **What you need first:**
+
 - Appendix J (CUDA C++), Chapter 10 (Quantization), Chapter 15 (Multi-GPU)
 
 ---
@@ -349,6 +351,7 @@ parameters {
 `[OPERATIONS]`
 
 TRT-LLM engines must be recompiled when:
+
 - The model weights change (new fine-tune or post-training update)
 - You change precision (BF16 → FP8)
 - You change tensor parallelism degree
@@ -406,6 +409,7 @@ messages_fast = [
 **Serving implications for thinking mode:**
 The 253B model in thinking mode generates 3,000–15,000 token reasoning traces.
 At 4× H100 (TP=4) with FP8:
+
 - Non-thinking output: ~800 tok/s aggregate throughput
 - Thinking output: ~800 tok/s aggregate throughput
   (throughput is the same per token — but 15K output tokens cost 15× more)

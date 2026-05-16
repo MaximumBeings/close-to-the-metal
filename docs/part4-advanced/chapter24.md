@@ -806,18 +806,25 @@ and match thinking budget to task difficulty to avoid paying for unnecessary com
 
 - **RLHF** — Reinforcement Learning from Human Feedback; three-stage pipeline (SFT → reward
   model → PPO) that produces instruction-following models.
+
 - **PPO** — Proximal Policy optimization; the RL algorithm in RLHF; uses clipped surrogate
   objectives and requires four simultaneous model copies.
+
 - **GRPO** — Group Relative Policy optimization; DeepSeek's PPO alternative that eliminates
   the critic by normalising rewards within a group of sampled responses.
+
 - **ORM / PRM** — Outcome / Process Reward Model; ORM scores final answers only; PRM scores
   each reasoning step; PRM provides denser signal but requires step annotations.
+
 - **Cold start** — the initial SFT phase in DeepSeek-R1's pipeline that teaches the model the
   `<think>...</think>` format before RL begins.
+
 - **Thinking budget** — a configurable cap on reasoning tokens; bounds KV cache growth and
   makes latency predictable; supported natively in Qwen3 and via prompt engineering in R1.
+
 - **Test-time compute scaling** — the empirical finding that more thinking tokens improve
   accuracy on hard tasks following a power law; the central motivation for the o1/o3 class.
+
 - **Distillation (reasoning)** — training a smaller model on verified reasoning traces from a
   larger RL-trained model; the smaller model learns to mimic reasoning without rediscovering it.
 

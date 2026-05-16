@@ -103,6 +103,7 @@ The cascade adds latency for escalated requests (two or three model calls instea
 ### 31.3.1 Expected Cost of a Two-Stage Cascade
 
 Let:
+
 - `p₁` = probability request is answered at stage 1 (hit rate)
 - `c₁`, `c₂` = cost per request at stage 1 and 2
 - `l₁`, `l₂` = latency per request at stage 1 and 2
@@ -182,6 +183,7 @@ An online estimator evaluates the small model's actual response before deciding 
 ### 31.4.3 Calibration
 
 A router that is wrong in the wrong direction destroys value:
+
 - **False negative (route-to-large when small was sufficient):** wastes money, no quality impact.
 - **False positive (route-to-small when large was needed):** saves money, hurts quality.
 
@@ -329,6 +331,7 @@ User Device
 ```
 
 The routing decision is made on-device, before any network call:
+
 - Classify query locally (fast 0.5B classifier or rule-based triage)
 - If `route_to_cloud=True`, send to API with full prompt
 - Otherwise, generate locally with llama.cpp
@@ -436,6 +439,7 @@ Consider a customer support system with three model tiers:
 | Large | Llama-3.1-70B | H100 × 4 | 400 ms | $0.0015 |
 
 **Traffic analysis (10M requests/day):**
+
 - 55% are FAQ lookups (order status, return policy, store hours) → small model
 - 25% are complaint resolution requiring empathy + policy knowledge → medium model
 - 15% are complex billing disputes, legal escalations → large model
@@ -451,6 +455,7 @@ DEFAULT:                                          → medium
 ```
 
 **Cost comparison:**
+
 - No routing (all large): 10M × 0.5k tokens × $0.0015/1k = $7,500/day
 - With routing: 5.5M × $0.05 + 2.5M × $0.15 + 2.0M × $0.75 = $275 + $375 + $1,500 = **$2,150/day** (71% reduction)
 

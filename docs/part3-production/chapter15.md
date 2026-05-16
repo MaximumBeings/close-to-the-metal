@@ -548,6 +548,7 @@ enable_prefix_caching: true
 ```
 
 Why TP=4? The 8B model fits on a single A100-40 (16 GB weights), but TP=4:
+
 - Cuts decode latency 4× (bandwidth-bound: 4 GPUs read weights in parallel)
 - Grows KV pool to ~128 GB total (4 × ~32 GB) → 1M+ tokens of context
 - Gives headroom for 256 concurrent sessions at 4K context each
@@ -664,6 +665,7 @@ The shared expert runs locally on every GPU — no all-to-all needed for it. Onl
 ### Worked Example: Token Distribution Variance
 
 Setup:
+
 - 256 experts, EP=8 (32 experts/GPU), top-2 routing, batch=64 tokens
 
 Expected tokens per expert (uniform routing):

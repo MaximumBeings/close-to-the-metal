@@ -199,6 +199,7 @@ Choosing a quantization level is a three-way trade-off between model quality, fi
 | 4 GB | Phi-3-mini (3.8B) | Q4_K_M | 2.2 GB | 6–9 tok/s | Strong small model |
 
 **A practical memory budget example:** Pi 5 8 GB, running Qwen2.5-7B-Q4_K_M, 4096 token context:
+
 - OS and background services: ~500 MB
 - Model weights (Q4_K_M 7B): ~4.4 GB
 - KV cache (2 × 28 layers × 32 heads × 128 dim × 4096 ctx × 2 bytes): ~1.5 GB
@@ -227,6 +228,7 @@ watch -n 2 "vcgencmd measure_temp && vcgencmd get_throttled"
 ```
 
 **Cooling recommendations:**
+
 - *Passive heatsink only:* Reaches throttle in 5–10 minutes. Acceptable only for occasional short inference sessions.
 - *Official Pi 5 Active Cooler (fan + heatsink):* Maintains temperature below 70°C during sustained inference. Minimum viable for a production deployment.
 - *Enclosed case with fan (Argon NEO 5, Pimoroni NVMe Base):* Maintains 60–65°C. Recommended for an always-on inference server.
@@ -533,6 +535,7 @@ KV_cache = 2 × num_layers × num_kv_heads × head_dim × ctx_size × bytes_per_
 ```
 
 For Orin Nano 8 GB running 7B Q4_K_M at 8K context:
+
 - OS: 1.5 GB, weights: 4.4 GB, KV cache: 4.3 GB, buffers: 0.5 GB → **10.7 GB total: doesn't fit**
 
 At 4K context: KV cache drops to ~2.1 GB → **8.5 GB total: barely fits**
@@ -585,6 +588,7 @@ tegrastats --interval 500   # print every 500ms
 ```
 
 Reading the output:
+
 - `RAM 3842/7773MB` — using 3.8 GB of 7.8 GB total (the rest is reserved by the OS for GPU and other hardware)
 - `lfb 4x2MB` — largest free block is 4 contiguous 2 MB pages — low fragmentation is good
 - `GR3D_FREQ 85%` — GPU is at 85% utilisation — inference is GPU-bound (ideal)
@@ -606,6 +610,7 @@ sudo jtop
 Jetson modules generate significantly more heat than Raspberry Pi, proportional to their higher compute throughput. An AGX Orin running at 60W produces as much heat as a demanding desktop CPU.
 
 **Temperature thresholds for all Orin modules:**
+
 - Safe sustained: below 80°C
 - Throttle onset: 85°C (clock speed reduction begins)
 - Hard shutdown: 95°C (OS initiates immediate shutdown to protect hardware)
@@ -771,6 +776,7 @@ If mean GPU utilisation is below 70% during the benchmark, something is limiting
 ## N.5 Choosing the Right Platform
 
 **Choose Raspberry Pi 5 when:**
+
 - Budget is the primary constraint and $80 is meaningful
 - The use case is single-user and interactive latency is not critical (home automation, overnight batch jobs)
 - You need broad Linux compatibility with minimal toolchain complexity
@@ -778,6 +784,7 @@ If mean GPU utilisation is below 70% during the benchmark, something is limiting
 - Power consumption must stay under 12W
 
 **Choose Jetson Orin Nano 8GB when:**
+
 - You need real GPU-accelerated CUDA inference (15–22 tok/s for 7B)
 - The application serves 2–4 concurrent users
 - Flash Attention and cuBLAS optimisations matter for your workload
@@ -785,6 +792,7 @@ If mean GPU utilisation is below 70% during the benchmark, something is limiting
 - You can tolerate JetPack setup complexity (it is a one-time cost)
 
 **Choose Jetson AGX Orin when:**
+
 - 13B–70B model serving is required at the edge
 - Production multi-user deployment (8–16 concurrent requests)
 - TensorRT-LLM optimization is worth the additional build complexity

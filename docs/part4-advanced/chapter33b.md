@@ -230,11 +230,13 @@ Runtime library (mlc_llm.LLMEngine)
 ```
 
 **Where MLC-LLM wins:**
+
 - Apple Silicon: 60–80% of llama.cpp throughput with a cleaner Python API
 - Browser deployment: the only engine with a production-quality WebGPU backend
 - Heterogeneous fleets: one codebase compiling for NVIDIA + AMD + Apple
 
 **Where it loses:**
+
 - Peak NVIDIA throughput: TRT-LLM's hand-tuned CUDA kernels are faster
 - Ecosystem: smaller community, fewer pre-compiled models
 

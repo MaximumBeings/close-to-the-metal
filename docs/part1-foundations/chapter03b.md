@@ -99,6 +99,7 @@ FFN(x) = W₂ · activation(W₁ · x)
 ```
 
 Where:
+
 - `x`: input `[d_model]`
 - `W₁`: up-projection `[d_model → d_ff]`  
 - `W₂`: down-projection `[d_ff → d_model]`
@@ -216,6 +217,7 @@ MoE_FFN(x) = Σᵢ₌₁ᵏ router_score(x, i) · FFN_i(x)
 ```
 
 Where:
+
 - `N` total experts (e.g., 64 for DeepSeek-V3's shared+routed design)
 - `k` active experts per token (e.g., top-2 or top-8)
 - Each `FFN_i` is a full-sized feed-forward network

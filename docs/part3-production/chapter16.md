@@ -31,6 +31,7 @@ TTFT measures how long a user waits before the response begins. It is dominated 
 | Batch / offline | No SLA | — |
 
 **What degrades TTFT:**
+
 - Long prompts with chunked prefill disabled (prefill starvation)
 - High `max_num_seqs` competing for the token budget
 - KV cache full → new requests queued (admission backpressure)
@@ -53,6 +54,7 @@ ITL measures the cadence of streaming output. It is determined almost entirely b
 | RTX 4090 | 7B Q4 | 20–50 ms |
 
 **ITL spikes indicate:**
+
 - Chunked prefill chunks being processed (new arrivals interrupting decode)
 - KV block eviction (paging to CPU)
 - Thermal throttle (sustained decode causes GPU temperature rise)

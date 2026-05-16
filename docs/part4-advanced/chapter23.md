@@ -42,6 +42,7 @@ This is not a software limitation — it is intrinsic to the conditional structu
 ### 23.1.2  The Cost Model
 
 During decode, each forward pass:
+
 - Reads the full model weight set from HBM: ~W bytes (16 GB for 8B BF16)
 - Reads the KV cache for all prior tokens: ~2 × n_layers × n_kv_heads × head_dim × seq_len × 2 bytes
 - Performs one matrix-vector multiply per layer (batch=1, single token query)
@@ -241,6 +242,7 @@ With speculation width K and acceptance rate α:
 ### 23.3.3  Speedup Formula
 
 Define:
+
 - c = cost ratio = (cost of one draft forward pass) / (cost of one target forward pass)
 - K = speculation width
 - α = acceptance rate
@@ -513,6 +515,7 @@ The simplest possible self-speculation: use an ngram language model built from t
 ```
 
 Ngram speculation is extremely cheap (no model inference for draft), but α is workload-dependent:
+
 - High α when generation heavily copies from context (RAG, summarization)
 - Near-zero when generation is creative or diverges from context
 
@@ -555,6 +558,7 @@ vllm serve meta-llama/Llama-3.1-70B-Instruct \
 ```
 
 Key flags:
+
 - `--speculative-model`: path or HuggingFace ID of the draft model
 - `--num-speculative-tokens`: K (speculation width)
 - `--speculative-draft-tensor-parallel-size`: TP degree for the draft model (usually 1)
@@ -640,6 +644,7 @@ This KV overhead reduces the number of concurrent requests that fit in HBM. For 
 ```
 
 Rule of thumb:
+
 - Enable speculative decoding when: batch size is small (< 8), latency matters more than throughput, α is expected high (code/structured output)
 - Disable speculative decoding when: running high-throughput batch jobs, batch size is large (> 32), generation is creative/high-temperature
 
@@ -1532,6 +1537,7 @@ Medusa decode:
 Each Medusa head is a 2-layer MLP (~2M parameters for a 7B model). The heads are trained jointly with the base model (or fine-tuned on top of a frozen base).
 
 **Key properties:**
+
 - No separate draft model process
 - Single forward pass produces K+1 candidate tokens
 - Acceptance: tree attention verifies all K draft tokens in one base model forward pass

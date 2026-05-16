@@ -5,6 +5,7 @@
 ---
 
 **What you will understand by the end of this chapter:**
+
 - The difference between GPU memory (HBM), system RAM (DRAM), and Apple Silicon's unified memory — and why bandwidth is the number that matters most
 - How to calculate exactly how many bytes a model's weights consume at any precision (FP32, FP16, BF16, INT8, INT4)
 - The KV cache formula — what it is, where it comes from, and how to compute it for any model
@@ -12,6 +13,7 @@
 - How llama.cpp loads models differently from vLLM, and how partial GPU offload works
 
 **What you need to know first:**
+
 - Chapter 1 (the autoregressive constraint and why inference is memory-bandwidth-bound)
 - You should know that computers have memory — you do not need to know hardware details yet; this chapter introduces them
 

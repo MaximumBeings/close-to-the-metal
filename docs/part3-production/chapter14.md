@@ -33,6 +33,7 @@ can diagnose any vLLM performance problem from first principles.
 - Chapter 6 (block pool and KV cache — what block_size controls).
 - Chapter 7 (the scheduler — how max_num_seqs and max_num_batched_tokens
   gate admission).
+
 - Chapter 11 (chunked prefill and prefix caching).
 
 ---
@@ -848,12 +849,14 @@ tensor_parallel_size: 1
 ## 14.13 Code Listing  `[FOUNDATIONAL]`
 
 See `code/chapter_14/knobs_demo.py` for:
+
 - Memory budget calculator: given hardware + model, output max_num_seqs
 - Parameter interaction checker: detect common misconfiguration patterns
 - YAML config generator for the three workload archetypes
 - Throughput and TTFT estimator: model the effect of each parameter change
 
 See `code/chapter_14/knobs_demo.cpp` for:
+
 - llama.cpp CLI flag → `llama_context_params` struct field annotated mapper
 - Memory budget calculator for llama.cpp (`--parallel × --ctx-size × KV`)
 - KV pool sizing comparison: vLLM dynamic pool vs. llama.cpp static buffers

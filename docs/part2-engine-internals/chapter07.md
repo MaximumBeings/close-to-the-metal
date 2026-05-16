@@ -31,6 +31,7 @@ By the end of this chapter you will be able to:
 - Distinguish the two preemption policies and choose between them.
 - Understand `max_num_seqs`, `max_num_batched_tokens`, and `max_model_len` as
   the three dials that govern scheduler behavior.
+
 - Build a priority-aware multi-request scheduler for llama.cpp from scratch.
 
 ---
@@ -589,6 +590,7 @@ Production deployments often serve two classes of traffic simultaneously:
 
 - **Latency-sensitive** (interactive chat): TTFT target < 500 ms, inter-token
   latency < 50 ms.
+
 - **Best-effort** (batch summarization, offline indexing): throughput matters,
   latency is flexible.
 
@@ -1248,8 +1250,10 @@ print("\nDone.")
 - **Chapter 8** (Startup and Initialization) describes how the block pool size
   used by the scheduler is determined: the dummy forward pass measures peak
   activation memory exactly, and the remainder is carved into KV blocks.
+
 - **Chapter 9** (The Forward Pass) explains what happens inside `execute_model`
   between Steps 6 and 7 of the scheduling loop.
+
 - **Chapter 11** (Speculative Decoding) adds a *draft* sequence to every
   SequenceGroup; the scheduler must budget for draft + verify tokens together.
 
@@ -1259,10 +1263,13 @@ print("\nDone.")
 
 - Yu et al., "Orca: A Distributed Serving System," OSDI 2022.
   *(Continuous batching + iteration-level scheduling.)*
+
 - Kwon et al., "Efficient Memory Management with PagedAttention," SOSP 2023.
   *(Scheduler + block manager co-design.)*
+
 - Agrawal et al., "SARATHI-Serve: Chunked Prefill for LLM Inference," 2024.
   *(Chunked prefill analysis.)*
+
 - vLLM source: `vllm/core/scheduler.py`.
 
 ---

@@ -436,6 +436,7 @@ Break-even utilization (Reserved vs. On-demand):
 
 This breakeven calculation is why reserved instances are appropriate only for
 **predictable, high-utilization** workloads. An LLM serving cluster with:
+
 - Stable 24/7 traffic (SaaS product, B2B API) → reserve
 - Batch jobs (nightly data processing) → spot
 - Experimental / development workloads → on-demand or spot
@@ -564,14 +565,19 @@ and benchmark rankings are inputs to that calculation, not ends in themselves.
 
 - **$/1M output tokens** — the canonical LLM serving cost metric; normalizes across hardware,
   engines, and model sizes.
+
 - **Spot instance** — cloud VM that can be reclaimed with 2-minute warning; 30–75% cheaper
   than on-demand; suitable for stateless decode workers with graceful drain.
+
 - **GPU utilization** — fraction of time tensor cores are active; low utilization means high
   cost per token; continuous batching is the primary lever for raising it.
+
 - **Amortised hardware cost** — capital expenditure divided by expected lifetime usage hours;
   used to compare owned hardware against cloud rental.
+
 - **Breakeven volume** — monthly token volume at which owned hardware becomes cheaper than
   cloud API; depends on model quality tier, hardware cost, and utilization assumptions.
+
 - **Drain** — the preferred spot-interruption response: stop accepting requests, complete
   in-flight work, then terminate; simpler and more reliable than checkpointing KV state.
 

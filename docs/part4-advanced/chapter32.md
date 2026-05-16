@@ -26,6 +26,7 @@ The debugging workflow always follows the same arc: **observe → isolate → re
 ### 32.2.1 NaN Propagation
 
 A NaN (Not a Number) in a forward pass is caused by one of three things:
+
 - Division by zero (softmax denominator collapses, LayerNorm denominator collapses)
 - 0 × ∞ in attention (zero attention weight multiplied by a very large value)
 - Overflow followed by subtraction (e.g., fp16 overflow → Inf - Inf = NaN)
@@ -127,6 +128,7 @@ In PagedAttention (vLLM), the KV cache is allocated in pages. Corruption occurs 
 3. The block manager assigns the wrong block offset, causing one sequence to write into another sequence's KV.
 
 Symptoms of KV cache corruption:
+
 - Sudden incoherence mid-generation ("the user asked about weather, the model starts discussing chemistry")
 - Repeated token loops that weren't present in smaller batches
 - Non-deterministic output given identical inputs
@@ -253,6 +255,7 @@ A system prompt from one request appearing in the output of another request. Mec
 ### 32.4.3 Repetition Loops
 
 The model enters a repetition loop (producing the same token or phrase indefinitely). This happens when:
+
 - Temperature is too low for a model that expects temperature > 0 (the greedy path gets stuck in a local attractor)
 - Repetition penalty is misconfigured (too high suppresses all variation; not applied at all allows loops)
 - The context is truncated incorrectly, causing the model to "forget" what it just said
@@ -391,6 +394,7 @@ export NCCL_DEBUG=INFO   # verbose NCCL logging
 ```
 
 **Common causes:**
+
 - Rank 0 processes the input while other ranks wait on a different codepath (rank-conditional logic)
 - One rank hits an OOM and exits, leaving others stuck in collective
 

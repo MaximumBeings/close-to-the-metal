@@ -83,6 +83,7 @@ paging**:
 - Physical RAM is divided into fixed-size **frames** (typically 4 KB).
 - Each process sees a flat virtual address space; the OS maps virtual **pages**
   to physical frames through a **page table**.
+
 - Frames are allocated on demand and can be scattered anywhere in physical RAM.
 - A process that needs 10 MB does not require 10 *contiguous* MB of physical
   RAM — it needs 2560 frames that can live anywhere.
@@ -954,6 +955,7 @@ during long prefills.  Setting it above 0.95 risks OOM during prefill spikes.
 
 Default: off (as of vLLM 0.4).  Enables the block-hash cache.  Almost always
 worth enabling when:
+
 - A fixed system prompt is used.
 - RAG contexts are prepended.
 - Chat history grows across turns.
@@ -1398,11 +1400,14 @@ same block manager, demonstrating:
 
 - **Chapter 7** (Continuous Batching Scheduler) uses the block manager's
   `can_allocate` / `can_append_slot` APIs as its core decision predicates.
+
 - **Chapter 9** (Speculative Decoding) needs CoW to cheaply fork the KV state
   for draft-model rollouts.
+
 - **Chapter 13** (Disaggregated Prefill) moves the prefill computation to a
   separate machine; PagedAttention's block-level granularity makes the resulting
   KV transfer tractable.
+
 - **Chapter 15** (Long-context Systems) relies on prefix caching to make
   repeated long-context queries affordable.
 
@@ -1412,9 +1417,11 @@ same block manager, demonstrating:
 
 - Kwon et al., "Efficient Memory Management for Large Language Model Serving
   with PagedAttention," SOSP 2023.  *(The primary source.)*
+
 - vLLM source: `vllm/core/block_manager.py`, `vllm/core/scheduler.py`.
 - Orca: Yu et al., "Orca: A Distributed Serving System for Transformer-Based
   Generative Models," OSDI 2022.
+
 - Sheng et al., "FlexGen: High-Throughput Generative Inference of Large
   Language Models with a Single GPU," ICML 2023.  *(CPU offloading.)*
 

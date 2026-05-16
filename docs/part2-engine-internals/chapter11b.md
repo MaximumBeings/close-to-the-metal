@@ -9,16 +9,22 @@
 
 - Why a full KV cache is not a theoretical edge case but the default state
   at 128K+ context windows.
+
 - The **attention sink** phenomenon: why the first few tokens receive
   disproportionate attention mass and must never be evicted.
+
 - **H2O (Heavy Hitter Oracle)**: accumulate attention scores, keep the
   tokens that matter, silently drop the rest.
+
 - **SnapKV**: compress a prompt's KV cache by clustering similar keys into
   pooled representatives.
+
 - **Token merging / CaM**: merge near-duplicate KV pairs before they
   enter the cache, reducing the cache footprint at write time.
+
 - The accuracy-memory tradeoff curve: how much budget is actually needed
   to stay within 1 % perplexity degradation.
+
 - Where eviction hooks into vLLM's `BlockSpaceManager` and how llama.cpp's
   `llama_kv_cache_seq_rm` implements sliding-window eviction.
 
@@ -26,6 +32,7 @@
 
 - **Chapter 6** — PagedAttention and the block manager (the physical KV
   cache layout, block table, eviction vocabulary).
+
 - **Chapter 11** — Prefill and chunked prefill (how the cache gets filled
   in the first place, and why 128 K context requests fill it quickly).
 
@@ -305,6 +312,7 @@ accumulated score (e.g., exponentially decaying sum)?
 
 - **Total** accumulated score: biased toward early tokens that have been
   "in play" for many decode steps.  Often dominated by sink tokens.
+
 - **Decayed** accumulated score: more responsive to recent attention patterns;
   better for tasks where the model's focus shifts across the sequence.
 

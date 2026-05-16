@@ -5,6 +5,7 @@
 ---
 
 **What you will understand after this appendix:**
+
 - How an NVIDIA GPU is physically organized, and how CUDA threads map to that hardware
 - The memory hierarchy (registers → shared → L2 → HBM) and the performance implication of each level
 - How to write, launch, and debug CUDA kernels from first principles
@@ -12,6 +13,7 @@
 - Four complete kernels written from scratch: vector addition, matrix-vector product, softmax, and INT8 GEMV
 
 **What you need first:**
+
 - Comfortable with C++17 (pointers, structs, templates, lambdas)
 - Basic understanding of what a GPU does (it runs many threads in parallel)
 - No prior CUDA experience required
@@ -23,6 +25,7 @@
 CUDA (Compute Unified Device Architecture) is NVIDIA's parallel programming model, released in 2007. It lets you write C++ functions that run on thousands of GPU threads simultaneously. Every LLM inference engine covered in this book — vLLM, TensorRT-LLM, SGLang — has CUDA kernels at its innermost loop.
 
 Understanding CUDA is not optional for serious inference engineering. You will encounter it when:
+
 - Reading a flash attention kernel to understand why it is fast
 - Debugging a quantization kernel that produces wrong outputs
 - Writing a custom attention variant not yet in any library
@@ -75,6 +78,7 @@ Each SM is an independent processing unit. SMs share the L2 cache and HBM but ot
 ```
 
 Key numbers to memorize for an H100 SM:
+
 - 128 FP32 CUDA cores
 - 65,536 registers (32-bit each)
 - Up to 228 KB shared memory / L1
@@ -280,6 +284,7 @@ kernel<<<grid, block>>>(...);
 ### J.5.1 Global Memory (HBM) — The Default
 
 When you do `cudaMalloc`, you get global memory — HBM (High Bandwidth Memory). It is:
+
 - **Accessible by all threads in all blocks**
 - **Persistent** for the lifetime of the allocation
 - **Slow**: ~600 cycles latency, 3.35 TB/s bandwidth (H100)
@@ -290,6 +295,7 @@ All kernel input/output goes through global memory. The goal is to minimize how 
 ### J.5.2 Shared Memory — The GPU's Scratchpad
 
 Shared memory is fast, on-chip memory that all threads in a **block** can read and write:
+
 - **Scope**: one block only (other blocks cannot see it)
 - **Speed**: ~20 cycles latency, ~33 TB/s bandwidth
 - **Size**: up to 228 KB per SM on H100 (configurable; more shared memory = fewer resident blocks)
@@ -682,6 +688,7 @@ Attention decode (single token, batch=1, D=4096, seq=8192, BF16):
 ```
 
 This explains why:
+
 - Decode is memory-bandwidth bound (not compute) — every token decode loads the entire KV cache
 - Prefill is compute-bound — processes a long sequence in a large matrix multiply
 - Flash Attention is designed to reduce HBM bytes moved (AI increases → moves toward compute roof)
@@ -925,6 +932,7 @@ __global__ void gemv_fp16(const __half* __restrict__ W,   // [M x K]
 ```
 
 Production GEMV kernels (in cuBLAS, cutlass, or vLLM's custom kernels) use:
+
 - **Vectorized loads** (`float4`, `int4`) to maximize memory bus utilization
 - **Double buffering** with shared memory for prefetch
 - **Tensor core WMMA** for INT8/FP8 quantized variants

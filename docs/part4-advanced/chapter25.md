@@ -54,6 +54,7 @@ This section provides the conceptual summary needed for serving decisions. The f
 **What it does:** A reward model is trained to predict human preference scores, then PPO or a similar RL algorithm trains the LLM to maximize the predicted reward while staying close to a reference model via a KL penalty.
 
 **Serving implications:**
+
 - The model follows instructions more reliably, reducing the need for defensive prompt engineering
 - Refusal rates are higher; budget for fallback routing to a less-restricted model for edge cases
 - The model's probability distribution is narrower (higher confidence on preferred formats); speculative decoding acceptance rates improve
@@ -64,6 +65,7 @@ This section provides the conceptual summary needed for serving decisions. The f
 **What it does:** The same pipeline as RLHF, but an existing strong LLM (e.g., GPT-4, Claude) generates the preference labels instead of human annotators.
 
 **Serving implications:**
+
 - Faster and cheaper to iterate than RLHF; expect more domain-specific variants
 - The quality ceiling is bounded by the annotator model; if your target task outperforms the annotator, RLAIF rewards may be miscalibrated
 - Useful for aligning specialized models (code, math, domain-specific) where human annotation is expensive
@@ -73,6 +75,7 @@ This section provides the conceptual summary needed for serving decisions. The f
 **What it does:** Bypasses the explicit reward model. Derives a closed-form training objective directly from preference pairs (chosen response, rejected response) using a reparameterization of the reward function in terms of the optimal policy.
 
 **Serving implications:**
+
 - No explicit reward model at serving time; the alignment is baked into the weights
 - Training is more stable than PPO (no adversarial reward hacking in the reward model)
 - The implicit reward can be extracted at inference time: `r_implicit(x, y) = β log[π_θ(y|x) / π_ref(y|x)]`. This can be used as a re-ranking signal for multiple candidate generations

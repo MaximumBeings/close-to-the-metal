@@ -5,12 +5,14 @@
 ---
 
 **What you will understand after this chapter:**
+
 - How to apply every technique from this book as a coherent system
 - The exact cost arithmetic tracing $1.2M → $108K per month
 - The full production architecture for 50,000 concurrent users
 - How to continuously improve an inference system after launch
 
 **What you need first:**
+
 - All prior chapters — this is the integration point
 
 ---
@@ -273,6 +275,7 @@ that a 7B model handles correctly. Use the routing classifier (§38.4.2) to meas
 7B accuracy on your traffic sample; if it's ≥ 95%, 7B is the right choice.
 
 **When to switch model families:**
+
 - Multilingual (CJK, Arabic, Hindi): Qwen2.5 beats Llama on all CJK tasks
 - Code generation: DeepSeek-V3 and Qwen2.5-Coder dominate
 - Reasoning / math: DeepSeek-R1-Distill or Qwen3-32B thinking mode

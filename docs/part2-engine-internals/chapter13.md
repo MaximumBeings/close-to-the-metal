@@ -27,11 +27,14 @@ Streaming is the feature that makes LLM output feel alive.
 
 - How detokenization converts token IDs back to text, and why multi-byte
   UTF-8 sequences require careful boundary handling.
+
 - The end-to-end latency budget from GPU kernel to character on screen.
 - How Server-Sent Events (SSE) work as a protocol and why they are preferred
   over WebSocket for LLM streaming.
+
 - How vLLM's async generator streams `RequestOutput` objects, handles
   backpressure, and supports client cancellation.
+
 - How llama.cpp's built-in HTTP server implements the same SSE protocol in
   C++, and how to build a streaming loop from the raw C API.
 
@@ -238,6 +241,7 @@ Rules:
 ```
 
 For LLM token streaming, SSE is the clear choice:
+
 - Unidirectional (server pushes tokens; client does not send mid-stream).
 - Works through HTTP proxies, CDNs, and load balancers without special config.
 - Automatic reconnection handles transient network failures.
@@ -845,6 +849,7 @@ HTTP/2 requires:
 ## 13.10 Code Listing  `[FOUNDATIONAL]`
 
 See `code/chapter_13/streaming_demo.py` for:
+
 - UTF-8 boundary detector and streaming detokenizer
 - SSE frame parser (handles multi-line events, [DONE] sentinel)
 - TTFT and ITL measurement harness
@@ -852,6 +857,7 @@ See `code/chapter_13/streaming_demo.py` for:
 - Backpressure simulation: slow consumer vs. fast producer
 
 See `code/chapter_13/streaming_demo.cpp` for:
+
 - UTF-8 boundary check (utf8_continuation_bytes)
 - Token-by-token streaming loop (annotated llama.cpp pattern)
 - SSE frame builder: JSON encode + "data: ...\n\n" wrapper

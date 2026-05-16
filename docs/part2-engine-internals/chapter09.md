@@ -17,6 +17,7 @@ This chapter dissects the forward pass in both engines:
 
 - **vLLM**: a PyTorch dispatch pipeline culminating in FlashAttention and cuBLAS
   kernels, optionally wrapped in CUDA graph replay to eliminate Python overhead.
+
 - **llama.cpp**: a GGML compute graph — a statically-scheduled DAG of tensor
   operations dispatched to CPU (AVX2/NEON), CUDA, or Metal backends.
 
@@ -381,6 +382,7 @@ of each forward pass.
 
 Unlike PyTorch's autograd graph (which exists for gradient computation) the
 GGML graph is:
+
 - **Statically allocated**: built into a pre-allocated `ggml_context` arena.
 - **Forward-only** (for inference): no gradient tensors.
 - **Eagerly scheduled**: topological sort is computed at build time.
@@ -790,9 +792,11 @@ implementation.
 
 - **Chapter 10** (Quantization) describes how quantized weights (Q4_K, INT8,
   FP8) change the matmul kernel inside `GGML_OP_MUL_MAT` and vLLM's GEMM path.
+
 - **Chapter 11** (Speculative Decoding) adds a *draft model* forward pass before
   the main model; understanding the per-layer timing lets you estimate the
   draft overhead precisely.
+
 - **Chapter 12** (Continuous Batching at Scale) shows how the per-step compute
   budget interacts with the scheduler's token budget.
 
@@ -804,10 +808,13 @@ implementation.
 - FlashAttention-3 paper: Shah et al., 2024.
 - GGML source: `ggml/src/ggml.c` (`ggml_graph_compute`),
   `ggml/src/ggml-cuda.cu` (CUDA dispatch for each op).
+
 - vLLM source: `vllm/model_executor/models/llama.py`,
   `vllm/attention/backends/flash_attn.py`.
+
 - PyTorch CUDA graphs documentation:
   `https://pytorch.org/docs/stable/notes/cuda.html#cuda-graphs`
+
 - NCCL AllReduce performance: `https://github.com/NVIDIA/nccl-tests`
 
 ---

@@ -581,13 +581,17 @@ environment.
 
 - **Disaggregated serving** — splitting LLM inference into separate prefill and decode worker
   pools with explicit KV transfer between them.
+
 - **KV transfer fabric** — RDMA or NVLink network over which serialised KV cache tensors move
   from prefill to decode workers.
+
 - **Global KV store** — distributed key-value store that caches KV tensors indexed by token
   sequence hash, enabling cross-worker prefix reuse.
+
 - **kv_producer / kv_consumer** — vLLM roles that designate a worker as a KV sender or receiver.
 - **GPUDirect RDMA** — NVIDIA technology that enables RDMA NICs to DMA directly to/from GPU HBM,
   bypassing CPU memory.
+
 - **Prefill/decode ratio** — the number of decode GPUs per prefill GPU required to keep both
   pools saturated for a given workload distribution.
 

@@ -79,6 +79,7 @@ Hit rate is very low for open-ended prompts (any whitespace difference is a miss
 very high for templated prompts where the variable parts are fixed.
 
 Appropriate when:
+
 - The same machine generates identical prompts (CI pipelines, batch jobs)
 - Prompt templates have low cardinality (FAQ systems with a finite question set)
 - Zero tolerance for semantic approximation (financial/legal contexts)
@@ -1446,10 +1447,12 @@ latency — typically sub-10ms.
 ### 30.7.3  Cache Partitioning
 
 Always partition the cache by:
+
 - **Model version:** `gpt-4o-mini` and `gpt-4o` responses are different; never mix them.
 - **System prompt hash:** Different system prompts produce different valid responses.
 - **Temperature bucket:** High-temperature responses should not be cached (non-deterministic).
   Use `temperature = 0` as the only cacheable bucket.
+
 - **User tier** (optional): Responses for enterprise users may have different SLAs or
   access to different information.
 
@@ -1464,6 +1467,7 @@ Cache invalidation is the hardest part of semantic caching.
 The simplest strategy: every entry expires after `TTL` seconds.
 
 Choosing TTL:
+
 - **FAQ content that rarely changes:** 7 days
 - **Product information (prices, features):** 4–24 hours
 - **News and current events:** 15 minutes or zero (don't cache)
@@ -1510,6 +1514,7 @@ Option 1 is safer for quality; option 2 avoids cold-start latency spikes.
 Over time, the distribution of questions shifts, and the embedding model's semantic
 space may no longer align with the cached entries.
 Monitor for **cache staleness signals:**
+
 - Hit rate drops significantly without traffic change
 - User feedback on cache-hit responses trends negative
 - Downstream task accuracy on cache hits diverges from fresh responses
@@ -1523,23 +1528,27 @@ When detected, consider a full cache flush and rebuild.
 Before deploying a semantic cache in production:
 
 **Quality gates:**
+
 - [ ] Measure answer accuracy on cache hits at your chosen `τ` against held-out test set
 - [ ] Set up sampling pipeline: 5–10% of hits re-run inference for quality monitoring
 - [ ] Alert on hit accuracy dropping below threshold (e.g., < 95% agreement)
 - [ ] Never cache responses where temperature > 0.1
 
 **Performance:**
+
 - [ ] Embedding latency < 5ms (use ONNX Runtime on CPU for MiniLM-L6)
 - [ ] Cache lookup (embed + search) < 10ms p99
 - [ ] Cache store (on miss) < 5ms (async write is acceptable)
 
 **Safety:**
+
 - [ ] Partition cache by model name + version
 - [ ] Partition cache by system prompt hash (different prompts = different cache)
 - [ ] TTL set appropriately for content freshness requirements
 - [ ] Event-driven invalidation wired to content update systems
 
 **Operations:**
+
 - [ ] Cache hit rate dashboard (alert on unexplained drops)
 - [ ] Cost savings tracking (verify ROI is positive)
 - [ ] Manual flush endpoint (for emergency invalidation)

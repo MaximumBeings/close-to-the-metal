@@ -44,6 +44,7 @@ No single number captures an engine's quality. Every benchmark you will find in 
 ### 33.2.2 Latency (time-to-first-token, inter-token latency)
 
 **Definition:**
+
 - TTFT: wall-clock time from request submission to first output token
 - ITL (Inter-Token Latency): average time between consecutive output tokens
 
@@ -92,6 +93,7 @@ kv_bytes_per_token = 2 × n_layers × n_kv_heads × head_dim × dtype_bytes
 vLLM's architecture has three innovations that define its position:
 
 **PagedAttention** (Chapter 6): non-contiguous KV cache in fixed-size blocks, eliminating fragmentation. The key insight is that KV cache is analogous to virtual memory — pages can be scattered in physical memory and assembled at attention time. This enables:
+
 - Concurrent requests with wildly different lengths without over-provisioning
 - Copy-on-write sharing for beam search and prefix caching
 - Near-zero memory waste (< 4% fragmentation vs. 60–80% for pre-allocated systems)
@@ -236,6 +238,7 @@ For **workloads with shared prefixes** (many requests with the same long system 
 TGI is Hugging Face's production inference server. It predates vLLM (December 2022 vs June 2023) and has evolved substantially as vLLM's innovations became standard.
 
 **Key design choices:**
+
 - Rust HTTP server with Python inference backend
 - Flash Attention 2 by default since 2023
 - Continuous batching (called "dynamic batching" in early TGI docs)
@@ -255,6 +258,7 @@ TGI is Hugging Face's production inference server. It predates vLLM (December 20
 MLC-LLM (Machine Learning Compilation for LLMs) takes the most radical architectural approach: instead of writing inference kernels by hand, it uses the Apache TVM compiler to automatically generate optimized kernels for any target hardware from a high-level model specification.
 
 **TVM / Relax IR**: the model is expressed in TVM's Relax intermediate representation. TVM then applies auto-tuning (tiling, vectorization, thread block configuration) to generate target-specific code. The same model description generates:
+
 - CUDA kernels for NVIDIA GPUs
 - Metal shaders for Apple Silicon
 - OpenCL kernels for AMD GPUs
@@ -316,6 +320,7 @@ Mooncake is the production disaggregated serving system behind Kimi's long-conte
 NVIDIA Dynamo (released February 2025) is NVIDIA's disaggregated serving framework, designed to work with TensorRT-LLM as the underlying inference engine.
 
 **Key components:**
+
 - **Router**: assigns incoming requests to prefill or decode workers based on current load
 - **KV cache manager**: tracks which KV blocks are on which node; manages migration
 - **NVLink bridge**: on DGX systems, NVLink provides 900 GB/s KV transfer bandwidth, eliminating the RDMA bottleneck
@@ -340,6 +345,7 @@ If TTFT target is 1 second, the KV transfer consumes 54% of the budget.
 This is why NVLink (900 GB/s) is transformative for disaggregated serving: the same 13.4 GB transfers in 120 ms, consuming 12% of the TTFT budget.
 
 For deployments without NVLink (most of the industry), disaggregated serving is only practical for:
+
 - Very long contexts (KV transfer cost amortized over many output tokens)
 - Workloads where prefill and decode requirements are radically different (e.g., 10K+ token prompts with only 50 output tokens)
 
@@ -352,6 +358,7 @@ The choice of inference engine cannot be separated from the hardware it runs on.
 ### 33.11.1 NVIDIA Hopper (H100, H200)
 
 The H100 remains the dominant datacenter GPU. Key numbers:
+
 - 3.35 TB/s HBM3 bandwidth (H100 SXM)
 - 1979 TFLOPS fp16 tensor core
 - 3958 TFLOPS fp8 tensor core (H100 NVL/SXM)
@@ -363,6 +370,7 @@ The H200's 141 GB memory is the critical difference for large-model inference: a
 ### 33.11.2 NVIDIA Blackwell (B200, GB200)
 
 B200 (released late 2024, volume in 2025) represents a step change:
+
 - 8 TB/s HBM3e bandwidth (4× H100)
 - 4.5 PFLOPS fp4 tensor core
 - 192 GB HBM3e
@@ -377,11 +385,13 @@ This means a B200 can sustain 14,285 tok/s for a 70B model *even at batch size 1
 ### 33.11.3 AMD Instinct MI300X
 
 The MI300X (128 GB HBM3) is the most memory-dense GPU available and the first AMD GPU to achieve genuine competitive parity with NVIDIA for inference. Key specs:
+
 - 5.3 TB/s HBM3 bandwidth
 - 1307 TFLOPS fp16
 - 128 GB HBM3 (vs 80 GB for H100)
 
 The extra memory makes the MI300X particularly attractive for:
+
 - 70B models (fits entirely, leaves substantial KV cache)
 - 405B models at fp8 (3 MI300X ≈ 1 DGX H100 node in memory capacity)
 
@@ -390,6 +400,7 @@ vLLM's ROCm backend has been substantially improved and achieves 85–90% of CUD
 ### 33.11.4 Apple Silicon M-Series
 
 For edge deployment, Apple Silicon's unified memory architecture is uniquely positioned:
+
 - M3 Max: 400 GB/s memory bandwidth, up to 128 GB unified memory
 - M4 Ultra (projected): ~500 GB/s, up to 192 GB
 - A single M3 Max Mac Studio holds a 70B Q4 model (≈40 GB) with 88 GB for other uses
@@ -403,6 +414,7 @@ llama.cpp with Metal backend is the only production-quality engine for Apple Sil
 The right engine for your use case emerges from five questions, applied in sequence:
 
 **Q1: What hardware do you have?**
+
 - NVIDIA GPU, production datacenter → vLLM, TensorRT-LLM, or SGLang
 - NVIDIA GPU, development/small scale → vLLM
 - AMD GPU → vLLM (ROCm)
@@ -411,23 +423,27 @@ The right engine for your use case emerges from five questions, applied in seque
 - Mobile (iOS/Android) → MLC-LLM
 
 **Q2: What scale of throughput do you need?**
+
 - < 100 concurrent users → vLLM is sufficient; any engine works
 - 100–1,000 concurrent users → vLLM or SGLang; consider TGI for simplicity
 - 1,000–10,000 concurrent users → TensorRT-LLM or SGLang; vLLM requires multiple instances
 - > 10,000 concurrent users → disaggregated serving (Dynamo, Mooncake pattern) + TensorRT-LLM
 
 **Q3: What is your latency requirement?**
+
 - Interactive (< 200 ms TTFT) → any engine at low batch size; llama.cpp fastest for short prompts
 - Standard (< 1 s TTFT) → any engine with appropriate batch configuration
 - Batch / async (no real-time constraint) → TensorRT-LLM for maximum throughput
 
 **Q4: What is your output format?**
+
 - Free text → any engine
 - Structured JSON / grammar-constrained → SGLang (fastest), vLLM (with outlines), llama.cpp (GBNF)
 - Complex multi-call agent workflows → SGLang (native support)
 - Vision + text → vLLM (Chapter 29), TGI
 
 **Q5: What is your operational constraint?**
+
 - Fastest time to production → TGI (docker one-liner)
 - Lowest operational complexity → vLLM (pip install, simple config)
 - Maximum performance and acceptable complexity → TensorRT-LLM
@@ -484,6 +500,7 @@ Every major engine now supports speculative decoding (Chapter 23) in production.
 ### 33.14.2 Mixture-of-Experts Changes the Throughput Picture
 
 MoE models (Mixtral, DeepSeek-MoE, Qwen-MoE) activate only a fraction of parameters per token. For a Mixtral 8×7B model (47B total params, 13B activated per token):
+
 - Memory required: 47B params, so 94 GB fp16
 - Compute per token: 13B params worth
 - KV cache: only the 2 active experts' layers
@@ -495,6 +512,7 @@ This creates a new regime: models that are memory-large (need large GPUs) but co
 The standard context window has grown from 4K (2023) to 128K (2024) to 1M+ (2025/2026 for frontier models). This invalidates memory planning done even 12 months ago. Engines that assume a context of 8K (allocating proportional KV memory) will OOM on routine 128K requests.
 
 The adaptive solutions:
+
 - vLLM: dynamic block allocation, context-length-aware scheduling
 - SGLang: radix tree naturally handles long shared prefixes
 - llama.cpp: `-c` flag sets max context; must be set before loading

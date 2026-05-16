@@ -5,6 +5,7 @@
 ---
 
 **What you will understand by the end of this chapter:**
+
 - Why generating text one token at a time creates a fundamentally different systems problem than training
 - Why a GPU is almost always idle during inference, and what that means for performance
 - What vLLM is, what llama.cpp is, and the specific trade-off each one makes
@@ -12,6 +13,7 @@
 - How to decide which engine to use for a given situation
 
 **What you need to know first:**
+
 - You should be comfortable reading Python code
 - You should know that a neural network takes an input and produces an output (no deeper ML knowledge needed)
 - You should know roughly what a GPU is — a chip designed for parallel computation (no GPU programming experience needed)

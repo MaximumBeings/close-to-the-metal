@@ -29,11 +29,14 @@ This chapter covers the full sampling pipeline, end to end:
 - Why raw logits cannot be used directly as probabilities.
 - How temperature, top-k, top-p, and min-p transform the logit distribution,
   with each step computed by hand.
+
 - What repetition, frequency, and presence penalties do — and when they hurt.
 - How structured output (JSON schema, GBNF grammars) works as a token mask
   applied before sampling.
+
 - How beam search expands multiple hypotheses in parallel and how it interacts
   with the copy-on-write KV blocks from Chapter 6.
+
 - How vLLM and llama.cpp implement each of these features.
 
 **What you need first:**
@@ -135,8 +138,10 @@ scaled_logit = logit / temperature
 - `temperature = 1.0` — unchanged; sample from the model's true distribution.
 - `temperature < 1.0` — sharpens the distribution; the top token becomes more
   dominant; output is more focused and predictable.
+
 - `temperature > 1.0` — flattens the distribution; rare tokens become more
   likely; output is more varied and creative.
+
 - `temperature → 0` — equivalent to greedy decoding (always pick the argmax).
 - `temperature → ∞` — uniform distribution over the vocabulary.
 
@@ -843,14 +848,17 @@ Final answer: next token = "mat"
 ## 12.12 Code Listing  `[FOUNDATIONAL]`
 
 See `code/chapter_12/sampling_demo.py` for:
+
 - Full logit pipeline visualiser: apply each stage and print the
   distribution after every transformation
+
 - Temperature, top-k, top-p, and min-p implemented from scratch
 - Repetition, frequency, and presence penalty simulation
 - Structured output token mask demo (JSON schema enforcement)
 - Beam search trace with log-probability tracking
 
 See `code/chapter_12/sampling_demo.cpp` for:
+
 - llama.cpp sampler chain construction and inspection
 - Manual temperature + top-k + top-p + penalties pipeline in C++
 - GBNF grammar snippet for JSON object enforcement

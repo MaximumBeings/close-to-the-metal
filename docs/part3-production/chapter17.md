@@ -230,6 +230,7 @@ Column meanings:
 | `t/s` | Tokens per second ± std deviation |
 
 **Decoding the test names:**
+
 - `pp512` = prefill 512 tokens (measures TTFT throughput / prefill speed)
 - `tg128` = generate 128 tokens (measures decode throughput = 1/ITL)
 
@@ -269,6 +270,7 @@ llama 8B Q4_K - Medium,4.58 GiB,8.03 B,CUDA,33,tg32,780.34,7.2
 **Rule 1: Same model, same quantization**
 
 Do not compare vLLM BF16 against llama.cpp Q4. This conflates engine performance with precision difference. Compare:
+
 - vLLM BF16 vs llama.cpp BF16 (GGUF F16 or exllama2 F16)
 - vLLM AWQ/GPTQ Q4 vs llama.cpp Q4_K_M
 
@@ -292,6 +294,7 @@ Prompt length has a first-order effect on both TTFT and throughput. Use the same
 ### Warmup requirement
 
 Both engines show elevated latency on the first few inferences due to:
+
 - CUDA kernel JIT compilation (cuBLAS heuristics)
 - KV cache allocation (vLLM allocates blocks on first use)
 - CPU branch predictor warmup (llama.cpp)
@@ -346,17 +349,20 @@ At batch≥8:
 ```
 
 The exact crossover depends on hardware. On an RTX 4090 (consumer GPU, PCIe, 24 GB):
+
 - batch=1: llama.cpp wins by 10–30% (lower overhead)
 - batch=4: roughly equal
 - batch≥8: vLLM wins by 20–50% (batching efficiency)
 
 On an A100-80 or H100 (data center GPU, NVLink, optimized NCCL):
+
 - batch=1: roughly equal (FlashAttention quality similar)
 - batch≥4: vLLM wins by 40–100% (compute saturation)
 
 ### Crossover 2: Apple Silicon
 
 llama.cpp is the clear winner on Apple Silicon (M1/M2/M3/M4):
+
 - Metal backend with hand-tuned kernels
 - Unified memory architecture (no PCIe transfer between CPU and GPU memory)
 - vLLM has no first-party Apple Silicon support
@@ -366,12 +372,14 @@ Apple M2 Ultra (192 GB unified memory, 800 GB/s bandwidth) achieves ~70 tok/s de
 ### Crossover 3: CPU-only inference
 
 llama.cpp supports highly optimized AVX-512 / NEON CPU kernels. vLLM requires CUDA. For CPU-only deployment (cloud instances without GPUs):
+
 - llama.cpp: achieves 5–15 tok/s on a 7B Q4 model on a 16-core x86 server
 - vLLM: not usable without GPU (CPU mode experimental, unmaintained)
 
 ### Crossover 4: Memory-constrained devices
 
 A 7B Q4 model is ~4.5 GB. On a device with 8 GB of VRAM (e.g., laptop GPU, RTX 3050):
+
 - llama.cpp: fits with 3.5 GB left for KV cache; works well
 - vLLM: fits but the KV cache is tiny; degrades at any concurrency above 1
 

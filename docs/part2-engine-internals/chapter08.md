@@ -20,9 +20,11 @@ Understanding startup is also practically important:
 - vLLM's **dummy forward pass** is the probe that makes the rest of the memory
   budget work.  If you misunderstand it you will misconfigure
   `--gpu-memory-utilization` and either OOM or leave GPU memory on the table.
+
 - vLLM's **CUDA graph capture** is responsible for the 10–30× reduction in
   Python overhead on the decode path.  Without it each decode step would be
   bottlenecked by Python, not the GPU.
+
 - llama.cpp's **mmap loading** is why it starts in seconds even for 70B models.
   Knowing when it is and isn't beneficial lets you tune cold-start vs.
   throughput trade-offs.
@@ -209,6 +211,7 @@ But it does *not* know how much memory a forward pass at maximum load will need
 for **activations** — the intermediate tensors computed during each layer.
 
 Activation memory depends on:
+
 - Batch size (number of sequences)
 - Sequence length (number of tokens per sequence)
 - Model architecture (number of layers, attention heads, FFN width)
@@ -483,6 +486,7 @@ for batch_size in GRAPH_BATCH_SIZES:
 
 The graph captures **all CUDA operations** between `torch.cuda.graph()`'s
 context manager, including:
+
 - All 32 (or 80) transformer layer forward passes
 - FlashAttention kernels for each layer
 - FFN matmuls
@@ -718,14 +722,17 @@ for (int i = 0; i < n_layers_on_gpu; i++) {
 ### 8.8.4 mmap vs eager load — when mmap hurts
 
 mmap is excellent for:
+
 - **Cold start** (first inference starts immediately without waiting for full load).
 - **Memory-mapped file sharing** (multiple processes can share the same pages).
 - **Large models on memory-limited systems** (only needed pages are resident).
 
 mmap is worse than eager loading for:
+
 - **Sequential full-model access** (e.g., a single long generation that reads
   every weight): eager loading enables the OS prefetcher to stream data without
   page-fault overhead.
+
 - **NVMe drives with high seek latency** (random page faults are expensive).
 - **Production servers** (where you want predictable latency, not page-fault spikes).
 
@@ -1165,9 +1172,11 @@ print("\nDone.")
 
 - **Chapter 9** (The Forward Pass) describes what happens inside the CUDA graph
   captured in Phase 5 — the actual kernel sequence that the graph replays.
+
 - **Chapter 10** (Quantization) explains the Q4_K_M, Q5_K_S, Q8_0 types that
   appear in GGUF tensor headers and how they affect both weight size (Phase 2)
   and inference accuracy.
+
 - **Chapter 13** (Disaggregated Prefill) requires shipping KV blocks from a
   prefill GPU to a decode GPU; the block pool layout from Phase 4 determines
   the granularity of those transfers.
@@ -1178,6 +1187,7 @@ print("\nDone.")
 
 - vLLM source: `vllm/worker/worker.py` (dummy forward, graph capture),
   `vllm/model_executor/model_loader/weight_utils.py` (weight loading).
+
 - GGUF specification: `https://github.com/ggerganov/ggml/blob/master/docs/gguf.md`
 - llama.cpp source: `src/llama.cpp`, function `llama_model_load_internal()`.
 - CUDA Graphs documentation:

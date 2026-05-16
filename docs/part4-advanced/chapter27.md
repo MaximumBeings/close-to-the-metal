@@ -534,6 +534,7 @@ This is why chunked prefill and multi-GPU tensor parallelism are both necessary 
 
 The decode bottleneck is different.
 Each auto-regressive step reads:
+
 - All model weight matrices: ~16 GB for Llama-3.1-8B in BF16
 - The full KV cache accumulated so far
 
@@ -589,6 +590,7 @@ Not suitable for: document Q&A over fixed corpora, legal/contract analysis, code
 ### 27.4.3  BigBird / Longformer Patterns
 
 BigBird and Longformer introduced hybrid patterns that combine:
+
 - Local window attention (every token attends to nearby tokens)
 - Global tokens (special CLS or summary tokens attend to the full sequence)
 - Random attention (each token attends to a random set of keys)
@@ -692,8 +694,10 @@ inappropriately at long contexts.
 
 YaRN is currently the best-performing RoPE extension method and is the technique used
 by most production-quality extended models:
+
 - Llama 3.1 (all sizes, native 128K) uses a combination of RoPE base increase to 500,000
   plus YaRN-style temperature correction
+
 - Mistral v0.3, Mistral Large use YaRN
 - Qwen 2.5 uses "dual chunk attention" + extended RoPE base (1,000,000)
 
@@ -841,6 +845,7 @@ python -m vllm.entrypoints.openai.api_server \
 ```
 
 Memory budget for 70B at TP=4 (4× H100 80GB):
+
 - Weights: 70B × 2 bytes = 140 GB → 35 GB per GPU
 - KV at 128K: 80 GB total → 20 GB per GPU (GQA heads also split by TP)
 - Activations + overhead: ~8 GB per GPU
@@ -853,6 +858,7 @@ supports prefix caching: if two requests share an identical prefix (e.g., the sa
 prompt), the KV blocks for that prefix are computed once and shared.
 
 At long context, prefix caching is especially valuable when:
+
 - A long document is queried multiple times with different questions (RAG)
 - A large code file is context for multiple completion requests
 - A long system prompt is reused across sessions
@@ -872,6 +878,7 @@ A 128K prefill takes ~18 seconds of compute on one H100 (as computed above).
 During that time, a mixed prefill+decode instance cannot serve decode requests efficiently.
 
 Production setups at 128K+ typically use:
+
 - **Prefill pool**: beefy multi-GPU nodes dedicated to long prefills (high compute, lower concurrency)
 - **Decode pool**: many smaller nodes for continuous decode (high concurrency)
 - **KV migration**: after prefill completes, KV blocks are transmitted over NVLink/InfiniBand

@@ -25,11 +25,14 @@ This chapter covers the full prefill story:
 
 - How prefill works mechanically and why it is compute-bound while decode is
   memory-bandwidth bound.
+
 - Why a single long-context request can silently stall all other users.
 - How chunked prefill splits long prompts across multiple scheduler steps,
   letting decode tokens run in the budget that remains.
+
 - How vLLM's radix prefix cache (prefix caching) eliminates redundant prefill
   work for repeated prompt prefixes.
+
 - What llama.cpp's `--ubatch-size` and `--cache-prompt` flags control, and
   how they map to the same concepts.
 
@@ -38,6 +41,7 @@ This chapter covers the full prefill story:
 - Chapter 7 (the scheduler's batching loop and token budget model).
 - Chapter 9 (the forward pass and the distinction between compute-bound and
   memory-bandwidth-bound workloads).
+
 - Chapter 6 (block table and KV cache layout).
 
 ---
@@ -514,6 +518,7 @@ Chapter 18).
 - All workers share the same prefix tree index.
 - A KV cache hit redirects the request to the worker holding those blocks
   (or fetches them over RDMA).
+
 - Hit rates of 78–91% have been reported in production RAG workloads.
 
 vLLM's disaggregated KV transfer (introduced in v0.6.x) provides the
@@ -792,12 +797,14 @@ TTFT: 30 ms (13× faster)  |  Existing users: uninterrupted ✓
 ## 11.10 Code Listing  `[FOUNDATIONAL]`
 
 See `code/chapter_11/chunked_prefill_demo.py` for:
+
 - TTFT benchmarks comparing unchunked vs. chunked prefill across prompt lengths
 - Radix prefix cache hit rate simulator with configurable workload distributions
 - Token budget allocation visualiser showing decode vs. prefill split per step
 - vLLM prefix cache metric scraper using the Prometheus endpoint
 
 See `code/chapter_11/chunked_prefill_demo.cpp` for:
+
 - llama.cpp micro-batch (ubatch) simulation — split large prompt into N chunks
 - KV cache reuse tracker comparing `--cache-prompt` hit/miss across sessions
 - Prefill vs. decode compute intensity analysis matching §11.2.2

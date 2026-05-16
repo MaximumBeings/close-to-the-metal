@@ -108,6 +108,7 @@ vLLM does **not** implement request-level rate limiting natively. Rate limiting 
 ```
 
 For a production deployment the right layer is the API gateway:
+
 - AWS API Gateway: usage plans with API keys define request/token budgets
 - Kong: `rate-limiting` plugin with Redis backend for multi-instance state
 - Custom FastAPI middleware: suitable for development, fragile at scale
@@ -471,11 +472,13 @@ Three categories of secrets must be protected in an LLM serving stack:
 Model weights are large (4 GB to 800 GB) but extremely valuable. Key protections:
 
 **Storage-layer controls:**
+
 - Store weights on a dedicated NFS mount or S3 bucket with IAM policies restricting access to inference worker service accounts only
 - Enable S3 bucket versioning and CloudTrail logging — detect unexpected downloads immediately
 - Use S3 VPC endpoint to ensure weights never traverse the public internet even within AWS
 
 **Runtime controls:**
+
 - Mount weights read-only: `docker run --mount type=bind,source=/weights,target=/mnt/weights,readonly`
 - In Kubernetes: use a `ReadOnlyRootFilesystem` SecurityContext and mount weights as a read-only volume
 - Never log model paths with full URIs — log only model IDs
@@ -566,6 +569,7 @@ For most deployments, Option A (edge TLS with VPC internal HTTP) is correct. The
 ### 21.7.3  Certificate Management
 
 Use a managed certificate provider to avoid manual rotation:
+
 - **AWS Certificate Manager (ACM)** — free TLS certificates, auto-renewed, integrates directly with ALB
 - **Let's Encrypt via cert-manager (Kubernetes)** — free, automatic renewal, works with any ingress controller
 - **Internal CA (high-compliance)** — for services that must not call external CAs; more operational burden
