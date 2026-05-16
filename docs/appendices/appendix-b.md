@@ -756,3 +756,115 @@ echo ""
 echo "Installation check complete."
 ```
 
+
+
+---
+
+## Worked Solutions
+
+### Installation Troubleshooting Q&A
+
+**Q: After `pip install vllm`, `import vllm` fails with "CUDA version mismatch". How do you diagnose and fix this?**
+
+**Step 1 — Check CUDA versions:**
+```bash
+nvidia-smi              # shows driver CUDA version (upper bound)
+nvcc --version          # shows toolkit version (used at compile time)
+python -c "import torch; print(torch.version.cuda)"  # PyTorch's CUDA
+```
+
+**Step 2 — Identify the mismatch:**
+vLLM is compiled against a specific CUDA toolkit version. If PyTorch was installed for CUDA 12.1 but the vLLM wheel was built for CUDA 12.4, the shared libraries won't link correctly.
+
+**Step 3 — Fix:**
+```bash
+# Uninstall and reinstall with matching CUDA version
+pip uninstall vllm torch torchvision torchaudio
+pip install torch --index-url https://download.pytorch.org/whl/cu124
+pip install vllm  # now downloads wheel matching cu124
+```
+
+---
+
+**Q: vLLM starts but crashes with "RuntimeError: CUDA out of memory" immediately on a GPU with 80 GB. The model is LLaMA-3 70B BF16 (140 GB). Why?**
+
+**Root cause:** The model (140 GB) exceeds the GPU's available HBM (80 GB). vLLM tries to load all weights before serving begins.
+
+**Fix options:**
+1. Use tensor parallelism: `--tensor-parallel-size 2` on a 2x A100 node (160 GB total).
+2. Use quantization: `--quantization fp8` halves model size to 70 GB, fitting on one H100.
+3. Use llama.cpp with Q4_K_M (40 GB) if a single GPU is required.
+
+---
+
+**Q: `pip install vllm` on Python 3.13 fails. Why?**
+
+vLLM's supported Python range (as of 2026) is 3.9-3.12. Python 3.13 introduced breaking changes to the C extension API that vLLM's compiled CUDA extensions have not yet been updated to support. Use Python 3.11 (recommended) or 3.12 for production deployments.
+
+---
+
+**Q: After installing ROCm vLLM, `CUDA_VISIBLE_DEVICES=0 python -c "import vllm"` fails but `HIP_VISIBLE_DEVICES=0` succeeds. Why?**
+
+ROCm vLLM uses HIP (Heterogeneous-compute Interface for Portability) internally. `CUDA_VISIBLE_DEVICES` is an NVIDIA CUDA environment variable that ROCm does not honour by default. Use `HIP_VISIBLE_DEVICES` or `ROCR_VISIBLE_DEVICES` to select AMD GPUs.
+
+---
+
+**Q: The llama.cpp build with `cmake -DGGML_CUDA=ON` fails with "nvcc not found". What is the fix?**
+
+```bash
+# Option 1 — Add CUDA toolkit to PATH
+export PATH=/usr/local/cuda/bin:$PATH
+export CUDA_HOME=/usr/local/cuda
+
+# Option 2 — Specify nvcc explicitly
+cmake -DGGML_CUDA=ON -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc ..
+
+# Option 3 — Use conda's cudatoolkit
+conda install -c conda-forge cudatoolkit-dev
+```
+
+Verify with: `which nvcc && nvcc --version`
+
+---
+
+**Q: vLLM serving starts successfully but `curl http://localhost:8000/v1/models` returns a connection refused error. What are the three most likely causes?**
+
+1. **vLLM is still loading the model.** Check startup logs — model loading can take 30-120 seconds. The HTTP server only binds after the engine is ready.
+2. **Wrong port or host binding.** vLLM defaults to `--host 127.0.0.1`. If running in a Docker container, use `--host 0.0.0.0` to accept external connections.
+3. **Firewall or security group blocking port 8000.** Check `netstat -tlnp | grep 8000` to confirm the port is listening, then check firewall rules.
+
+---
+
+**Q: A Docker container running vLLM can see the GPU with `nvidia-smi` but vLLM reports "No GPU found". What is missing?**
+
+The NVIDIA Container Toolkit is not properly configured, or the `--gpus` flag was omitted from `docker run`. Fix:
+```bash
+# Correct docker run command
+docker run --gpus all \
+  --runtime=nvidia \
+  -e NVIDIA_VISIBLE_DEVICES=all \
+  -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+  vllm/vllm-openai:latest \
+  --model meta-llama/Llama-3.1-8B-Instruct
+```
+
+The `--runtime=nvidia` and `NVIDIA_VISIBLE_DEVICES` environment variable are both required for the CUDA runtime inside the container to find and initialise the GPU.
+
+---
+
+**Q: After upgrading from vLLM 0.5.x to 0.6.x, existing `--engine-args` flags cause startup errors. How do you migrate?**
+
+vLLM 0.6.x reorganised CLI flags, deprecating some and renaming others. Migration steps:
+```bash
+# Run with --help to see current valid flags
+python -m vllm.entrypoints.openai.api_server --help
+
+# Common renames:
+# --use-v2-block-manager -> removed (V2 is default in 0.6)
+# --worker-use-ray -> --distributed-executor-backend ray
+# --swap-space -> still valid but unit changed to GiB
+
+# Check deprecation warnings in startup logs:
+vllm serve meta-llama/Llama-3.1-8B 2>&1 | grep -i deprecat
+```
+

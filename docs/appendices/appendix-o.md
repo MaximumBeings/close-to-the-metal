@@ -567,3 +567,173 @@ The reference path for this book's GPU kernel appendices: Appendix L (CUDA funda
 4. Mojo's `SIMD[DType.float32, 16]` maps to a 512-bit AVX-512 register. An A100 GPU's SIMD width for FP32 is effectively 32 (one warp = 32 threads, each doing one FP32 op). Compare the theoretical FLOPs/second for: (a) a single AVX-512 core at 5 GHz, (b) one A100 SM (128 FP32 CUDA cores at 1.41 GHz), (c) a full A100 (108 SMs). *(Sections R.4, Appendix L.2)*
 
 5. The MAX `LLMPipeline` compiles a HuggingFace model to optimised code. For a deployment on Apple M3 Max (128 GB unified memory, Metal GPU), describe what hardware path MAX would use for: (a) the embedding lookup, (b) the attention GEMM, (c) the output logit computation. Why is unified memory particularly advantageous for MAX's multi-target compilation on Apple Silicon? *(Section R.9)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**`fn` that takes a `borrowed` float array pointer and returns the max value using SIMD. Why `borrowed`?**
+
+```mojo
+from sys.info import simdwidthof
+from algorithm import vectorize
+
+fn array_max(data: DTypePointer[DType.float32], length: Int) -> Float32:
+    # borrowed is implicit for fn arguments -- data is read-only
+    alias simd_width = simdwidthof[DType.float32]()  # typically 8 or 16
+    
+    var max_val = SIMD[DType.float32, 1](Float32.MIN)
+    var i = 0
+    
+    # SIMD loop: process simd_width elements at a time
+    while i + simd_width <= length:
+        let chunk = data.simd_load[simd_width](i)  # load simd_width floats
+        let chunk_max = chunk.reduce_max()          # max within chunk
+        max_val = max_val.max(SIMD[DType.float32, 1](chunk_max))
+        i += simd_width
+    
+    # Handle remainder (scalar)
+    while i < length:
+        max_val = max_val.max(SIMD[DType.float32, 1](data.load(i)))
+        i += 1
+    
+    return max_val[0]
+```
+
+**Why `borrowed` (not `inout` or `owned`):**
+
+- **`borrowed`** means the function receives a read-only view of the argument. The caller retains ownership; the function cannot modify or free the data. This is correct here because we are only reading the array to find the maximum -- no modification needed.
+
+- **`inout`** would allow modification of the array in place. This is inappropriate for a "find maximum" function -- the semantic contract says we don't change the data.
+
+- **`owned`** would transfer ownership of the pointer to the function, preventing the caller from using it after the call. This would be a semantic error for a utility function -- callers expect to retain their array after calling `array_max`.
+
+`borrowed` is the most restrictive and most correct ownership convention for read-only operations. It enables the compiler to prove no aliasing occurs and enables more aggressive optimizations (no store barriers needed).
+
+---
+
+### Question 2
+**`parallelize[compute_row](M)` on M=4096 rows, 16-core machine, 2 µs per row. Theoretical speedup and practical limits.**
+
+**Rows per core:**
+```
+rows_per_core = ceil(4096 / 16) = 256 rows per core
+```
+
+**Sequential time:**
+```
+t_sequential = 4096 rows x 2 µs = 8,192 µs = 8.19 ms
+```
+
+**Parallel time (theoretical):**
+```
+t_parallel = 256 rows x 2 µs = 512 µs = 0.512 ms
+theoretical_speedup = 8.19 / 0.512 = 16x
+```
+
+**What limits it in practice:**
+
+1. **Amdahl's Law -- serial overhead.** The `parallelize` call has setup overhead: thread pool initialization, work distribution, and synchronization barrier at the end. For 512 µs of useful work, even 50 µs of synchronization overhead reduces speedup to 8.19 / (0.512 + 0.050) = 14.6x.
+
+2. **Memory bandwidth saturation.** 16 cores simultaneously reading different rows from RAM will compete for memory bandwidth. If each row accesses 8 KB (4096 floats x 2 bytes) and DRAM bandwidth is 50 GB/s: peak throughput = 50 GB/s / 8 KB = 6.25 million rows/s. At 16x parallelism with 256 rows each: 16 x (256 / 6.25M) = 0.655 ms -- bandwidth-limited. The actual speedup may be only 8-12x rather than 16x.
+
+3. **Cache thrashing.** 16 cores loading different rows of a large matrix will each evict the other cores' cache lines. L3 cache is shared; with a 4096-row matrix, even L3 misses become common at high parallelism.
+
+4. **Load imbalance.** If some rows take longer than others (e.g., variable sparsity), cores with heavy rows delay the synchronization barrier, wasting other cores' idle time.
+
+---
+
+### Question 3
+**Embedding lookup: 2048 tokens, embed_dim=4096, simd_width=16. SIMD load+store operations vs Python loop.**
+
+**SIMD operations per token:**
+```
+loads_per_token  = ceil(4096 / 16) = 256 SIMD loads
+stores_per_token = ceil(4096 / 16) = 256 SIMD stores
+total_per_token = 512 SIMD ops
+```
+
+**Total for 2048 tokens:**
+```
+total_SIMD_ops = 2048 x 512 = 1,048,576 SIMD operations
+```
+
+Each SIMD operation processes 16 floats simultaneously.
+
+**Naive Python loop instruction count:**
+A Python loop over 4096 floats per token requires:
+- 4096 float reads (as Python object lookups)
+- 4096 float writes
+- 4096 loop iterations (each with: increment, compare, branch)
+- Python overhead: ~10 Python bytecodes per iteration (LOAD_FAST, STORE_SUBSCR, etc.)
+
+```
+Python instructions per token = 4096 x (2 loads + 2 stores + 10 overhead) = 57,344 Python bytecodes
+Total for 2048 tokens = 2048 x 57,344 = 117,440,512 Python bytecodes
+```
+
+**Comparison:**
+- Mojo SIMD: 1,048,576 native vector instructions, each processing 16 floats
+- Python: 117,440,512 Python bytecode instructions, each processing 1 float
+
+**Python instructions per Mojo SIMD instruction:** 117,440,512 / 1,048,576 = 112x more instructions. Additionally, each Python bytecode is ~100ns (due to interpreter overhead, reference counting, GIL); each SIMD instruction is ~0.3ns. Total speedup factor: 112 x (100/0.3) = ~37,000x faster in Mojo.
+
+---
+
+### Question 4
+**FLOPs/second comparison: (a) AVX-512 core at 5 GHz, (b) one A100 SM, (c) full A100.**
+
+**(a) Single AVX-512 core at 5 GHz:**
+AVX-512 = 512-bit register = 16 x FP32 values processed simultaneously.
+With FMA (fused multiply-add): 2 FLOPs per element per clock.
+```
+FLOPs/cycle = 16 x 2 = 32 FLOPs/cycle
+FLOPs/sec = 32 x 5 GHz = 160 GFLOPS
+```
+
+**(b) One A100 SM at 1.41 GHz:**
+The A100 SM has 128 FP32 CUDA cores (64 per half-warp, 2 processing sets). With FMA:
+```
+FLOPs/cycle = 128 cores x 2 FLOPs/core = 256 FLOPs/cycle
+FLOPs/sec = 256 x 1.41 GHz = 361 GFLOPS = 0.361 TFLOPS
+```
+
+**(c) Full A100 (108 SMs):**
+```
+FLOPs/sec = 0.361 TFLOPS x 108 SMs = 38.9 TFLOPS FP32
+```
+
+(NVIDIA's spec: 19.5 TFLOPS FP32 dense. The 38.9 discrepancy is because the SM doesn't sustain peak FP32 every cycle -- the real IPC is ~50% for typical workloads. With Tensor Cores: 312 TFLOPS TF32, 77.6 TFLOPS FP32 dense.)
+
+**Summary:**
+- AVX-512 core: 160 GFLOPS (1x reference)
+- A100 SM: 361 GFLOPS (2.3x per SM)
+- Full A100: ~39 TFLOPS (244x vs single CPU core)
+
+The GPU's advantage is parallelism (108 SMs x 128 cores = 13,824 FP32 cores) rather than per-core clock speed.
+
+---
+
+### Question 5
+**MAX LLMPipeline on Apple M3 Max (128 GB unified memory, Metal GPU): hardware paths for each component.**
+
+**(a) Embedding lookup:**
+The embedding table lookup is an index-into-table operation with irregular memory access (each token selects a different row). MAX routes this to the **CPU** (using NEON SIMD) or the **ANE (Apple Neural Engine)** if the embedding table fits in its fast SRAM cache.
+
+Reason: The ANE is optimised for dense matrix operations with regular access patterns. Index lookups with random row selections are better handled by the CPU's large L3 cache and prefetch hardware. The ANE would generate cache misses for large vocabulary embeddings.
+
+**(b) Attention GEMM:**
+The Q@K^T and attention_output@V matrix multiplies are large, dense GEMMs. MAX routes these to the **Metal GPU** via Metal Performance Shaders (MPS), which uses the M3's dedicated matrix multiply hardware (the ANE for small shapes, GPU for larger batches).
+
+For long-context attention (>4K tokens), MAX may use a Flash-Attention-like tiled approach on the GPU to stay within the GPU's tile SRAM capacity.
+
+**(c) Output logit computation:**
+The lm_head is a large GEMM (d_model x vocab_size = 4096 x 128256 for Llama-3). MAX routes this to the **Metal GPU** for batched inference, or to the **CPU+ANE** for single-token decode (where the GEMM is a GEMV, more suited to ANE/CPU at batch=1).
+
+**Why unified memory is advantageous for MAX:**
+On discrete NVIDIA GPUs, data must be explicitly transferred between CPU RAM and GPU VRAM via PCIe (32 GB/s). Each component transition (CPU embedding lookup -> GPU GEMM -> CPU logit sampling) requires a DMA transfer.
+
+On Apple Silicon, CPU, GPU, and ANE all share the **same 128 GB physical memory pool**. The Metal GPU can access the embedding table that the CPU just populated with zero-copy overhead -- no PCIe transfer, no explicit synchronization. MAX's multi-target compilation exploits this by scheduling operations on the most efficient compute unit for each shape/pattern without incurring transfer costs between components. The model can seamlessly flow CPU (embedding) -> GPU (attention) -> ANE (small FFN) -> CPU (sampling) with pointer passing rather than memcpy.
+

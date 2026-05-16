@@ -749,3 +749,378 @@ The combined result: at 3 effective bits per dimension (2-bit PolarQuant + 1-bit
 ---
 
 *This appendix covers TurboQuant as of arXiv 2504.19874 (April 2025) and the vLLM integration PR #38479 (May 2026). Check the vLLM changelog and llama.cpp discussion #20969 for the current status of production availability.*
+
+---
+
+## Worked Solutions
+
+### Solution 1 — Why random rotation makes TurboQuant data-oblivious
+
+**The core problem without rotation:**
+
+Real LLM KV-cache key vectors are not uniformly distributed. A specific coordinate
+`k[d]` may be biased (mean ≠ 0), or have heavy tails, or cluster near specific
+values due to positional encodings. A Lloyd-Max codebook optimised for this
+specific distribution would only work for this layer, this model, this position.
+Different models need different codebooks → no universal scheme is possible.
+
+**What random rotation does:**
+
+Apply an orthogonal matrix R ∈ ℝ^{d×d} with i.i.d. entries sampled from the
+uniform distribution on O(d):
+
+```
+k̃ = R k
+```
+
+By the **Johnson-Lindenstrauss rotational invariance property**, any fixed vector
+k, when multiplied by a Haar-uniform random orthogonal matrix R, produces
+components k̃[i] that are identically distributed as:
+
+```
+k̃[i] ~ N(0, ‖k‖² / d)
+```
+
+That is, the components of the rotated vector are (approximately) i.i.d.
+Gaussian with variance `‖k‖²/d`, regardless of the structure of the original
+vector k. The distribution depends only on the vector's L2 norm, not its
+direction, not its layer of origin, not the model architecture.
+
+**Why this enables a universal codebook:**
+
+Since every rotated coordinate has the same N(0, σ²) distribution (with σ²
+estimated from ‖k‖ at runtime), a single Lloyd-Max codebook designed for a unit
+Gaussian can be reused for all layers, all models, all positions. TurboQuant
+stores σ as a 16-bit float (4 bytes per vector, shared across all d dimensions)
+and uses the same 8-level (TQ3) or 16-level (TQ4) codebook everywhere.
+
+---
+
+### Solution 2 — How TurboQuant ensures the per-coordinate distribution is "known"
+
+**Step 1 — Rotation:** Apply R to obtain k̃ = Rk. By the argument in Solution 1,
+each coordinate k̃[i] is approximately N(0, ‖k‖²/d).
+
+**Step 2 — Normalise by σ:** Compute `σ² = ‖k‖²/d` (equivalently,
+`σ = ‖k‖/sqrt(d)`). Store σ as a 16-bit float alongside the quantized vector.
+
+**Step 3 — Unitised coordinates:** Each coordinate becomes:
+
+```
+ẑ[i] = k̃[i] / σ  ~  N(0, 1)
+```
+
+This is a standard unit-normal random variable. The distribution is now
+**exactly known** — it is N(0,1) by construction, regardless of the original
+key vector's distribution.
+
+**Step 4 — Lloyd-Max on N(0,1):** Design (offline, once) a Lloyd-Max codebook
+with B = 2^b levels for N(0,1). This is a classic numerical optimisation with
+known closed-form solutions for small b. The codebook is shared globally.
+
+**Step 5 — Quantize:** Map each ẑ[i] to the nearest codebook entry. Store b
+bits per coordinate. At reconstruction, multiply by σ and apply Rᵀ.
+
+The "known distribution" is guaranteed by normalisation (Step 2–3), not by any
+data-specific calibration. This is the key elegance of TurboQuant: it converts
+the quantization problem into one with a fixed, universal distribution.
+
+---
+
+### Solution 3 — Why k[2] = 0.07 has the largest reconstruction error
+
+**From Worked Example V.1 (reconstructed):**
+
+After rotation, `k̃[2]` falls near the edge of a quantization bin. The Lloyd-Max
+codebook is designed to minimise mean-squared error over the N(0,1) distribution.
+Bin edges are placed where the N(0,1) PDF transitions between cell regions —
+these are symmetric around 0. Values near the bin edges have the largest
+distance to any codebook centroid.
+
+Specifically, `k[2] = 0.07` maps to a normalised value near `ẑ[2] = 0.07/σ`.
+If σ ≈ 0.3, then `ẑ[2] ≈ 0.23`, which falls close to a bin boundary in the
+TQ3 codebook (3 bits = 8 levels over N(0,1), boundaries at approximately ±0.43,
+±0.90, ±1.53, ±∞). Values near 0 are in a region with relatively wide bins
+(since the N(0,1) PDF concentrates probability there) — the nearest centroid may
+be 0.2–0.3 units away, yielding reconstruction error of 0.2–0.3 × σ.
+
+**Would more bits help?**
+
+Yes — doubling to TQ4 (4 bits = 16 levels) halves the bin widths near zero,
+reducing the maximum possible reconstruction error by approximately 2× (since
+MSE scales as Δ²/12 where Δ is bin width). However:
+
+1. The **relative** position near a bin boundary still determines error — some
+   coordinate will always be the "worst" in any given vector.
+2. For attention logits, the QJL correction (Solution 4) may matter more than
+   raw reconstruction MSE.
+3. At b=4 bits, TurboQuant is no longer compressing below INT4 (4 bits/coord),
+   defeating one of its primary goals.
+
+---
+
+### Solution 4 — Reconstruction error vs attention logit error
+
+**Reconstruction error** measures the L2 distance between the original key vector
+k and the reconstructed k̂:
+
+```
+E_rec = ‖k - k̂‖²
+```
+
+This is what PolarQuant minimises — it finds the quantization that best
+approximates the vector geometrically.
+
+**Attention logit error** measures the error in the dot product between a query q
+and the reconstructed key k̂:
+
+```
+E_logit = |q·k - q·k̂|  =  |q·(k - k̂)|
+```
+
+**Why minimising E_rec does not minimise E_logit:**
+
+By the Cauchy-Schwarz inequality:
+
+```
+|q·(k - k̂)|  ≤  ‖q‖ × ‖k - k̂‖
+```
+
+The logit error depends on both the reconstruction error AND the direction of the
+error relative to q. Specifically:
+
+```
+E_logit = ‖q‖ × ‖k - k̂‖ × cos(θ)
+```
+
+where θ is the angle between q and the error vector `(k - k̂)`. A quantization
+scheme can have small L2 reconstruction error but large logit error if the error
+vector happens to be aligned with q. Conversely, large reconstruction error in
+directions orthogonal to q causes zero logit error.
+
+**QJL's approach:**
+
+QJL (Query-aware Jacobian Linearisation) corrects the bias introduced by
+quantization in the attention logit specifically. It estimates `𝔼[q·k̂ - q·k]`
+from the calibration distribution of queries and applies a per-head bias
+correction:
+
+```
+corrected_logit = q·k̂ + bias_correction(q, codebook, σ)
+```
+
+This reduces E_logit without changing E_rec — it addresses the query-conditional
+error rather than the geometric error. The two objectives are complementary:
+PolarQuant for geometry, QJL for attention fidelity.
+
+---
+
+### Solution 5 — At what head dimension does TurboQuant exceed INT8 compression?
+
+**Compression ratio setup:**
+
+TurboQuant stores b bits per coordinate plus one 16-bit σ scalar per vector.
+
+```
+TQ bits per vector = b × d + 16
+INT8 bits per vector = 8 × d
+```
+
+TurboQuant exceeds INT8 (uses fewer bits) when:
+
+```
+b × d + 16  <  8 × d
+16  <  (8 - b) × d
+d  >  16 / (8 - b)
+```
+
+**For TQ3 (b = 3 bits):**
+
+```
+d  >  16 / (8 - 3)  =  16 / 5  =  3.2
+```
+
+For d ≥ 4, TQ3 already compresses better than INT8.
+
+**For TQ4 (b = 4 bits):**
+
+```
+d  >  16 / (8 - 4)  =  16 / 4  =  4
+```
+
+For d ≥ 5, TQ4 compresses better than INT8.
+
+**Practical result for d = 128 (standard head dimension):**
+
+```
+TQ3 bpw = (3 × 128 + 16) / 128 = 400/128 = 3.125 bits/dim
+TQ4 bpw = (4 × 128 + 16) / 128 = 528/128 = 4.125 bits/dim
+INT8 bpw = 8 bits/dim
+```
+
+TQ3 compresses to 39% of INT8 size; TQ4 to 52% of INT8 size. The σ overhead
+(16 bits / 128 coords = 0.125 bits/coord) is negligible at typical head
+dimensions.
+
+**Common mistake:** Forgetting the σ overhead entirely and claiming TQ3 is
+exactly 3 bits/dim. At d = 16 (some MLA architectures), the overhead is
+16/16 = 1 bit/coord, making TQ3 effectively 4 bits/dim — equal to INT4, not
+compressing beyond INT8.
+
+---
+
+### Solution 6 — TQ3 vs INT8 attention-logit bias
+
+**Attention logit bias** is the systematic error in the dot product `q·k̂`
+relative to the true `q·k`, averaged over queries and keys.
+
+**For INT8:**
+
+INT8 uses uniform quantization: each coordinate is rounded to the nearest value
+on a uniform grid with step Δ = max_val / 127. The quantization error per
+coordinate is ε_i ~ Uniform(-Δ/2, Δ/2), which has **zero mean**. Therefore:
+
+```
+𝔼[q·(k - k̂)] = Σᵢ qᵢ × 𝔼[εᵢ] = Σᵢ qᵢ × 0 = 0
+```
+
+INT8 has **zero attention-logit bias** (the errors are unbiased).
+
+**For TQ3 (Lloyd-Max codebook on N(0,1)):**
+
+The Lloyd-Max quantizer is also unbiased for the distribution it was designed
+for — the centroid of each bin is the conditional mean of N(0,1) given
+membership in that bin, by definition of the Lloyd-Max optimality conditions.
+Therefore, for vectors truly distributed as N(0,1) per coordinate after rotation:
+
+```
+𝔼[ẑ[i] - ẑ̂[i]] = 0   (zero reconstruction bias)
+𝔼[q·(k - k̂)] = 0      (zero logit bias for matched distribution)
+```
+
+**Conclusion:** Both INT8 and TQ3 achieve **zero attention-logit bias** when the
+quantizer distribution matches the data distribution. The advantage of TQ3 is
+not lower bias but lower variance (fewer bits → coarser but unbiased) — and 2.6×
+compression compared to INT8.
+
+**Where bias arises:** If the post-rotation distribution is not perfectly
+Gaussian (heavy tails, outliers), the Lloyd-Max codebook is slightly mismatched
+and a small bias may appear. QJL addresses this with an analytic bias-correction
+term, making TQ3+QJL lower-bias than INT8+no-correction in practice.
+
+---
+
+### Solution 7 — Hadamard vs general random orthogonal rotation
+
+**Hadamard matrix:**
+
+The Walsh-Hadamard matrix H of size d×d (d = power of 2) has entries ±1/√d.
+Applying it to a vector uses the **Fast Walsh-Hadamard Transform (FWHT)**:
+
+```
+Time complexity: O(d log d)
+Storage: none — the matrix is implicit; no d² storage required
+FWHT operations: all additions/subtractions, no multiplications
+```
+
+**General random orthogonal matrix:**
+
+A random O(d) sample (e.g., via QR decomposition of a Gaussian matrix) has
+entries that are dense real numbers. Applying it to a vector is a full matrix-
+vector multiply:
+
+```
+Time complexity: O(d²)
+Storage: d² × 4 bytes = 65,536 bytes for d=128 (modest but non-zero)
+Operations: d² FMAs (fused multiply-add instructions)
+```
+
+**Complexity comparison at d = 128:**
+
+```
+Hadamard FWHT: 128 × log₂(128) = 128 × 7 = 896 operations
+General matmul: 128² = 16,384 operations
+Speedup: 16,384 / 896 ≈ 18.3×
+```
+
+**Why llama.cpp chooses Hadamard:**
+
+1. **18× fewer operations** at d = 128 — essential for CPU inference where every
+   FLOP matters.
+2. **No storage** — the rotation matrix is defined algorithmically, not stored.
+   This matters for models with many KV heads (e.g., 128 heads × 128 dim each).
+3. **Same statistical guarantee** — the Hadamard matrix is also orthogonal, so
+   the rotational invariance argument holds identically. The per-coordinate
+   distribution after Hadamard rotation converges to N(0, σ²) by the same CLT
+   argument as for random orthogonal matrices.
+4. **Integer arithmetic friendly** — FWHT needs only ±1 multiplications, which
+   are just additions/subtractions.
+
+**Trade-off:** The Hadamard matrix requires d to be a power of 2. For head
+dimensions like d = 96 or d = 80, padding to d = 128 is required, adding a
+small overhead.
+
+---
+
+### Solution 8 — Why queries must also be rotated by R
+
+**The attention logit is a dot product:**
+
+```
+logit = q · k
+```
+
+After key rotation: `k̂ = R k` (quantized representation of Rk)
+
+**If R is applied to keys but NOT queries:**
+
+```
+reconstructed_logit = q · (Rᵀ k̂_quantized)
+                    ≠ q · k
+```
+
+The reconstructed key is `Rᵀ k̂_quantized ≈ k` (approximately, with quantization
+error). This is fine — the reconstruction is in the original space and the inner
+product with q is approximately correct.
+
+**Wait — so why rotate queries at all?**
+
+The rotation must be applied consistently. There are two equivalent approaches:
+
+**Approach A (standard):** Store keys in rotated space. At attention time, rotate
+the query before the dot product:
+
+```
+logit = (R q) · k̂_quantized   =   q · (Rᵀ k̂_quantized)   ≈   q · k  ✓
+```
+
+**Approach B:** Rotate keys before quantizing, unrotate before dot product:
+
+```
+k̂ = quantize(R k)
+logit = q · (Rᵀ k̂)   ≈   q · k  ✓
+```
+
+**What would happen if R is applied ONLY to keys (no query rotation, keys stored in rotated space):**
+
+```
+logit = q · k̂_quantized   (q in original space, k̂ in rotated space)
+```
+
+This is computing the dot product between a vector in the original basis and a
+vector in the rotated basis — geometrically meaningless. The dot product no
+longer measures the cosine similarity between query and key in any consistent
+space.
+
+Numerically: since R is orthogonal, `Rᵀ R = I`, but `q · (R k) ≠ (R q) · k`
+when q is in the original space and Rk is treated as if it were in the original
+space. The result is equivalent to computing the inner product of q with a
+randomly rotated version of k — the output has variance `‖q‖² ‖k‖² / d` (as if
+q and k were independent random vectors), destroying all attention signal.
+
+**Summary:** The rotation R is a change of basis. Both operands of the dot
+product must live in the same basis. Either: (a) rotate both q and k before
+computing the dot product in rotated space, or (b) store k in rotated space and
+un-rotate before the dot product. The vLLM implementation chooses option (a) for
+efficiency: the query is rotated once per step, and the stored KV cache contains
+pre-rotated keys, enabling direct `q̃ · k̃` computation without runtime un-rotation.

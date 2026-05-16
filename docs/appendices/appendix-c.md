@@ -1237,3 +1237,205 @@ PASS: column-parallel and row-parallel linear simulation correct
 *Cross-references: Chapter 8.5 (CUDA Graphs), Chapter 10 (Quantization), Chapter 15
 (Tensor Parallelism), Appendix L (CUDA C++ Introduction), Appendix J (libtorch C++ API),
 Appendix M (Triton), Appendix N (CUTLASS).*
+
+
+---
+
+## C.16 Self-Check Questions
+
+1. A BF16 weight tensor of shape `[4096, 4096]` is stored on GPU. Calculate its
+   memory footprint in bytes and in megabytes. If you call `.to(torch.float32)`,
+   how does the memory change? What is the risk of storing activations in FP16
+   rather than BF16 for a model with logit values exceeding 65,504?
+
+2. You profile a decode step and find that `torch.cat([kv_cache, new_kv], dim=2)`
+   appears in the hot path, consuming 30% of step time. Why is this operation
+   expensive in an autoregressive loop? What data structure change eliminates
+   this copy entirely, and how does vLLM implement it?
+
+3. Explain the difference between `torch.no_grad()` and `torch.inference_mode()`.
+   In which scenario would `inference_mode` fail where `no_grad` succeeds?
+   Which should you always prefer in production inference, and why?
+
+4. You measure GPU memory with `torch.cuda.memory_allocated()` before and after
+   loading a 7B BF16 model and observe a 12.8 GB increase — but `nvidia-smi`
+   shows 15.1 GB used by your process. Explain the discrepancy. How do you
+   query the correct "reserved but not allocated" amount?
+
+5. A column-parallel linear layer splits the weight matrix `W` of shape
+   `[d_model, 4 x d_model]` across 4 GPUs along the output dimension. Each GPU
+   holds a `[d_model, d_model]` shard. What collective operation is needed after
+   the local GEMM to produce the correct full output on all ranks? Write the
+   one-line `torch.distributed` call required.
+
+---
+
+## Worked Solutions
+
+### Solution 1 — BF16 tensor memory and FP16 overflow risk
+
+**BF16 memory footprint:**
+
+BF16 uses 2 bytes per element.
+
+```
+elements = 4096 x 4096 = 16,777,216
+bytes    = 16,777,216 x 2 = 33,554,432 bytes
+MB       = 33,554,432 / (1024 x 1024) = 32.0 MB
+```
+
+**After `.to(torch.float32)`:**
+
+FP32 uses 4 bytes per element.
+
+```
+bytes = 16,777,216 x 4 = 67,108,864 bytes = 64.0 MB
+```
+
+Memory doubles to 64 MB. This is why keeping weights in BF16 and only upcasting
+for sensitive operations (e.g., softmax, loss) is standard practice.
+
+**FP16 overflow risk:**
+
+FP16 has a maximum representable value of 65,504. Modern LLMs frequently produce
+pre-softmax logits in the range 10,000-100,000 (especially with large vocabulary
+sizes). A logit of 70,000 stored in FP16 would be clamped to 65,504, distorting
+the softmax distribution and causing incorrect token probabilities.
+
+BF16 has the same 8-bit exponent as FP32, giving a maximum value of ~3.4 x 10^38
+— logit overflow is essentially impossible. This is why Ampere+ GPU inference
+uses BF16, not FP16.
+
+---
+
+### Solution 2 — Eliminating the KV concatenation copy
+
+**Why `torch.cat` is expensive in a decode loop:**
+
+`torch.cat([kv_cache, new_kv], dim=2)` allocates a new tensor of shape
+`[batch, heads, seq_len+1, d_head]` on every decode step, then copies all
+existing KV data into it before appending the new vector. For a 2048-token
+context this is 2048 x heads x d_head x 2 bytes moved per step — O(seq_len)
+copy every iteration, making total KV management cost O(seq_len squared).
+
+**Solution — pre-allocated KV buffer with index tracking:**
+
+Allocate the KV cache once to maximum context length:
+
+```python
+k_cache = torch.zeros(batch, heads, max_seq_len, d_head, dtype=torch.bfloat16)
+v_cache = torch.zeros(batch, heads, max_seq_len, d_head, dtype=torch.bfloat16)
+```
+
+On each decode step, write directly into the pre-allocated slot:
+
+```python
+k_cache[:, :, pos, :] = new_k   # O(1) scatter write
+v_cache[:, :, pos, :] = new_v
+```
+
+Pass a slice `k_cache[:, :, :pos+1, :]` to attention — no copy, just a view.
+
+**vLLM's implementation:**
+
+vLLM uses PagedAttention: the KV cache is divided into fixed-size blocks (typically
+16 tokens per block). Blocks are allocated from a memory pool on demand. Writing
+a new KV pair is always an O(1) scatter into the current block. No contiguous
+growing buffer exists — the block table handles fragmentation. This also enables
+sharing KV blocks between requests with the same prefix (prefix caching).
+
+---
+
+### Solution 3 — `no_grad` vs `inference_mode`
+
+**`torch.no_grad()`:** Disables gradient computation (no grad_fn is attached to
+tensors). The resulting tensors *can* still be used as inputs to grad-enabled
+operations outside the context. Memory: saves gradient tensor memory.
+
+**`torch.inference_mode()`:** A stricter superset. In addition to disabling
+gradient tracking, it marks all tensors as "inference tensors" that cannot be
+used as inputs to any gradient-enabled computation. This allows PyTorch to skip
+additional internal checks, making it slightly faster.
+
+**Where `inference_mode` fails but `no_grad` succeeds:**
+
+If you compute a tensor inside `inference_mode` and pass it into a
+`torch.autograd.grad()` call or into a module with `requires_grad=True` weights
+(e.g., an adapter being trained), you get `RuntimeError: Inference tensors
+cannot be saved for backward`. Under `no_grad` the same code succeeds because
+the tensor is not marked as an inference tensor.
+
+**Which to prefer in production:** Always use `torch.inference_mode()`. It is
+faster, prevents accidental gradient computation, and makes intent explicit.
+Use `no_grad` only when tensors from the context must feed into a gradient-
+enabled region — which should never occur in a production inference server.
+
+---
+
+### Solution 4 — Allocated vs reserved GPU memory
+
+**The discrepancy:**
+
+`torch.cuda.memory_allocated()` returns bytes currently occupied by live tensors.
+PyTorch's CUDA allocator requests memory from the OS in large chunks and holds
+those chunks even after tensors are freed, to avoid repeated `cudaMalloc` calls.
+The reserved pool is what `nvidia-smi` reports.
+
+```
+allocated   = 12.8 GB   (live tensors: weights, activations, KV cache)
+reserved    = 15.1 GB   (allocated + held-but-free pool blocks)
+pool_slack  = 15.1 - 12.8 = 2.3 GB
+```
+
+**Querying reserved memory:**
+
+```python
+allocated = torch.cuda.memory_allocated()   # bytes in live tensors
+reserved  = torch.cuda.memory_reserved()    # bytes held by PyTorch allocator
+free_pool = reserved - allocated            # free blocks inside allocator
+```
+
+**Practical implication:** When vLLM computes available KV cache memory at
+startup, it measures `reserved` (not `allocated`) to avoid overcommitting the
+GPU. The pool slack cannot be used by other processes until released with
+`torch.cuda.empty_cache()`.
+
+---
+
+### Solution 5 — Collective operation for column-parallel linear
+
+**Setup:**
+
+Each GPU i holds weight shard `W_i` of shape `[d_model, d_model]` (columns
+of the full weight matrix split across 4 GPUs). Each GPU computes:
+
+```
+out_i = x @ W_i.T    shape: [batch, seq, d_model]
+```
+
+The 4 shards `[out_0, out_1, out_2, out_3]` form the full output when
+**concatenated** (not summed) along the last dimension.
+
+**Collective operation: AllGather**
+
+Each GPU's `out_i` is a different slice of the full output — they must be
+assembled, not reduced. The correct collective is AllGather:
+
+```python
+import torch.distributed as dist
+
+full_out = [torch.empty_like(out_i) for _ in range(dist.get_world_size())]
+dist.all_gather(full_out, out_i)
+output = torch.cat(full_out, dim=-1)   # [batch, seq, 4 x d_model]
+```
+
+**One-line shorthand:**
+
+```python
+dist.all_gather_into_tensor(output_full, out_i, group=tp_group)
+```
+
+**Common mistake:** Using `all_reduce` (sum) instead of `all_gather`. AllReduce
+is correct for *row-parallel* linear layers (where each GPU computes a partial
+sum of the full output). Column-parallel outputs are disjoint slices — they must
+be concatenated, not summed.

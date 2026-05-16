@@ -964,3 +964,111 @@ Although inference is forward-pass only, autograd mathematics explains several i
 4. In GQA with $n_{heads}=32$ and $n_{kv}=4$, how many times is each KV head shared by query heads?
 
    *Answer: 32/4 = 8 query heads share each KV head*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**Model: d_model=4096, n_layers=32, n_kv=8, d_head=128. KV cache for 2048-token sequence in BF16.**
+
+**Step 1 — Bytes per token:**
+Each token stores one K vector and one V vector per layer, per KV head:
+```
+bytes_per_token = 2 (K and V) x n_layers x n_kv x d_head x 2 bytes (BF16)
+                = 2 x 32 x 8 x 128 x 2
+                = 131,072 bytes = 128 KB per token
+```
+
+**Step 2 — Total for 2048 tokens:**
+```
+total = 2048 x 131,072 = 268,435,456 bytes = 256 MB
+```
+
+**Common mistake:** Forgetting to multiply by 2 for both K and V. Also note n_kv=8 (GQA), not n_heads=32 — with full MHA the cache would be 4x larger (1 GB vs 256 MB).
+
+---
+
+### Question 2
+**Why does sqrt(d_head) scaling prevent training instability?**
+
+**The problem without scaling:**
+The dot product q · k sums d_head independent terms. If q and k are initialised with zero-mean unit-variance components (as is standard), then:
+```
+Var(q · k) = sum_{i=1}^{d_head} Var(q_i * k_i) = d_head x Var(q_i) x Var(k_i) = d_head
+```
+
+So std(q · k) = sqrt(d_head). For d_head=64, std = 8; for d_head=128, std = 11.3.
+
+**Why this causes instability:**
+Softmax is applied to the raw dot products. When inputs have large variance (std >> 1), softmax produces very peaked distributions (near one-hot). The gradient of a peaked softmax approaches zero almost everywhere — this is the **vanishing gradient** problem. Training becomes extremely slow or collapses.
+
+**The fix:**
+Dividing by sqrt(d_head) normalises the variance back to 1:
+```
+Var(q · k / sqrt(d_head)) = d_head / d_head = 1
+```
+
+Now softmax receives inputs with unit standard deviation regardless of d_head, producing well-calibrated attention distributions and healthy gradients throughout training.
+
+---
+
+### Question 3
+**7B BF16 model on H100 (3.35 TB/s bandwidth). Maximum decode throughput at batch=1.**
+
+**Model weight bytes:**
+```
+7B parameters x 2 bytes (BF16) = 14 GB
+```
+
+**Bandwidth-bound decode time:**
+At batch=1, each decode step must load all model weights from HBM (the weights are the bottleneck, not compute):
+```
+t_per_token = 14 GB / 3,350 GB/s = 0.00418 s = 4.18 ms per token
+```
+
+**Maximum throughput:**
+```
+tokens_per_second = 1 / 0.00418 = 239 tokens/s
+```
+
+**Reality check:** This is the theoretical upper bound assuming perfect memory access patterns and zero overhead. Real-world throughput is typically 70-85% of this (175-200 tok/s) due to CUDA kernel launch overhead, attention KV cache reads, and activation tensor movements.
+
+**Note:** At batch=B, the model weights are amortised across B tokens. For batch=8:
+```
+t_per_token = 14 GB / (3,350 GB/s * 8) ≈ 0.52 ms -> 1,920 tok/s effective
+```
+Batching is the primary lever for improving throughput on bandwidth-bound models.
+
+---
+
+### Question 4
+**GQA with n_heads=32, n_kv=4. How many times is each KV head shared?**
+
+**Calculation:**
+With 32 query heads and 4 KV heads, query heads are grouped into n_kv=4 groups:
+```
+sharing_ratio = n_heads / n_kv = 32 / 4 = 8
+```
+
+Each KV head is shared by **8 query heads**.
+
+**Group structure:**
+- KV head 0: serves query heads 0-7
+- KV head 1: serves query heads 8-15
+- KV head 2: serves query heads 16-23
+- KV head 3: serves query heads 24-31
+
+**Memory saving vs MHA:**
+MHA requires n_heads=32 KV heads. GQA with n_kv=4 reduces KV cache by:
+```
+reduction = 32 / 4 = 8x
+```
+
+For the model in Q1 (n_layers=32, d_head=128, BF16), this reduces KV cache from:
+- MHA: 2 x 32 x 32 x 128 x 2 = 524,288 bytes = 512 KB/token
+- GQA (n_kv=4): 131,072 bytes = 128 KB/token (4x fewer KV heads shown above)
+
+At 128K context, the difference is 128K x (512-128) KB = 48 GB saved — enough to fit an additional small model on the same GPU.
+

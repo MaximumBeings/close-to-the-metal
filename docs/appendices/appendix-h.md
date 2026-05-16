@@ -665,3 +665,114 @@ vllm serve <model> --role decode \
 ---
 
 *This appendix is a living reference. Flag defaults and recommended values change with vLLM releases. Always verify against the installed version's `vllm serve --help` output and release notes.*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**Decision: Single GPU deployment, model=7B, 100 req/min, P99 TTFT < 500ms, mixed prompt lengths (128-4096 tokens).**
+
+**Working through the decision tree:**
+
+1. **Model fits on one GPU?** 7B BF16 = 14 GB. A100/H100 80 GB: yes. ✓
+2. **Throughput requirement:** 100 req/min ≈ 1.67 req/s. At 200 tok/s throughput (7B on A100) and average 512 output tokens: 0.4 req/s sustained. Need to check if this saturates.
+3. **Mixed prompt lengths:** Chunked prefill needed to prevent large prompts from blocking short ones.
+4. **P99 TTFT < 500ms with 4096-token prompts:** At ~10,000 tok/s prefill throughput, 4096 tokens takes 410ms. Tight but feasible with prefix caching for repeated system prompts.
+
+**Recommended configuration:**
+```bash
+vllm serve meta-llama/Llama-3.1-7B-Instruct \
+  --gpu-memory-utilization 0.90 \
+  --enable-chunked-prefill \
+  --enable-prefix-caching \
+  --max-num-seqs 64 \
+  --max-num-batched-tokens 4096
+```
+
+---
+
+### Question 2
+**Decision: 70B model, 1000 req/min, cost-sensitive, team has no GPU cluster.**
+
+**Decision path:**
+1. **Own GPU cluster?** No -> consider cloud or quantization.
+2. **Cost-sensitive?** Yes -> FP8 or GGUF quantization to reduce GPU count.
+3. **70B FP8:** ~70 GB -> fits on 1x H100 80GB with 10GB KV headroom.
+4. **1000 req/min = 16.7 req/s:** At 500 tok/s (70B FP8, H100) with avg 300 output tokens: 1.67 req/s per GPU. Need 10x H100s.
+
+**More cost-effective path:**
+- Use Q4_K_M (GGUF, ~40 GB) on 1x H100, serving at ~120 tok/s decode.
+- 1000 req/min at avg 300 tokens out = 5,000 tok/s needed. Requires ~42 H100s with GGUF.
+
+**Recommendation:** Model routing. Route 70% of requests to a 7B model (handles simple queries at $0.10x cost), escalate 30% to 70B. Effective GPU count drops 7x. See Chapter 31.
+
+---
+
+### Question 3
+**Decision: Streaming chatbot, 10 concurrent users max, Apple M2 MacBook Pro (16 GB RAM).**
+
+**Decision path:**
+1. **GPU available?** Apple Silicon MPS (unified memory) — limited VRAM.
+2. **16 GB unified memory:** Model must fit within ~12 GB (leaving 4 GB for OS/app).
+3. **Model choice:** Llama-3.2-3B Q4_K_M (~2 GB) or Qwen2.5-7B Q4_K_M (~4.5 GB).
+4. **10 concurrent users:** llama.cpp `--parallel 10` allocates 10 KV cache slots.
+
+**Configuration:**
+```bash
+llama-server \
+  --model qwen2.5-7b-instruct-q4_k_m.gguf \
+  --parallel 10 \
+  --ctx-size 4096 \
+  --n-gpu-layers 99 \
+  --flash-attn
+```
+
+KV per slot: 4096 x 128 KB = 512 MB. Total KV: 10 x 512 MB = 5 GB. Model: 4.5 GB. Total: 9.5 GB < 12 GB available. ✓
+
+---
+
+### Question 4
+**Decision: RAG pipeline, same 2048-token system prompt for all users, 500 concurrent requests.**
+
+**Key insight:** All users share the same 2048-token system prompt — prefix caching eliminates 100% of system prompt prefill cost after the first request.
+
+**Decision:**
+```bash
+vllm serve <model> \
+  --enable-prefix-caching \
+  --enable-chunked-prefill \
+  --max-num-seqs 500 \
+  --gpu-memory-utilization 0.92
+```
+
+**Expected benefit:** With 2048-token shared prefix at 500 concurrent users, prefix cache hit rate approaches 99%+ after warm-up. TTFT drops from ~200ms (prefill) to ~5ms (cache hit) for subsequent requests. This is the highest-ROI single optimization for RAG deployments.
+
+---
+
+### Question 5
+**Decision: Production service, need 99.9% uptime, traffic spikes 10x on weekday mornings.**
+
+**Decision path:**
+1. **High availability (99.9% uptime):** Minimum 2 replicas at all times (one can fail while the other serves).
+2. **10x traffic spike:** HPA with scale-up headroom + predictive scaling for known morning spikes.
+3. **Kubernetes + KubeRay:** Necessary for automated scaling.
+
+**Architecture:**
+```yaml
+# HPA configuration
+minReplicas: 2   # always-on baseline
+maxReplicas: 20  # handles 10x spike
+scaleUp:
+  stabilizationWindowSeconds: 30  # react in 30s
+  policies:
+  - type: Pods
+    value: 4    # add 4 pods at a time
+    periodSeconds: 30
+```
+
+**Predictive scaling:** Schedule a CronJob to pre-scale to 8 replicas at 7:45 AM weekdays (before the 8 AM traffic spike), then allow HPA to handle residual variance. This eliminates the cold-start penalty during the predictable morning ramp.
+
+**Minimum viable SLA configuration:** PodDisruptionBudget with `minAvailable: 1`, `terminationGracePeriodSeconds` = max_sequence_length x ITL, and node anti-affinity spreading replicas across availability zones.
+

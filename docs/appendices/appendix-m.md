@@ -581,3 +581,136 @@ The reference progression for GPU kernel expertise in LLM inference: start with 
 4. An autotuner runs 6 configurations × 50 warmup + 100 timed iterations each. Each kernel call takes 2 ms. Estimate the total autotuning time for one (M, N, K) shape. When does this cost amortise? *(Section P.7)*
 
 5. The fused dequantise + GEMV kernel in §P.11.1 loads INT4 weights packed 2 per byte and applies per-group FP16 scales. For a 7B-parameter model with 4096 rows × 4096 columns in each weight matrix and group size=128, compute the total HBM reads for one forward pass token, and compare to serving the same model in BF16. *(Section P.11)*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**Grid = (M//128, N//256), BLOCK_M=128, BLOCK_N=256. M=4096, N=8192. Program instances and computation.**
+
+**Number of program instances:**
+```
+grid = (4096//128, 8192//256) = (32, 32)
+total instances = 32 x 32 = 1,024 program instances
+```
+
+**What each program instance computes:**
+Program instance (pid_m, pid_n) computes a tile of the output matrix C of shape (BLOCK_M, BLOCK_N) = (128, 256). Specifically, the tile starting at row `pid_m * 128` and column `pid_n * 256`:
+```
+C[pid_m*128 : pid_m*128+128, pid_n*256 : pid_n*256+256]
+```
+
+This tile is computed as the partial sum over K blocks:
+```
+C_tile = sum over k: A[pid_m*128:..., k*BLOCK_K : ...] @ B[k*BLOCK_K:..., pid_n*256:...]
+```
+
+Each of the 1,024 program instances runs independently (and concurrently on the GPU), covering the full 4096x8192 output matrix without overlap. Total coverage: 1,024 x 128 x 256 = 33,554,432 = 4096 x 8192 elements ✓.
+
+---
+
+### Question 2
+**`tl.dot(a, b)` with BLOCK_K=64 uses Tensor Cores; BLOCK_K=3 does not. Why.**
+
+**Tensor Core requirements on A100:**
+NVIDIA Tensor Cores require matrix dimensions that are multiples of specific tile sizes. For FP16/BF16 on A100:
+- The hardware MMA (Matrix Multiply Accumulate) instruction operates on 16x16x16 tiles.
+- BLOCK_K must be a multiple of 16 (at minimum) for Triton to legally emit Tensor Core instructions.
+
+**BLOCK_K=64:** 64 is a multiple of 16. Triton's `tl.dot` backend sees a K-dimension that satisfies the Tensor Core alignment requirement and generates `mma.sync.aligned.m16n8k16` PTX instructions (or similar), which execute on Tensor Cores. Achieves ~312 TFLOPS peak for FP16.
+
+**BLOCK_K=3:** 3 is NOT a multiple of 16. Triton cannot pack 3-wide dot products into Tensor Core tiles. It falls back to scalar FP32 FMA (fused multiply-add) instructions executed on regular CUDA cores. These are ~16x slower than Tensor Cores for the same operation (~19.5 TFLOPS scalar FP32 vs ~312 TFLOPS Tensor Core FP16 on A100).
+
+**Practical rule:** Always choose BLOCK_K in {16, 32, 64, 128} for Tensor Core utilization. The Triton autotuner will naturally select from these values, but manual kernel writers must be aware of this constraint.
+
+---
+
+### Question 3
+**Fused softmax: row must fit in BLOCK_SIZE registers. Sequence length 131,072, FP32. Register memory per row.**
+
+**Register memory for one row:**
+```
+register_bytes = 131,072 floats x 4 bytes (FP32) = 524,288 bytes = 512 KB per row
+```
+
+**H100 register file per SM:**
+The H100 SM has 65,536 x 4 bytes = 256 KB of register file (maximum, shared across all active threads). A single row of 131,072 FP32 values requires 512 KB — **twice the total register file of the entire SM**.
+
+This is physically impossible. No amount of BLOCK_SIZE tuning can fit a 131K-element row in registers.
+
+**Why FlashAttention's tiling approach is necessary:**
+FlashAttention processes the attention matrix in tiles (e.g., BLOCK_SIZE=64 keys at a time). Each tile requires only 64 x 4 = 256 bytes of registers — easily fitting. The online softmax algorithm (Q4 of Appendix L) maintains a running (max, sum) state across tiles, producing the correct normalised attention weights without ever materialising the full 131K-element row.
+
+This is precisely why FlashAttention is not just an optimization but a **necessity** for long-context inference: the naive fused-softmax approach is physically impossible beyond ~16K sequence length on current hardware.
+
+---
+
+### Question 4
+**Autotuner: 6 configs x 150 iterations each (50 warmup + 100 timed) x 2 ms/call. Total time and amortization.**
+
+**Total autotuning time:**
+```
+iterations = 6 configs x (50 + 100) iterations = 6 x 150 = 900 iterations
+time = 900 x 2 ms = 1,800 ms = 1.8 seconds
+```
+
+**When does this cost amortise?**
+The autotuner caches results keyed on (M, N, K, dtype). The 1.8s cost is paid once per unique shape. After that, the best configuration is loaded from cache (a JSON file), adding ~0.1ms per kernel call.
+
+**Amortisation break-even:**
+If the autotuned kernel runs 1,000 times in production (reasonable for a weight matrix used in every forward pass), and the speedup is 1.5x:
+```
+time_saved_per_call = baseline_time * (1 - 1/1.5) = 2ms * 0.33 = 0.66ms per call
+total_saved = 1,000 x 0.66ms = 660ms
+autotuning_cost = 1,800ms
+break_even = 1,800 / 0.66 = 2,727 calls
+```
+
+At 100 forward passes/second, break-even is reached in 27 seconds of runtime. The cost amortises quickly for any weight matrix used in ongoing production serving.
+
+**Practical consideration:** Only run the autotuner for shapes that actually appear in your workload. A shape like (4096, 1, 8192) for batch=1 GEMV is different from (4096, 16, 8192) for batch=16 — the autotuner caches separately for each and must be run for each distinct shape.
+
+---
+
+### Question 5
+**INT4 GEMV kernel: 4096x4096 per weight matrix, group_size=128, 7B model. HBM reads vs BF16.**
+
+**Weight matrix size with INT4 + group scales:**
+- INT4 weights: 4096 x 4096 x 0.5 bytes (2 per byte) = 8 MB per matrix
+- Group scales (FP16, 1 per 128 elements): 4096 x 4096 / 128 x 2 bytes = 262,144 bytes = 256 KB per matrix
+- Total per matrix: 8 MB + 256 KB = 8.25 MB
+
+**For one forward pass token (one GEMV per weight matrix):**
+In a 7B model, approximate weight matrix count:
+- Attention: Q, K, V, O projections x 32 layers = 128 matrices (but K/V smaller with GQA)
+- FFN: up, gate, down x 32 layers = 96 matrices
+- Approximate: ~200 weight matrices of shape ~4096x4096
+
+Total HBM reads (INT4):
+```
+200 matrices x 8.25 MB = 1,650 MB = 1.61 GB
+```
+
+**BF16 comparison:**
+```
+200 x 4096 x 4096 x 2 bytes = 200 x 32 MB = 6,400 MB = 6.25 GB
+```
+
+**Comparison:**
+```
+INT4 HBM reads = 1.61 GB
+BF16 HBM reads = 6.25 GB
+Reduction = 6.25 / 1.61 = 3.88x fewer HBM reads
+```
+
+At H100 3.35 TB/s, decode latency is proportional to HBM reads at batch=1:
+```
+BF16 decode: 6.25 GB / 3,350 GB/s = 1.87ms per token
+INT4 decode: 1.61 GB / 3,350 GB/s = 0.48ms per token
+Speedup: 1.87 / 0.48 = 3.9x faster decode at batch=1
+```
+
+This is the fundamental advantage of INT4 quantization for memory-bandwidth-bound inference: nearly 4x throughput improvement at batch=1 with minimal quality loss when using AWQ/GPTQ calibration.
+

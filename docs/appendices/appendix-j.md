@@ -1171,3 +1171,80 @@ PASS: column-parallel simulation matches reference (shape [2, 1024])
 *Cross-references: Appendix C (PyTorch Python API), Appendix J (CUDA C++ Introduction),
 Appendix I (C++ Build Patterns), Appendix N (CUTLASS), Chapter 8.5 (CUDA Graphs),
 Chapter 15 (Multi-GPU Serving).*
+
+
+---
+
+## Worked Solutions
+
+### When to Use libtorch (C++ API) vs Python vLLM
+
+**Scenario 1 — Building a new inference runtime from scratch:**
+libtorch is appropriate when you need fine-grained control over memory layout, kernel dispatch, and tensor operations that Python's overhead would obscure. libtorch gives direct access to ATen (PyTorch's C++ tensor library) without the Python interpreter. This is how TensorRT-LLM, ONNX Runtime, and MLC-LLM are built at their core — they use ATen or equivalent C++ tensor APIs to compose custom CUDA kernels with a thin C++ orchestration layer.
+
+**When Python vLLM is better:** For standard transformer architectures served via HTTP API, vLLM's Python layer adds only 5-20ms scheduling overhead — negligible compared to model forward pass time. Don't rebuild what vLLM already provides correctly.
+
+---
+
+**Scenario 2 — Real-time latency constraint under 1ms:**
+Python has a GIL (Global Interpreter Lock) and interpreter overhead that makes it impossible to guarantee sub-millisecond response times. A C++ application using libtorch can:
+- Pre-allocate all tensors at startup (zero allocation latency on hot path)
+- Bypass Python garbage collection pauses
+- Use lock-free queues for request ingestion
+- Achieve consistent 0.1-0.5ms scheduling latency
+
+**Example use case:** Hardware inference accelerators (FPGAs, custom ASICs) that feed into a libtorch forward pass, requiring <1ms total pipeline latency including scheduling.
+
+**Worked example — minimum latency inference loop:**
+```cpp
+#include <torch/torch.h>
+
+class FastInferenceEngine {
+  torch::jit::Module model_;
+  torch::Tensor preallocated_input_;
+  torch::Tensor preallocated_output_;
+public:
+  FastInferenceEngine(const std::string& model_path) {
+    model_ = torch::jit::load(model_path);
+    model_.to(torch::kCUDA);
+    model_.eval();
+    // Pre-allocate tensors at startup -- zero allocation on hot path
+    preallocated_input_ = torch::zeros({1, 512}, torch::kCUDA);
+    preallocated_output_ = torch::zeros({1, 32000}, torch::kCUDA);
+  }
+
+  void infer(const std::vector<int64_t>& token_ids) {
+    // Copy token IDs into pre-allocated tensor
+    auto input_data = preallocated_input_.data_ptr<float>();
+    // ... fill input tensor ...
+    auto output = model_.forward({preallocated_input_}).toTensor();
+    // output is ready in microseconds -- no Python overhead
+  }
+};
+```
+
+---
+
+**Scenario 3 — Packaging inference into a C++ application or shared library:**
+libtorch enables packaging the model as a `.so` shared library that any C++ application (game engine, embedded system, C++ microservice) can `dlopen()` and call directly. No Python runtime required in the deployment environment.
+
+**Practical steps:**
+```bash
+# 1. Compile and link against libtorch
+cmake_minimum_required(VERSION 3.18)
+find_package(Torch REQUIRED)
+target_link_libraries(inference_lib "${TORCH_LIBRARIES}")
+
+# 2. Export symbols for shared library
+# CMakeLists.txt:
+add_library(inference_lib SHARED inference.cpp)
+set_target_properties(inference_lib PROPERTIES 
+  CXX_VISIBILITY_PRESET hidden
+  VISIBILITY_INLINES_HIDDEN YES)
+
+# 3. Ship the .so + libtorch shared libraries
+# No Python interpreter required on the deployment machine
+```
+
+**Comparison to Python vLLM:** Python vLLM requires Python 3.9+, pip, and the full PyTorch Python stack. A libtorch-based library requires only the libtorch shared libraries (~500 MB) and CUDA drivers. This is a significant reduction in deployment complexity for embedded or containerised C++ applications.
+

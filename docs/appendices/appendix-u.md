@@ -963,3 +963,230 @@ PASS: GGUF format memory calculations consistent (Q2_K=23GB → F16=140GB)
    different from your production distribution (e.g., calibrated on Wikipedia
    but deployed for code generation), describe how this would affect the
    importance scores and what the consequence for code generation quality would be.
+
+---
+
+## Worked Solutions
+
+### Solution 1 — AWQ salient channel scaling
+
+**What salient channels are:**
+
+During calibration, AWQ passes a small dataset through the model and records the
+activation magnitudes for each input channel of every weight matrix. A channel
+is "salient" if its activations have unusually large magnitude — when the
+activation is large, even a tiny quantization error in the corresponding weight
+produces a large output error (`δ_output = activation × δ_weight`). AWQ
+identifies saliency by comparing the per-channel activation L2 norm or max
+absolute value against the layer median.
+
+**Why scaling reduces error for salient channels:**
+
+Before quantization, multiply salient weight `wᵢ` by scale factor `s > 1`:
+
+```
+w̃ᵢ = wᵢ × s
+```
+
+Quantize `w̃ᵢ` to INT4. The quantized value represents `wᵢ × s` with the same
+absolute error `ε` as any other channel, but the **relative** error is `ε / (wᵢ
+× s)` — smaller by factor `1/s` compared to not scaling.
+
+At runtime, divide the corresponding activation by `s` to compensate:
+
+```
+output = (w̃ᵢ_quantized / s) × (aᵢ × s)   →   same output as original
+```
+
+This is a zero-overhead identity: the division is fused with the activation
+scaling in the dequantize kernel. The net effect: salient channels get
+effectively more quantization precision at no memory cost.
+
+**Which channels are salient:** AWQ ranks channels by `max(|activation|)` or
+`mean(|activation|²)` across the calibration set. Typically the top 1% of
+channels by activation magnitude are scaled. The scale factor `s` is chosen to
+minimise layer-level quantization error on the calibration data via a grid
+search over `s ∈ {0.5, 1.0, 2.0, 4.0, 8.0}`.
+
+---
+
+### Solution 2 — Why Hessian information improves GPTQ
+
+**First-order minimisation (naive):**
+
+Minimising reconstruction error using only the gradient `∂L/∂w` finds a search
+direction that reduces error locally, but it treats all weights as equally
+important. A small weight with a large gradient could be moved aggressively, but
+if neighbouring weights compensate poorly, the total error remains high.
+
+**Second-order information — the Hessian:**
+
+The Hessian `H = ∂²L/∂w²` encodes the curvature of the loss landscape. Concretely,
+for a linear layer `y = Wx`:
+
+```
+H = 2 × X Xᵀ    (where X is the calibration input matrix)
+```
+
+The diagonal `H_{ii}` measures how sensitive the output is to perturbations in
+weight `wᵢ`. A large `H_{ii}` means even a small quantization error `δwᵢ` causes
+a large output error `H_{ii} × δwᵢ² / 2`.
+
+**GPTQ's insight:**
+
+After quantizing weight `wᵢ`, the resulting quantization error `δwᵢ` is known
+exactly. GPTQ uses the Hessian to propagate this error to the remaining
+unquantized weights:
+
+```
+δw_{j≠i}  ←  δw_{j≠i}  -  (H_{ij} / H_{ii}) × δwᵢ
+```
+
+This is the optimal weight update given the Hessian — it compensates for the
+damage done by quantizing `wᵢ` before proceeding to `w_{i+1}`. First-order
+methods cannot do this because they have no curvature information to guide the
+compensation.
+
+**Intuition:** Think of weights as springs in a network. When you permanently
+deform one spring (quantize `wᵢ`), the Hessian tells you exactly how to pre-
+tension the adjacent springs to maintain the same total force. Gradient-only
+methods see only local slope, not the network of inter-spring forces.
+
+---
+
+### Solution 3 — FP8 E4M3 static quantization scale factor
+
+**Given:**
+- FP8 E4M3 max representable value: 448.0
+- Weight matrix max absolute value: 2.3
+
+**Scale factor for static FP8 quantization:**
+
+```
+scale = max_fp8 / max_weight = 448.0 / 2.3 = 194.78
+```
+
+Round to a power of two for hardware efficiency: `scale = 128` (2⁷) or keep
+`194.78` as a FP16 scale stored alongside the FP8 tensor.
+
+**Quantized representation:**
+
+```
+w_fp8 = round(w × scale) clamped to [-448, 448]
+w_recon = w_fp8 / scale
+```
+
+**What happens with activation max = 600.0:**
+
+At inference, a fresh activation with max absolute value 600.0 arrives. The
+static scale was set for weights (max = 2.3), not activations. If the same
+scale is naively applied:
+
+```
+a_fp8 = round(600.0 × 194.78) = round(116,870) → clamp to 448
+```
+
+The activation is **saturated** — clipped to 448 / 194.78 = 2.3 in FP32 space,
+throwing away the true value of 600.0. This produces catastrophic output error.
+
+**Solutions:**
+1. **Dynamic quantization:** Compute a per-tensor scale at inference time:
+   `scale_act = 448.0 / 600.0 = 0.747`. Apply this scale to the activation
+   before the FP8 GEMM.
+2. **Calibration update:** Re-run calibration capturing the max activation over
+   a larger dataset so the static scale accommodates the true dynamic range.
+3. **Hybrid:** FP8 weights with BF16 activations (W8A16) — avoids activation
+   saturation at the cost of a slower mixed-precision GEMM.
+
+---
+
+### Solution 4 — Recovering quality after Q4_K_M perplexity degradation
+
+**Situation:** Baseline perplexity increase = +1.8 (above the +1.0 reject threshold).
+
+**Three actions, in order of increasing cost:**
+
+**Action 1 — Try a higher-quality GGUF variant (zero cost, minutes):**
+
+Switch from `Q4_K_M` to `Q5_K_M` or `Q6_K`. These use 5 and 6 bits per weight
+respectively with the same k-quant mixed precision.
+
+```
+Q4_K_M: ~4.5 bpw, PPL ↑ ~0.5–1.5
+Q5_K_M: ~5.5 bpw, PPL ↑ ~0.2–0.6
+Q6_K:   ~6.6 bpw, PPL ↑ ~0.1–0.3
+```
+
+This costs no money and takes 5 minutes to swap. Accept the larger file size.
+
+**Action 2 — Use importance-matrix guided quantization (medium cost, hours):**
+
+Generate an importance matrix (imatrix) from your specific production corpus:
+
+```bash
+llama-imatrix -m model.gguf -f production_samples.txt -o imatrix.dat
+llama-quantize --imatrix imatrix.dat model.gguf model-IQ4_XS.gguf IQ4_XS
+```
+
+IQ4_XS with a domain-specific imatrix typically outperforms generic Q4_K_M on
+your distribution, sometimes recovering 0.5–1.0 perplexity points.
+
+**Action 3 — Use AWQ or GPTQ quantization with calibration data (highest cost, days):**
+
+Re-quantize using `autoawq` or `auto-gptq` with calibration data drawn from
+your production distribution:
+
+```python
+from awq import AutoAWQForCausalLM
+model = AutoAWQForCausalLM.from_pretrained("meta-llama/Meta-Llama-3-70B")
+model.quantize(tokenizer, quant_config={"w_bit": 4, "q_group_size": 128},
+               calib_data=your_production_samples)
+```
+
+AWQ with domain-specific calibration data consistently achieves lower perplexity
+than generic GGUF quantization because the salient channel scaling is tuned to
+your activation distribution rather than a generic calibration corpus.
+
+---
+
+### Solution 5 — Importance matrix domain mismatch
+
+**What the importance matrix captures:**
+
+The importance matrix `I[i,j]` records the magnitude of gradient × activation
+for weight `w[i,j]` over the calibration corpus. Weights with large `I[i,j]`
+are deemed important and assigned more bits (or smaller quantization error) in
+IQ4_XS.
+
+**Effect of Wikipedia calibration on code generation:**
+
+Wikipedia text activates language modelling circuits for prose: long-range
+syntactic dependencies, named-entity recognition, factual recall. Code
+generation uses different circuits: identifier resolution, bracket matching,
+type consistency, indentation tracking.
+
+Concretely:
+- Attention heads specialised for **code token patterns** (indentation, brackets,
+  keywords) will have low activation magnitude on Wikipedia → assigned as **low
+  importance** → quantized aggressively.
+- Attention heads for **noun-phrase cohesion** (important for Wikipedia) will be
+  marked high importance → quantized conservatively → wasted precision budget.
+
+**Consequence for code generation quality:**
+
+The aggressively quantized code-specific heads introduce higher quantization
+error precisely in the computation paths needed for correct code. Practically:
+
+1. **Bracket/indentation errors:** Heads tracking structural tokens are degraded.
+2. **Identifier confusion:** Similar variable names may be conflated.
+3. **Logical errors:** Arithmetic and comparison operations may use degraded
+   weight representations in the MLP layers that process numeric tokens.
+
+The perplexity on a code benchmark (HumanEval, MBPP) will be higher than if the
+model had been calibrated on a code corpus (The Stack, CodeSearchNet), even
+though the Wikipedia-calibrated model may show acceptable perplexity on prose.
+
+**Mitigation:** Always use a calibration corpus that matches the production
+distribution. For a code-generation model, use 128–512 samples from the target
+language (Python, C++, etc.). For a mixed-use model, combine 50% prose + 50%
+code calibration samples.

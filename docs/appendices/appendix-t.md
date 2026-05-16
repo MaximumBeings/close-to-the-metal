@@ -878,3 +878,204 @@ PASS: ColBERT 1M docs FP32 = 2.10 TB
    uses last-token pooling rather than CLS pooling. Why can't an autoregressive
    model use CLS pooling? What property of the decoder architecture makes last-
    token pooling the natural choice?
+
+---
+
+## Worked Solutions
+
+### Solution 1 — Masked mean pooling
+
+**What goes wrong without the attention mask:**
+
+Mean pooling without masking sums embedding vectors for all `n` tokens (including
+`[PAD]`) and divides by `n`:
+
+```
+e_wrong = (1/n) × Σᵢ hᵢ    for i = 1..n, including PAD tokens
+```
+
+The `[PAD]` token produces a non-zero embedding vector `h_pad` — the model has
+learned an embedding for the padding token ID. Including it shifts the mean
+toward `h_pad`, degrading the semantic fidelity of the sentence representation.
+At 512 tokens with 1 PAD token, the dilution is 1/512 ≈ 0.2%, small but
+measurable. At 64 actual tokens plus 448 PAD tokens, the dilution is 448/512 ≈
+87.5% — the pooled embedding would be nearly indistinguishable from `h_pad`.
+
+**Masked mean pooling fix:**
+
+```
+mask  = [1, 1, 1, ..., 1, 0]   # 1 for real tokens, 0 for PAD
+denom = mask.sum() = n_real     # count of non-PAD tokens
+
+e_masked = Σᵢ (mask[i] × hᵢ) / denom
+```
+
+Step by step:
+1. Multiply each token embedding by its mask bit — PAD embeddings become the
+   zero vector.
+2. Sum the masked embeddings.
+3. Divide by the number of real tokens (`n_real`), not the sequence length.
+
+This guarantees the sentence embedding is the mean over only the meaningful
+tokens, regardless of padding position or count.
+
+**Common mistake:** Dividing by `n` (sequence length) even after zeroing PAD
+embeddings. The numerator is correct (PAD zeroed out) but the denominator is
+wrong — you divide by a larger number than the actual token count, producing a
+scaled-down embedding. Always divide by `mask.sum()`.
+
+---
+
+### Solution 2 — Inner product vs cosine similarity for L2-normalised vectors
+
+**Mathematical identity:**
+
+For two vectors **u** and **v** with ‖u‖₂ = ‖v‖₂ = 1:
+
+```
+cosine_similarity(u, v) = u · v / (‖u‖ ‖v‖)
+                        = u · v / (1 × 1)
+                        = u · v
+                        = inner_product(u, v)
+```
+
+When both vectors are unit-normalised, inner product and cosine similarity are
+numerically identical. A higher inner product means higher cosine similarity,
+so ranking by IP gives the same ordering as ranking by cosine.
+
+**Why IP over L2 in FAISS?**
+
+The L2 distance between unit vectors is related to inner product by:
+
+```
+‖u - v‖² = ‖u‖² + ‖v‖² - 2(u · v)
+           = 1 + 1 - 2(u · v)
+           = 2 - 2(u · v)
+```
+
+So minimising L2 distance is equivalent to maximising inner product — the
+ranking is identical. However, `IndexFlatIP` has a computational advantage:
+
+- **L2 distance** requires computing `‖u - v‖²` = expanded form with three
+  terms; FAISS must materialise `Σ(uᵢ - vᵢ)²`.
+- **Inner product** requires only `Σ uᵢvᵢ` — a single GEMM operation with no
+  subtraction, directly maps to `BLAS sgemm`, and benefits from hardware-level
+  fused multiply-add (FMA) optimisation.
+
+Result: `IndexFlatIP` is typically 10–20% faster than `IndexFlatL2` for
+unit-normalised embeddings, with identical result ordering.
+
+---
+
+### Solution 3 — Reranker latency and budget
+
+**Given:**
+- `bge-reranker-large`: 435M params, 520 pairs/s
+- `ms-marco-MiniLM-L-6-v2`: 22M params, 4,200 pairs/s
+- P95 latency budget: 50 ms for 100 candidate documents
+
+**Latency per model for 100 candidates:**
+
+```
+latency_bge     = 100 / 520  pairs/s = 0.1923 s = 192 ms
+latency_minilm  = 100 / 4200 pairs/s = 0.0238 s =  24 ms
+```
+
+**Decision:** `bge-reranker-large` at 192 ms **exceeds** the 50 ms budget by
+3.8×. `ms-marco-MiniLM-L-6-v2` at 24 ms **fits** within the budget.
+
+**Break-even candidate set size (N) for each model:**
+
+```
+bge_max_N    = 520  × 0.050 = 26  candidates
+minilm_max_N = 4200 × 0.050 = 210 candidates
+```
+
+Within the 50 ms budget:
+- `bge-reranker-large` can rerank at most **26 candidates**.
+- `ms-marco-MiniLM-L-6-v2` can rerank at most **210 candidates**.
+
+**Practical implication:** If your RAG retriever returns 100 documents, only
+MiniLM fits the latency budget. If quality is paramount and you can afford
+25–30 ms extra latency, consider a two-stage approach: MiniLM to trim 100→20,
+then BGE-reranker-large on the top 20 (192 × 20/100 = 38 ms — now within
+budget).
+
+---
+
+### Solution 4 — Dense vs sparse vs multi-vector retrieval (BGE-M3)
+
+**Dense retrieval:**
+Each query and document is encoded as a single fixed-length vector (e.g., 1024
+dimensions). Similarity is computed as one inner product. Advantages: fast
+FAISS search, small index size, works well when semantic paraphrasing is common.
+Disadvantage: a single vector cannot capture all semantic facets of a long
+document.
+
+**Best scenario:** Broad semantic search where the user's phrasing differs from
+the document's phrasing (paraphrase matching, cross-lingual retrieval).
+
+**Sparse retrieval:**
+Uses a learned sparse representation (e.g., SPLADE): most dimensions are zero,
+non-zero dimensions correspond roughly to important terms. Stored and searched
+using inverted index structures. Advantages: exact term matching, interpretable,
+efficient for keyword-heavy queries. Disadvantage: poor at semantic paraphrasing.
+
+**Best scenario:** Technical documentation, medical records, or legal text where
+exact terminology matters and users type precise keywords.
+
+**Multi-vector retrieval (ColBERT-style, BGE-M3's "ColBERT mode"):**
+Every token in the document produces a separate embedding vector. Query tokens
+perform MaxSim (maximum inner product over all document token vectors) for each
+query token, then sum. This late-interaction model is much more expressive.
+Advantage: fine-grained token-level alignment catches partial matches. Disadvantage:
+index size scales with sequence length × number of documents × embedding dim —
+potentially 100× larger than dense.
+
+**Best scenario:** Retrieval tasks requiring fine-grained matching — e.g.,
+multi-hop QA, code search where specific function names and arguments matter,
+or biomedical literature where exact phrase alignment is critical.
+
+**BGE-M3 hybrid:** Combine all three signals with a weighted sum
+(`dense + λ₁ × sparse + λ₂ × colbert`). This achieves SOTA on BEIR while
+maintaining acceptable latency by using dense for initial candidate retrieval
+and multi-vector for reranking.
+
+---
+
+### Solution 5 — Last-token pooling for decoder-only LLMs
+
+**Why CLS pooling fails for autoregressive decoders:**
+
+CLS pooling reads the representation at position 0 (the `[CLS]` token). This
+works in bidirectional encoders (BERT) because attention at every position can
+attend to every other position — the `[CLS]` token accumulates information from
+the entire sequence during forward propagation.
+
+Decoder-only (causal) architectures use **causal attention masks**: each token
+can only attend to previous tokens, not future ones. Position 0 can see only
+itself. It has no information about tokens at positions 1, 2, …, n. Pooling at
+position 0 would give an embedding that represents nothing beyond the first
+token — worse than random.
+
+**Why last-token pooling is the natural choice:**
+
+In a causal model, the last token (position n) has attended to all preceding
+tokens through the chain of residual connections and attention layers. Its
+hidden state `h_n` is the most information-rich position: it is conditioned on
+the full sequence.
+
+Formally, for an autoregressive model with causal mask M:
+
+```
+h_t = Attention(Q_t, K_{≤t}, V_{≤t}) + FFN(...)
+```
+
+Only `h_n` (t = n) has K and V from all positions 1 through n. It is the
+natural "summary" token.
+
+**NV-Embed-v2 additional trick:** It appends a learned `[EOS]` instruction
+token after the input and uses that token's representation, ensuring the model
+can learn a dedicated pooling behaviour through fine-tuning without conflating
+it with the final content token. This is equivalent to last-token pooling but
+with a controllable, task-specific pooling head.

@@ -866,3 +866,188 @@ llama-bench --model MODEL.gguf --n-gpu-layers 999 -p 512 -n 128 -r 3
 ---
 
 *For Apple Silicon and Android deployment, see Appendix Q. For the general llama.cpp CLI flag reference, see Appendix E. For CI/CD pipelines that build llama.cpp binaries for these platforms automatically, see Appendix S (the llama.cpp multi-architecture build matrix section).*
+
+
+---
+
+## R.8 Self-Check Questions
+
+1. A Raspberry Pi 5 has 8 GB of LPDDR4X RAM. After accounting for OS overhead
+   (~512 MB) and GPU shared memory (~256 MB for the VideoCore), approximately
+   how much RAM is available for model weights? What is the largest quantized
+   model (in parameter count) that fits, using Q4_K_M format?
+
+2. You run `vcgencmd get_throttled` on a Raspberry Pi 5 mid-inference and see
+   the output `0x50005`. What does this code indicate? What are the two most
+   likely physical causes, and what corrective action addresses each?
+
+3. A Jetson Orin NX 16 GB has a 1024-core Ampere GPU. You set `-ngl 999`
+   (all layers on GPU) for a Q4_K_M 7B model (~4.4 GB). The model loads without
+   error, but decode throughput is only 8 tok/s, far below the expected 20+
+   tok/s. List three diagnostic steps you would take, in order, to identify the
+   bottleneck.
+
+4. Explain the difference between `sudo nvpmodel -m 0` and `sudo jetson_clocks`
+   on a Jetson device. Why is running both commands (in that order) necessary
+   to achieve maximum inference throughput? What does running `jetson_clocks`
+   without `nvpmodel -m 0` first risk?
+
+5. The Raspberry Pi 5 VideoCore VII GPU supports Vulkan 1.2. When you compile
+   llama.cpp with `-DGGML_VULKAN=ON` and set `-ngl 20`, what is happening
+   architecturally? Why does offloading only 20 layers (rather than all layers)
+   often produce higher throughput than `-ngl 999` on the Pi 5?
+
+---
+
+## Worked Solutions
+
+### Solution 1 — Available RAM and model capacity on Raspberry Pi 5 (8 GB)
+
+**Available RAM calculation:**
+
+```
+total RAM        = 8,192 MB
+OS overhead      =   512 MB
+GPU shared mem   =   256 MB
+available        = 8,192 - 512 - 256 = 7,424 MB = 7.25 GB
+```
+
+**Largest Q4_K_M model that fits:**
+
+Q4_K_M uses approximately 0.63 GB per billion parameters (4.5 effective bits per
+weight).
+
+```
+max_params = 7.25 GB / 0.63 GB/B = 11.5 B
+```
+
+A 7B model at Q4_K_M (~4.4 GB) fits comfortably with ~2.85 GB headroom for
+KV cache and working memory. A 13B model (~8.2 GB) exceeds available RAM and
+will cause heavy swapping or an OOM kill.
+
+**Practical note:** The Pi 5 has no dedicated GPU VRAM — all RAM is shared
+between CPU and VideoCore GPU. Setting `gpu_mem=256` in `/boot/config.txt`
+reserves 256 MB for the GPU; the rest is available for llama.cpp.
+
+---
+
+### Solution 2 — Interpreting `vcgencmd get_throttled` output `0x50005`
+
+**Bit field decoding:**
+
+The register is a bitmask where each bit represents a thermal or voltage event:
+
+```
+Bit 0  (0x00001) = Under-voltage detected NOW
+Bit 2  (0x00004) = Currently throttled
+Bit 16 (0x10000) = Under-voltage has occurred since last reboot
+Bit 18 (0x40000) = Throttling has occurred since last reboot
+```
+
+`0x50005` has bits 0, 2, 16, and 18 set: the Pi is **currently throttled due
+to under-voltage**, and this has occurred before since the last reboot.
+
+**Cause A — Inadequate power supply:** The Pi 5 requires a USB-C supply rated
+for 5V/5A (25W). Many "5V/3A" chargers cannot sustain inference load. Fix:
+replace with the official Raspberry Pi 5 power supply (5V/5A).
+
+**Cause B — Voltage drop on the cable:** Even a correct adapter can lose voltage
+over a long or thin USB-C cable due to resistive drop. Fix: use a short (< 1m),
+high-quality USB-C cable rated for 5A.
+
+---
+
+### Solution 3 — Diagnosing 8 tok/s on Jetson Orin NX 16 GB
+
+**Expected:** 20+ tok/s for Q4_K_M 7B with full GPU offload.
+**Observed:** 8 tok/s — roughly 60% below expectation.
+
+**Step 1 — Check power mode and clock state:**
+
+```bash
+sudo nvpmodel -q           # What power mode is active?
+sudo jetson_clocks --show  # Are clocks at maximum?
+tegrastats                 # Check GR3D_FREQ (GPU utilisation %)
+```
+
+If `nvpmodel` shows mode 1 (15W) instead of mode 0 (MAXN), GPU and memory bus
+are running at reduced clocks. Run `sudo nvpmodel -m 0 && sudo jetson_clocks`
+and re-benchmark.
+
+**Step 2 — Verify the model is actually running on GPU:**
+
+```bash
+tegrastats | grep "GR3D_FREQ"
+```
+
+If `GR3D_FREQ` is near 0% during decode, the GPU is idle — the model is running
+on CPU despite `-ngl 999`. Check that the build was compiled with CUDA support
+(`cmake -DGGML_CUDA=ON` is required). Verify with `llama-bench --n-gpu-layers 999`
+and check the build info output for `GGML_CUDA=1`.
+
+**Step 3 — Check thermal throttling:**
+
+```bash
+tegrastats | grep "Temp"
+```
+
+Jetson Orin NX begins thermal throttling above 75 degrees C, reducing GPU
+frequency. If temperatures are high, add a heatsink with active cooling or
+reduce the power mode to trade throughput for thermal headroom.
+
+---
+
+### Solution 4 — `nvpmodel` vs `jetson_clocks` and ordering
+
+**`sudo nvpmodel -m 0`:** Sets the power mode — a pre-defined envelope specifying
+the maximum TDP and which CPU/GPU cores are active. Mode 0 (MAXN) unlocks all
+CPU cores and sets the GPU and memory bus TDP to the device maximum.
+
+**`sudo jetson_clocks`:** Within the current power mode's ceiling, pins all
+clocks to their maximum allowed values. Without it, the Linux CPUfreq governor
+and CUDA power management leave clocks at conservative frequencies waiting for
+a workload ramp-up signal.
+
+**Why both are required, in order:**
+
+1. `nvpmodel -m 0` first: raises the TDP ceiling to device maximum. Without
+   this, `jetson_clocks` can only pin clocks at the current (lower) mode's limit.
+2. `jetson_clocks` second: pins clocks at the new higher ceiling.
+
+**Risk of wrong order:** Running `jetson_clocks` without `nvpmodel -m 0` first
+pins clocks at the current mode's limit — if the device booted in 15W mode,
+clocks are pinned at 15W maximums, not MAXN maximums. No hardware damage, but
+you leave significant performance on the table.
+
+---
+
+### Solution 5 — Vulkan offload on Raspberry Pi 5 and the `-ngl 20` optimum
+
+**What happens with `-ngl 20`:**
+
+llama.cpp's Vulkan backend compiles GLSL compute shaders that run on the
+VideoCore VII. With `-ngl 20`, the first 20 transformer layers execute on the
+VideoCore via Vulkan, and the remaining layers (for a 32-layer 7B model, layers
+21-32) run on the CPU via NEON SIMD. Both subsystems work concurrently.
+
+**Why `-ngl 20` often beats `-ngl 999`:**
+
+The VideoCore VII is a modest GPU that shares the LPDDR4X memory bus with the
+CPU. At `-ngl 999`, all 32 layers run on the VideoCore:
+- The shared memory bus is fully saturated by GPU DRAM reads.
+- The CPU sits idle between layer completions.
+
+At `-ngl 20`, the workload is split:
+- The VideoCore handles the early layers.
+- The CPU handles later layers in parallel using its own L2/L3 cache hierarchy.
+- Both subsystems are active simultaneously, hiding memory latency.
+
+The optimal split depends on the model's layer structure and the Pi 5's
+VideoCore/CPU throughput balance. Values between 16 and 24 layers typically
+maximise throughput. Find the optimum by benchmarking:
+
+```bash
+for ngl in 0 8 16 20 24 28 32; do
+    llama-bench --model MODEL.gguf --n-gpu-layers $ngl -p 256 -n 64 -r 3
+done
+```

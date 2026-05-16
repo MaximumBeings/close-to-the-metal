@@ -1901,3 +1901,206 @@ The goal is not ceremony. The goal is the ability to ship a change on a Tuesday 
 ---
 
 *For the Kubernetes and KubeRay deployment patterns that this pipeline targets, see Chapter 19. For the Prometheus metrics that feed the canary monitor, see Chapter 16. For the model evaluation methodology referenced in the eval gate, see Chapter 39. For the security concepts behind prompt injection defence, see Chapter 21.*
+
+
+---
+
+## Self-Check Questions
+
+1. A PR modifies `vllm/attention/backends/flash_attn.py`. Your CI pipeline runs
+   a unit test gate and a Docker build, but the Docker image build succeeds while
+   the unit test gate skips (no tests cover that file). The PR is merged, and
+   the next day a user reports OOM crashes on A100s. What CI gate was missing,
+   and what specific test would have caught the regression?
+
+2. You add an eval gate to your pipeline that runs `lm-evaluation-harness` on
+   HellaSwag (10,042 examples) using a 70B model. The gate takes 4.5 hours.
+   Describe two concrete strategies that preserve gate quality while reducing
+   wall-clock time to under 30 minutes.
+
+3. Your canary deployment shifts 5% of traffic to a new model version.
+   After 10 minutes, Prometheus shows: `request_rate` is unchanged, `error_rate`
+   is 0%, but `p99_latency` has increased from 800ms to 2,400ms. Should the
+   canary be promoted, rolled back, or held for more data? Justify your answer.
+
+4. A GitHub Actions workflow uses `if: github.ref == 'refs/heads/main'` to gate
+   a Kubernetes deployment step. A developer accidentally pushes directly to
+   `main` (bypassing PR review) with a broken config. What branch protection
+   rule would have prevented this, and what CI step would catch the broken
+   config before the deployment step runs?
+
+5. Explain the difference between a smoke test and a load test in the context
+   of an LLM inference CI pipeline. At what stage of the pipeline should each
+   run, and what specific metrics does each validate?
+
+---
+
+## Worked Solutions
+
+### Solution 1 — Missing CI gate for attention backend regression
+
+**What was missing: a GPU smoke test.**
+
+The unit test gate ran but had no coverage for `flash_attn.py`. The Docker build
+verified the image builds and imports cleanly without executing real inference
+on GPU hardware. The missing gate is a GPU smoke test that runs an actual forward
+pass on the target hardware class.
+
+**Specific test that would have caught the regression:**
+
+```python
+# smoke_test_attention.py — runs on a real A100 runner in CI
+import torch
+from vllm import LLM, SamplingParams
+
+def test_flash_attn_no_oom():
+    # Use a small model for CI speed; the kernel path is the same
+    llm = LLM(
+        model="meta-llama/Llama-3.2-1B",
+        max_model_len=8192,
+        gpu_memory_utilization=0.90,
+        enforce_eager=False,   # uses CUDA graphs + flash attn
+    )
+    outputs = llm.generate(
+        ["Explain attention in one sentence."] * 32,
+        SamplingParams(max_tokens=64)
+    )
+    assert len(outputs) == 32
+    assert all(len(o.outputs[0].text) > 0 for o in outputs)
+
+if __name__ == "__main__":
+    test_flash_attn_no_oom()
+    print("PASS: flash attention smoke test")
+```
+
+This test would have triggered the OOM on a real A100 CI runner rather than in
+production.
+
+**Lesson:** Unit tests (no GPU) and build tests (no inference) cannot catch
+runtime memory allocation bugs in GPU kernels. Every pipeline touching attention,
+quantization, or memory management needs a GPU smoke test job.
+
+---
+
+### Solution 2 — Reducing eval gate from 4.5 hours to under 30 minutes
+
+**Strategy A — Stratified subset sampling:**
+
+Draw a statistically representative sample from the full benchmark:
+
+```bash
+lm_eval --model vllm     --tasks hellaswag     --limit 500     --device cuda:0
+```
+
+500 examples complete in approximately 12 minutes for a 70B model. The standard
+error on accuracy is +-1.5% at this sample size — sufficient to detect regressions
+larger than 3 percentage points. The gate rejects if accuracy drops more than
+2 pp from baseline.
+
+Trade-off: small regressions (< 2 pp) may be missed. Mitigation: run the full
+eval asynchronously post-merge and alert if a regression is found.
+
+**Strategy B — 7B proxy model:**
+
+Maintain a regression test using a 7B version of the same model family as a
+proxy. The 7B model runs HellaSwag in approximately 8 minutes. Establish (by
+validating on past PRs) that a regression of X pp on the 7B proxy reliably
+predicts a regression on the 70B model.
+
+Reserve the full 70B eval for nightly runs and model checkpoint changes only —
+not every code PR.
+
+**Best combined approach:** 500-example stratified subset on the 70B model
+(~12 min) as the PR gate, plus full HellaSwag on the 70B model nightly.
+
+---
+
+### Solution 3 — Canary decision: p99 latency 800ms to 2,400ms
+
+**Decision: Roll back immediately.**
+
+The new version is not crashing (error rate 0%) but is 3x slower at p99.
+P99 latency represents the experience of the slowest 1 in 100 requests.
+
+**SLA implication:** If the SLA specifies p99 < 1,000ms (a common production
+target), the new version is already violating SLA at just 5% of traffic.
+Promoting to 100% would put the entire service out of SLA compliance, affecting
+1 in 100 requests for every user.
+
+**Why not hold for more data:** Latency regressions do not self-correct with
+more traffic — they reflect a fundamental change (longer generation length,
+slower kernel, memory pressure causing eviction). Waiting 10 more minutes will
+not fix a 3x slowdown.
+
+**Correct action:** Roll back the canary, profile `time_to_first_token` and
+`time_per_output_token` separately to isolate whether the regression is in
+prefill (compute-bound) or decode (memory-bound), then fix before re-deploying.
+
+---
+
+### Solution 4 — Branch protection and broken config detection
+
+**Branch protection rule to prevent direct pushes:**
+
+In GitHub Repository Settings > Branches > Branch protection rules for `main`:
+
+- Enable "Require a pull request before merging" — prevents direct pushes.
+- Set "Require approvals: 1" — requires at least one reviewer.
+- Enable "Require status checks to pass before merging" — CI must be green.
+- Enable "Do not allow bypassing the above settings" — applies to admins too.
+
+With these rules, even repository admins cannot push directly to `main`.
+
+**CI step that catches broken config before deployment:**
+
+A dry-run validation step placed before the deployment step in the workflow:
+
+```yaml
+- name: Validate Kubernetes manifests
+  run: |
+    kubectl apply --dry-run=client -f k8s/
+
+- name: Helm dry-run
+  run: |
+    helm upgrade --install my-release ./chart       --values values-prod.yaml       --dry-run --debug
+```
+
+The `--dry-run` flag sends rendered manifests to the Kubernetes API server's
+validation endpoint without applying them. Schema errors, missing required
+fields, and invalid resource types are caught here, before any resources change.
+
+---
+
+### Solution 5 — Smoke test vs load test in LLM inference CI
+
+**Smoke test:** Verifies that the server starts correctly and can process at
+least one request end-to-end without crashing. Binary pass/fail for basic
+functionality.
+
+- Runs: immediately after Docker build, as the first job that starts the server.
+  Blocks all subsequent jobs.
+- Duration: 30-120 seconds.
+- Metrics validated: server starts within timeout, `/health` returns HTTP 200,
+  a single prompt produces non-empty output, GPU memory allocated (model is on
+  GPU), no CUDA errors in stderr.
+
+**Load test:** Verifies that the server sustains production-level throughput and
+latency under concurrent traffic. Stress-tests the scheduler, batching logic,
+and memory management.
+
+- Runs: after the smoke test and eval gate pass, on the main branch before a
+  release tag. Does not block individual PRs (too slow).
+- Duration: 5-30 minutes.
+- Metrics validated: tokens/second at target concurrency (e.g., 64 concurrent
+  users), p50/p95/p99 time-to-first-token and inter-token latency, GPU memory
+  stability over 1,000+ requests (no memory leak), error rate < 0.1% under load.
+
+**Summary:**
+
+| Property | Smoke Test | Load Test |
+|---|---|---|
+| Runs on | Every PR (post-build) | Main branch / release |
+| Duration | 30-120 s | 5-30 min |
+| Traffic | 1 request | 64+ concurrent |
+| Validates | Server starts, basic inference | Throughput, latency, stability |
+| Blocks merge | Yes | No (post-merge gate) |

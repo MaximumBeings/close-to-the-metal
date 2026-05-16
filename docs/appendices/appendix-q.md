@@ -1204,3 +1204,206 @@ PASS: estimated cold-start = 75s for 50 unique shapes
 ---
 
 *For Raspberry Pi and NVIDIA Jetson deployment, see Appendix R. For the general llama.cpp CLI flag reference, see Appendix E. For quantization internals (GGUF, AWQ, FP8), see Chapter 10. For MLX low-level Metal kernel programming, see the Metal shader concepts in Appendix L.*
+
+---
+
+## Q.12 Self-Check Questions
+
+1. A 7B-parameter model in Q4_K_M format is approximately 4.4 GB. A Pixel 9 Pro
+   has 16 GB of physical RAM. After accounting for OS overhead (~3 GB) and other
+   apps (~2 GB), is there enough headroom to run the model? Show your arithmetic.
+   What is the largest model (in parameter count) that fits comfortably?
+
+2. You benchmark llama.cpp on an M2 MacBook Air (8-core GPU) with `-ngl 0`
+   (CPU only) and then with `-ngl 99` (all layers on GPU). The CPU run produces
+   8.3 tok/s; the GPU run produces 31.2 tok/s. Calculate the speedup ratio.
+   What architectural property of Apple Silicon makes this speedup possible
+   without a PCIe bandwidth penalty?
+
+3. A developer uses `Q2_K` quantization on a Snapdragon 8 Gen 3 phone to fit a
+   7B model. Compared to `Q4_K_M`, what is the approximate file-size reduction?
+   What quality trade-off does the developer accept?
+
+4. The MLX 4-bit format stores each weight in 4 bits plus a 16-bit scale per
+   group of 64 weights. Calculate the effective bits-per-weight and the total
+   memory for a 13B-parameter model. How does this compare to Q4_K_M GGUF?
+
+5. Your Android app crashes with an out-of-memory error when loading a
+   Q4_K_M 3B model (≈ 2.0 GB) on a device with 8 GB RAM. What are the
+   three most likely causes, and what diagnostic steps would you take to
+   identify which one is responsible?
+
+---
+
+## Worked Solutions
+
+### Solution 1 — 7B Q4_K_M on Pixel 9 Pro
+
+**Given:**
+- Physical RAM: 16 GB
+- OS overhead: ~3 GB
+- Other apps: ~2 GB
+- Model size: 4.4 GB
+
+**Available RAM for model:**
+
+```
+available = 16 - 3 - 2 = 11 GB
+```
+
+**Headroom check (80% rule — leave 20% to avoid thrashing):**
+
+```
+safe_limit = 11 × 0.80 = 8.8 GB
+```
+
+4.4 GB < 8.8 GB → **Yes, the 7B Q4_K_M fits comfortably.**
+
+**Largest model that fits:**
+
+Working backwards from the safe limit:
+
+```
+Q4_K_M memory ≈ params_B × 0.63 GB/B   (4-bit + k-quant overhead)
+largest_params = 8.8 / 0.63 ≈ 14 B
+```
+
+A 13B model at Q4_K_M (≈ 8.2 GB) fits within 8.8 GB. A 14B model is marginal;
+use Q4_K_S or Q3_K_M to stay within budget.
+
+**Key insight:** The 80% headroom rule is important because Android's low-memory
+killer will terminate your app if it causes the system to page heavily.
+
+---
+
+### Solution 2 — CPU vs GPU layer offload speedup
+
+**Given:**
+- CPU-only (`-ngl 0`): 8.3 tok/s
+- Full GPU (`-ngl 99`): 31.2 tok/s
+
+**Speedup ratio:**
+
+```
+speedup = 31.2 / 8.3 = 3.76×
+```
+
+The GPU run is approximately **3.8× faster**.
+
+**Why no PCIe penalty?**
+
+On Apple Silicon, CPU and GPU share the same unified memory pool on the same
+physical silicon die. There is no separate VRAM connected over PCIe. When the
+GPU reads model weights, it accesses the same DRAM that the CPU would read —
+the memory bandwidth is the full 100–400 GB/s (depending on chip tier) rather
+than the 16–32 GB/s of a PCIe 4.0 ×16 link.
+
+On a discrete-GPU PC, "offloading" to the GPU requires copying tensors over the
+PCIe bus. If the model is too large for VRAM, partial offload means every
+forward pass crosses PCIe, creating a bottleneck that can make GPU offload
+*slower* than CPU-only for large models. Apple Silicon avoids this entirely.
+
+---
+
+### Solution 3 — Q2_K vs Q4_K_M
+
+**File-size comparison for a 7B model:**
+
+| Format | Bits/weight (effective) | 7B size |
+|--------|------------------------|---------|
+| Q4_K_M | ~4.5 | ~4.4 GB |
+| Q2_K | ~2.6 | ~2.7 GB |
+
+**Reduction:**
+
+```
+reduction = (4.4 - 2.7) / 4.4 = 1.7 / 4.4 ≈ 39%
+```
+
+Q2_K is approximately **39% smaller** than Q4_K_M for a 7B model.
+
+**Quality trade-off:**
+
+Q2_K quantizes weights to just 2 bits with k-quant mixed precision. Perplexity
+(PPL) typically increases by 3–8 points versus the FP16 baseline, compared to
+only 0.5–1.5 for Q4_K_M. In practice this manifests as:
+- Reduced factual recall
+- More grammatical errors in long outputs
+- Tendency to repeat phrases or lose coherent structure
+
+This trade-off is acceptable for simple, short-context tasks (voice assistants,
+keyword classification) but not for reasoning-heavy or code-generation tasks.
+
+---
+
+### Solution 4 — MLX 4-bit memory for 13B model
+
+**MLX 4-bit format:**
+- 4 bits per weight
+- 16-bit (FP16) scale per group of 64 weights
+
+**Effective bits per weight:**
+
+```
+scale_overhead = 16 bits / 64 weights = 0.25 bits/weight
+effective_bpw  = 4 + 0.25 = 4.25 bits/weight
+```
+
+**Memory for 13B parameters:**
+
+```
+memory = 13 × 10⁹ × 4.25 bits / 8 bits/byte / 10⁹ bytes/GB
+       = 13 × 4.25 / 8
+       = 6.91 GB
+```
+
+**Comparison to Q4_K_M GGUF:**
+
+Q4_K_M uses approximately 4.5 bits/weight (some sensitive layers stored at 6
+bits, most at 4 bits):
+
+```
+Q4_K_M memory ≈ 13 × 10⁹ × 4.5 / 8 / 10⁹ = 7.31 GB
+```
+
+MLX 4-bit (g=64) is about **5–6% smaller** than Q4_K_M for a 13B model. The
+difference narrows with larger group sizes and is offset by the fact that Q4_K_M
+has finer-grained mixed precision for quality-sensitive layers.
+
+---
+
+### Solution 5 — Android OOM diagnostic
+
+**Three most likely causes:**
+
+**Cause A: OS memory limits per process.** Android enforces per-process heap
+limits (typically 256 MB to 1 GB depending on device class). Native C++ memory
+via JNI bypasses the heap limit but is still subject to system-level limits.
+
+**Cause B: Memory fragmentation.** Even with 8 GB physical RAM, the OS may have
+paged or fragmented available RAM such that a single 2.0 GB contiguous mapping
+cannot be satisfied.
+
+**Cause C: KV cache + working memory overhead.** The model file is 2.0 GB, but
+inference also needs: KV cache (context × layers × 2 × d_model × 2 bytes),
+tokenizer state, output buffers, and JNI bridge overhead. Total runtime memory
+may be 2.5–3.5 GB.
+
+**Diagnostic steps:**
+
+1. **Log `ActivityManager.MemoryInfo.availMem`** before model load. If
+   available RAM < 3 GB at load time, Cause A or B is likely.
+
+2. **Use `adb shell dumpsys meminfo <your.package.name>`** to inspect native
+   heap and graphics memory breakdowns after the crash.
+
+3. **Try `--ctx-size 512`** (reduce context) to shrink KV cache. If the crash
+   disappears, Cause C is confirmed.
+
+4. **Try Q2_K** (≈ 1.6 GB) instead of Q4_K_M. If Q2_K loads but Q4_K_M
+   crashes, the device's available RAM is between 2 and 3 GB at runtime (Cause
+   B — fragmentation or background pressure).
+
+5. **Check `logcat` for `LowMemoryKiller`** entries. If the system killed other
+   processes before your app crashed, you are hitting the device's global memory
+   ceiling rather than a per-process limit.

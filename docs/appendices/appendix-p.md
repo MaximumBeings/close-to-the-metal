@@ -853,3 +853,133 @@ PASS: 5 HIP→CUDA API mappings are well-formed
    MI300X. Their current setup uses custom CUDA C++ kernels for fused attention.
    List the steps required to port those kernels to ROCm, in order. Which step
    is most likely to require manual intervention rather than automated tooling?
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**MI300X: 192 GB HBM3. Llama 3.1 70B BF16 = 140 GB. gpu_memory_utilization=0.85. KV budget and max concurrent 4K requests.**
+
+**Step 1 — Available HBM:**
+```
+available = 192 GB x 0.85 = 163.2 GB
+```
+
+**Step 2 — After model weights:**
+```
+kv_budget = 163.2 - 140 = 23.2 GB
+```
+
+**Step 3 — KV per 4K-token request:**
+At 320 KB/token for 70B BF16 (from Appendix A calculations):
+```
+kv_per_request = 4096 tokens x 320 KB = 1,310,720 KB = 1.25 GB
+```
+
+**Step 4 — Maximum concurrent requests:**
+```
+max_requests = floor(23.2 GB / 1.25 GB) = floor(18.56) = 18 concurrent requests
+```
+
+**MI300X advantage:** A single MI300X (192 GB) fits the full 70B BF16 model AND serves 18 concurrent 4K-context requests. Compare to H100 80 GB, which cannot fit 70B BF16 on a single GPU at all (requires 2x H100 = 160 GB). The MI300X's massive unified HBM3 pool is its key differentiator for large-model inference.
+
+---
+
+### Question 2
+**Difference between `HIP_VISIBLE_DEVICES` and `ROCR_VISIBLE_DEVICES`.**
+
+**`HIP_VISIBLE_DEVICES`:**
+A high-level environment variable that filters which GPUs are visible to the HIP runtime. It operates at the HIP API layer, similar to CUDA's `CUDA_VISIBLE_DEVICES`. Setting `HIP_VISIBLE_DEVICES=0,1` makes only GPUs 0 and 1 available to any HIP API call (hipMalloc, hipDeviceGet, etc.).
+
+**`ROCR_VISIBLE_DEVICES`:**
+A lower-level variable that controls visibility at the ROCm runtime (ROCR = ROCm Runtime) layer, which is the foundation beneath HIP. It uses HSA (Heterogeneous System Architecture) device indices, which may differ from HIP device indices if there are non-GPU HSA agents (e.g., CPU HSA agents, DSPs) in the system.
+
+**When they give different results:**
+On a system with mixed HSA agents (e.g., 4 AMD GPUs + 1 CPU HSA agent), the HSA agent indices are 0=CPU, 1=GPU0, 2=GPU1, 3=GPU2, 4=GPU3. Setting `ROCR_VISIBLE_DEVICES=1,2` would expose GPU0 and GPU1 (HSA indices 1 and 2). Setting `HIP_VISIBLE_DEVICES=0,1` would expose GPU0 and GPU1 (HIP indices, counting only GPUs). These may refer to the same physical GPUs, but the index mapping differs.
+
+**Practical recommendation:** Use `HIP_VISIBLE_DEVICES` for GPU selection in vLLM and PyTorch ROCm deployments. Use `ROCR_VISIBLE_DEVICES` only when working with low-level HSA kernels or when `HIP_VISIBLE_DEVICES` doesn't behave as expected on heterogeneous systems.
+
+---
+
+### Question 3
+**`hipify-clang` translates `cudaMalloc` to `hipMalloc`. One CUDA feature with no direct HIP equivalent requiring manual porting.**
+
+**CUDA Feature: Cooperative Groups -- Grid-level synchronization (`grid.sync()`).**
+
+CUDA Cooperative Groups (introduced in CUDA 9) allow all thread blocks in a grid to synchronize via `grid.sync()`. This enables algorithms where different thread blocks need to communicate results before proceeding (e.g., global reductions, multi-pass algorithms).
+
+HIP does not have a direct equivalent to `cg::grid_group grid = cg::this_grid(); grid.sync()`. Hipify-clang will translate the syntax but the runtime behavior may not be supported on all AMD GPUs, and the performance characteristics differ significantly.
+
+**Manual porting approach:**
+Replace grid-level synchronization with multiple kernel launches (each kernel launch implicitly synchronizes all blocks via the GPU's hardware barrier):
+```cpp
+// CUDA (grid.sync() pattern):
+__global__ void two_phase_kernel(...) {
+    phase1_compute(...)
+    grid.sync();  // ALL blocks wait here
+    phase2_compute(...)
+}
+
+// ROCm manual port (two separate kernels):
+hipLaunchKernelGGL(phase1_kernel, grid, block, 0, stream, ...);
+// implicit sync between launches
+hipLaunchKernelGGL(phase2_kernel, grid, block, 0, stream, ...);
+```
+
+Other CUDA features requiring manual porting: `cudaGraphs` (HIP Graphs have different API semantics), `CUDA MPS` (AMD has no direct equivalent), and Warp-level primitives like `__match_any_sync()` (AMD has different ballot/shuffle semantics in HIP).
+
+---
+
+### Question 4
+**MFMA 32x32x8 FP16 (MI300X) vs WMMA 16x16x16 FP16 (NVIDIA). Minimum batch size for full utilization.**
+
+**NVIDIA WMMA 16x16x16:**
+Each warp (32 threads) computes a 16x16x16 matrix multiply. Minimum useful input size: 16 rows x 16 columns = 256 output elements per warp call. For a GEMV (matrix-vector multiply) at batch=1: the output is Mx1, not MxN -- only 1 column is needed. The WMMA tile computes 16 columns at once; only 1/16 of the tile's compute is useful. This wastes 93.75% of Tensor Core utilization at batch=1.
+
+**AMD MFMA 32x32x8:**
+The MFMA instruction operates on a 32x32 output tile with K=8. Each wavefront (64 threads) computes 1024 output elements per instruction. For batch=1 GEMV: the output is Mx1 -- only 1/32 of the tile is useful. Waste: 96.9%.
+
+**Comparison at batch=1:**
+- NVIDIA: wastes 93.75% of tile (1/16 useful)
+- AMD: wastes 96.9% of tile (1/32 useful)
+
+**Which is more efficient for batch=1 decode?**
+Counterintuitively, **neither is efficient at batch=1**. Both architectures are designed for large GEMMs, not GEMVs. At batch=1, both are purely **memory-bandwidth-bound** (not compute-bound), so the Tensor Core tile size is irrelevant -- the bottleneck is how fast HBM supplies weights, not how fast the matrix units compute.
+
+For batch=1 decode: MI300X advantage comes from **higher HBM bandwidth** (5.2 TB/s vs H100's 3.35 TB/s) and **larger HBM capacity** (192 GB), not from MFMA tile size. The MFMA tile size advantage over WMMA only matters at batch>=32 where compute-bound operation begins.
+
+---
+
+### Question 5
+**Porting custom CUDA C++ fused attention kernels from 4x H100 to MI300X. Steps in order. Most manual step.**
+
+**Step 1 -- Hipify the source code:**
+```bash
+hipify-clang fused_attention.cu --cuda-gpu-arch=sm_90 \
+  -o fused_attention_hip.cpp 2> hipify_report.txt
+```
+This automatically translates: `cudaMalloc` -> `hipMalloc`, `__global__` stays, `cudaStream_t` -> `hipStream_t`, `cublasHandle_t` -> `rocblas_handle`, etc. Review the report for untranslated constructs.
+
+**Step 2 -- Replace CUDA intrinsics with HIP equivalents:**
+Automated hipify misses or incorrectly translates warp-level primitives:
+- `__shfl_down_sync(mask, val, delta)` -> `__shfl_down(val, delta)` (HIP drops the mask parameter)
+- `__ballot_sync(mask, pred)` -> `__ballot(pred)`
+- `cp.async` (async global-to-shared copies) -> no direct HIP equivalent; use `__builtin_nontemporal_load` or manual pipelining.
+
+**Step 3 -- Retune tile sizes for MFMA (most manual step):**
+The CUDA kernel was tuned for NVIDIA's 16x16x16 WMMA tiles on H100. AMD's MFMA uses 32x32x8 tiles. Kernel parameters (`BLOCK_M`, `BLOCK_N`, `BLOCK_K`, number of warps) must be retuned from scratch for optimal MI300X performance. This requires:
+- Understanding AMD's wavefront execution model (64 threads vs NVIDIA's 32)
+- Adjusting shared memory layout for MFMA's different register mapping
+- Re-running profiling with `rocprof` or Omniperf to find bottlenecks
+- This step is **entirely manual** -- no automated tool converts NVIDIA tile configurations to AMD-optimal ones.
+
+**Step 4 -- Validate numerical correctness:**
+Run both the CUDA and HIP implementations on identical inputs and compare outputs with `torch.allclose(cuda_out, hip_out, atol=1e-3)`. FP16 accumulation order differences between NVIDIA and AMD hardware may produce small numerical differences that are acceptable.
+
+**Step 5 -- Performance benchmarking:**
+Profile with `rocprof --sys-trace ./fused_attention_hip` and compare achieved bandwidth/FLOPS to MI300X theoretical limits. Iterate on tile sizes until within 80% of roofline.
+
+**Most manual step: Step 3 (tile size retuning for MFMA).** Hipify handles syntactic translation automatically, but the performance-critical kernel configuration requires deep understanding of AMD's microarchitecture and is never automated.
+

@@ -1810,3 +1810,153 @@ __global__ void stencil_2d_5pt(
 - **CUTLASS** (github.com/NVIDIA/cutlass) — production-quality CUDA templates for GEMM and attention
 - **Triton** (triton-lang.org) — Python-embedded DSL for writing GPU kernels at a higher level of abstraction; used by PyTorch for custom ops and increasingly by vLLM for custom attention backends
 - **Flash Attention source** (github.com/Dao-AILab/flash-attention) — read `csrc/flash_attn/src/flash_fwd_kernel.h` after this appendix; it will make sense
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**Kernel: 64 registers/thread, block size=256 threads. Threads per H100 SM, and occupancy.**
+
+**H100 SM limits:**
+- Max registers per SM: 65,536
+- Max threads per SM: 2,048
+- Max warps per SM: 64 (2,048 / 32)
+
+**Step 1 — Register-limited threads:**
+```
+threads_from_registers = floor(65,536 / 64) = 1,024 threads
+```
+
+**Step 2 — Active warps:**
+```
+active_warps = 1,024 / 32 = 32 warps
+```
+
+**Step 3 — Occupancy:**
+```
+occupancy = 32 active warps / 64 max warps = 50%
+```
+
+**Interpretation:** The kernel is register-limited. 50% occupancy means the SM can hide some memory latency by switching between 32 active warps, but has no additional warps to switch to during long-latency operations (compared to a 64-warp/100% occupancy kernel).
+
+**How to improve:** Reduce registers per thread from 64 to 32 (allows 64 warps = 100% occupancy). Use `__launch_bounds__(256, 2)` to guide the compiler to use fewer registers, or manually reduce register pressure by recomputing values instead of storing them.
+
+---
+
+### Question 2
+**Kernel achieves 80 GB/s on H100 (peak: 3,350 GB/s). Utilization and most likely cause.**
+
+**Bandwidth utilization:**
+```
+utilization = 80 / 3,350 = 2.39%
+```
+
+This is dramatically below peak bandwidth. At 2.4%, the kernel is wasting 97.6% of available HBM bandwidth.
+
+**Most likely cause: Uncoalesced memory access (strided reads).**
+
+When threads in a warp access memory at non-contiguous addresses (e.g., thread 0 reads address 0, thread 1 reads address 128, thread 2 reads address 256...), CUDA cannot coalesce these into a single wide memory transaction. Instead of one 128-byte cache line fetch serving 32 threads, it issues 32 separate 4-byte transactions, each bringing in 128 bytes but using only 4 bytes. Effective bandwidth is reduced by 32x.
+
+**Diagnosis:**
+```bash
+ncu --metrics l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,\
+             l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum \
+             ./my_kernel
+```
+
+A high ratio of sectors/requests (ideally 1.0, bad = 32) confirms uncoalesced access.
+
+**Fix:** Restructure data layout so thread `i` accesses address `base + i` (row-major access in row-parallel kernels). Transpose the weight matrix if necessary to achieve coalesced access in the hot loop.
+
+---
+
+### Question 3
+**2D kernel for matrix [M, N] with block dimensions (16, 16). Thread indexing code.**
+
+```cuda
+__global__ void matrix_kernel(float* A, float* B, float* C, int M, int N) {
+    // Compute global 2D indices
+    int col = blockIdx.x * blockDim.x + threadIdx.x;  // N dimension
+    int row = blockIdx.y * blockDim.y + threadIdx.y;  // M dimension
+
+    // Bounds check -- essential for non-multiple-of-16 dimensions
+    if (col < N && row < M) {
+        int idx = row * N + col;  // row-major linear index
+        C[idx] = A[idx] + B[idx];
+    }
+}
+
+// Launch configuration
+dim3 block_dim(16, 16);                          // 256 threads per block
+dim3 grid_dim(ceil_div(N, 16), ceil_div(M, 16)); // enough blocks to cover matrix
+matrix_kernel<<<grid_dim, block_dim>>>(A, B, C, M, N);
+```
+
+**Why bounds checking is mandatory:** If M or N is not divisible by 16, the last block will launch threads whose global indices (row, col) fall outside the matrix. Without `if (col < N && row < M)`, those threads would read/write out-of-bounds memory — undefined behavior. CUDA does not automatically clip thread indices to valid ranges.
+
+**Common mistake:** Using `blockIdx.x` for rows and `blockIdx.y` for columns. Convention is `x` -> column, `y` -> row (matching (width, height) image convention). Mixing this up causes correct-looking code that processes the matrix transposed.
+
+---
+
+### Question 4
+**Why online softmax avoids a second pass. What mathematical identity makes it possible.**
+
+**Standard softmax requires two passes:**
+1. Pass 1: find max m = max(x_i) across all elements
+2. Pass 2: compute sum S = sum(exp(x_i - m)), then normalise each: x_i -> exp(x_i - m) / S
+
+For attention with T=128K tokens, these two passes over 128K floats each require loading 128K x 4 bytes = 512 KB from HBM twice — very expensive.
+
+**The key mathematical identity (online rescaling):**
+When a new maximum m_new > m_old is encountered, the running sum from the old maximum can be rescaled:
+```
+S_new = S_old * exp(m_old - m_new) + exp(x_new - m_new)
+```
+
+This works because:
+```
+sum_i exp(x_i - m_old) * exp(m_old - m_new) = sum_i exp(x_i - m_new)
+```
+
+The exponential identity `exp(a) * exp(b) = exp(a+b)` lets us shift all prior exponentials to the new base in O(1) time (just multiply the running sum by a scalar). We never need to re-visit previous elements.
+
+**Result:** A single sequential pass over the input maintains (running_max, running_sum) and produces the exact same softmax as the two-pass algorithm. This is the core of FlashAttention's IO efficiency — the entire computation fits in registers/SRAM without re-reading Q, K, or V from HBM.
+
+---
+
+### Question 5
+**GEMV for 8192x8192 BF16 weight matrix achieves 2.0 TFLOPS on H100. Compute-bound or memory-bound?**
+
+**Step 1 — Arithmetic intensity (AI):**
+GEMV computes y = W x, where W is [8192, 8192] and x is [8192, 1].
+
+FLOPs: 2 x 8192 x 8192 = 134,217,728 FLOPs = 134 MFLOPs
+
+Bytes read: W = 8192 x 8192 x 2 bytes (BF16) = 134,217,728 bytes = 134 MB
+(x vector is negligible: 8192 x 2 = 16 KB)
+
+```
+Arithmetic Intensity = 134 MFLOPs / 134 MB = 1.0 FLOPs/byte
+```
+
+**Step 2 — Compare to ridge point:**
+H100 ridge point = peak_compute / peak_bandwidth = 1,979 TFLOPS / 3.35 TB/s = 591 FLOPs/byte.
+
+```
+AI = 1.0 << ridge point of 591 -> MEMORY-BOUND
+```
+
+**Step 3 — Bandwidth roofline prediction:**
+At 1.0 FLOP/byte and 3.35 TB/s bandwidth:
+```
+Theoretical peak = 3.35e12 x 1.0 = 3.35 TFLOPS
+```
+
+Achieved: 2.0 TFLOPS = 2.0/3.35 = **59.7% of the bandwidth roof** — reasonable efficiency for a straightforward GEMV kernel.
+
+**What the 2.0 TFLOPS tells us:** The kernel is getting ~60% of peak memory bandwidth. The remaining 40% is lost to: (a) kernel launch overhead, (b) imperfect cache line utilization, (c) L2 cache pressure from the large 134 MB weight matrix, (d) partial warp utilization at the matrix boundary.
+
+**Implication:** To improve this kernel, focus on memory access patterns (coalescing, prefetching) — not on FP math throughput, which is irrelevant for this memory-bound workload.
+

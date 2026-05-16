@@ -1174,3 +1174,192 @@ SIMD kernels.
 *— Appendix K covers `std::mdspan` as standardised in C++23 (core) and C++26
 (`submdspan`, `std::linalg`). The Kokkos reference implementation
 (github.com/kokkos/mdspan) backports all features to C++17.*
+
+
+---
+
+## Worked Solutions
+
+### Question 1
+**W stored as `float[4096 * 4096]` row-major. Present as column-major to BLAS via `layout_stride`.**
+
+Row-major means element (i, j) is at offset `i * 4096 + j`. Column-major means element (i, j) is at offset `j * 4096 + i`. To present the same flat array as column-major, we need strides: stride in the row dimension = 1 (adjacent rows differ by 1 element), stride in the column dimension = 4096 (adjacent columns differ by 4096 elements).
+
+```cpp
+#include <mdspan>
+
+float W_data[4096 * 4096];  // stored row-major
+
+// Row-major view (default):
+std::mdspan<float, std::extents<size_t, 4096, 4096>, std::layout_right>
+  W_rowmajor(W_data);
+// W_rowmajor(i, j) = W_data[i * 4096 + j]  ✓
+
+// Column-major view via layout_stride -- NO data copy:
+std::layout_stride::mapping<std::extents<size_t, 4096, 4096>> colmaj_map(
+    std::extents<size_t, 4096, 4096>{},
+    std::array<size_t, 2>{1, 4096}  // stride[0]=1 (row), stride[1]=4096 (col)
+);
+std::mdspan<float, std::extents<size_t, 4096, 4096>, std::layout_stride>
+  W_colmajor(W_data, colmaj_map);
+// W_colmajor(i, j) = W_data[i * 1 + j * 4096] = W_data[i + j * 4096]
+// = column-major offset for (i, j)  ✓
+```
+
+**Verification:** For (i=2, j=3):
+- Row-major: offset = 2*4096 + 3 = 8,195
+- Column-major view: offset = 2*1 + 3*4096 = 12,290
+Both access the same `W_data` array at different offsets — the view is a reinterpretation, not a copy.
+
+**BLAS call:**
+```cpp
+// Pass W_colmajor.data_handle() to BLAS with leading dimension 4096
+cblas_sgemm(CblasColMajor, CblasNoTrans, CblasNoTrans,
+            4096, 4096, 4096,
+            1.0f, W_colmajor.data_handle(), 4096,
+            B.data_handle(), 4096,
+            0.0f, C.data_handle(), 4096);
+```
+
+---
+
+### Question 2
+**Why `std::submdspan(K_cache, layer, 0, head, std::pair{0, seq_pos}, std::full_extent)` produces a zero-copy view.**
+
+The KV cache mdspan has extents `[n_layers, 2, n_heads, max_seq, d_head]`. `submdspan` computes a new mapping from this slice's indices to the original flat memory offsets.
+
+**What happens at compile time:**
+- Integer arguments (`layer`, `0`, `head`) are "rank-reducing" slicers: they fix a dimension to a single value and eliminate that rank from the output mdspan.
+- `std::pair{0, seq_pos}` is a range slicer: it reduces the seq dimension to [0, seq_pos) but keeps the rank.
+- `std::full_extent` keeps the d_head dimension unchanged.
+
+The result is an mdspan of rank 2 (seq_pos x d_head) that points into the same memory region as K_cache. The compiler computes the base pointer offset at compile time for the static dimensions (layer, 0, head) and adjusts the stride for the dynamic seq_pos dimension.
+
+**Zero-copy mechanism:** The new mdspan's `data_handle()` is `K_cache.data_handle() + layer * stride_layer + 0 * stride_kv + head * stride_head`. No data is moved — only a new pointer and stride values are computed. The entire operation compiles to 3-5 integer arithmetic instructions.
+
+**Compile-time vs runtime:** `layer` and `head` are `size_t` (runtime values), so their offsets are computed at runtime. But the stride computation itself is determined at compile time from the static layout — the compiler generates an optimal sequence of multiply-add instructions with no branches.
+
+---
+
+### Question 3
+**Custom FP4 accessor policy: two 4-bit values packed per byte, scale per 32-element group.**
+
+```cpp
+struct FP4Accessor {
+    // The backing store is uint8_t (packed FP4 pairs)
+    const uint8_t* packed_data;
+    const float* scale_data;   // one scale per 32 elements
+    static constexpr size_t GROUP_SIZE = 32;
+
+    // reference type must be float (value, not reference)
+    using reference = float;  // NOT float&
+
+    float operator()(size_t idx) const {
+        // Unpack the 4-bit nibble
+        size_t byte_idx = idx / 2;
+        uint8_t packed = packed_data[byte_idx];
+        uint8_t nibble = (idx % 2 == 0) ? (packed & 0x0F) : (packed >> 4);
+
+        // Dequantize: map nibble [0..15] to signed float
+        // Typical FP4 mapping: 0000=0, 0001=0.5, ..., 1111=-0.5 (NF4 or E1M2)
+        static constexpr float lut[16] = {
+            0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 6.0f,
+           -0.0f,-0.5f,-1.0f,-1.5f,-2.0f,-3.0f,-4.0f,-6.0f
+        };
+        float dequantized = lut[nibble];
+
+        // Apply group scale
+        float scale = scale_data[idx / GROUP_SIZE];
+        return dequantized * scale;
+    }
+};
+```
+
+**Why `reference` must be `float` (value) not `float&`:**
+The FP4 value does not exist as a `float` in memory — it is packed as 4 bits within a byte alongside another value. There is no address you can return a reference to. The accessor must compute the dequantised float on-the-fly and return it by value. This is the fundamental difference between custom accessor policies (which return computed values) and the default accessor (which returns a reference to an existing float in memory).
+
+---
+
+### Question 4
+**Static extents vs dynamic extents: assembly differences and when to prefer dynamic.**
+
+```cpp
+// Static: extents known at compile time
+std::mdspan<float, std::extents<size_t, 4096, 4096>> A(ptr);
+// A(i, j) compiles to: ptr[i * 4096 + j]
+// The compiler knows 4096 at compile time -> single MUL + ADD instruction
+
+// Dynamic: extents known at runtime
+std::mdspan<float, std::dextents<size_t, 2>> B(ptr, 4096, 4096);
+// B(i, j) compiles to: ptr[i * B.extent(1) + j]
+// The compiler must load extent(1) from memory, then MUL + ADD
+```
+
+**Assembly difference for `A(i, j)` vs `B(i, j)`:**
+- **Static `A`:** The compiler substitutes 4096 as a compile-time constant. The stride multiply becomes either a shift (`4096 = 2^12` -> `i << 12`) or a multiply by an immediate constant — one instruction.
+- **Dynamic `B`:** The runtime extent must be loaded from the mdspan's stored extents array (a memory load), then multiplied. On modern CPUs with good cache behavior, this is 1 extra load + 1 multiply vs 1 multiply — typically 1-3 ns overhead.
+
+**When to prefer dynamic `B` over static `A`:**
+1. **Shape varies at runtime:** If matrix dimensions change based on input (e.g., variable sequence length in attention), static extents would require template instantiation per shape. Dynamic extents compile once and handle all shapes.
+2. **Reducing binary size:** Each unique static extent combination produces separate template instantiation code. A large model with many weight shapes would produce thousands of instantiations. Dynamic extents share one implementation.
+3. **Plugin or hot-reloaded models:** When model architecture is not known at compile time (loaded from a config file at startup), dynamic extents are required.
+
+**Rule of thumb:** Use static extents for hot-loop inner dimensions (d_head=128 is a natural candidate), dynamic for batch/sequence dimensions.
+
+---
+
+### Question 5
+**Llama-3 70B KV cache: 80 layers, 8 KV heads, head_dim=128, 4096-token context, FP16. Total bytes + mdspan declaration.**
+
+**Total bytes:**
+```
+bytes = 2 (K and V) x 80 layers x 8 KV heads x 4096 tokens x 128 head_dim x 2 bytes (FP16)
+      = 2 x 80 x 8 x 4096 x 128 x 2
+      = 2 x 80 x 8 x 4096 x 256
+      = 2 x 671,088,640
+      = 1,342,177,280 bytes
+      = 1.25 GB per request
+```
+
+**mdspan declaration with static head_dim and dynamic other dimensions:**
+```cpp
+#include <mdspan>
+#include <cstdint>
+
+// Extents: [n_layers, 2, n_kv_heads, seq_len, head_dim]
+// Static: head_dim=128 (architecture constant)
+// Dynamic: n_layers, n_kv_heads, seq_len (may vary by model config)
+using KVCacheExtents = std::extents<
+    size_t,
+    std::dynamic_extent,  // n_layers (80 at runtime)
+    2,                    // K and V (always 2, static)
+    std::dynamic_extent,  // n_kv_heads (8 at runtime)
+    std::dynamic_extent,  // seq_len (4096 at runtime, grows during generation)
+    128                   // head_dim (architecture constant, static)
+>;
+
+// Allocate backing storage
+std::vector<uint16_t> kv_data(1'342'177'280 / 2);  // FP16 = 2 bytes
+
+// Construct mdspan
+std::mdspan<uint16_t, KVCacheExtents> kv_cache(
+    kv_data.data(),
+    80,   // n_layers
+    2,    // KV
+    8,    // n_kv_heads
+    4096  // seq_len (current context length)
+    // head_dim=128 is static, not passed at construction
+);
+
+// Access: K cache for layer 5, head 3, token 100, dim 64
+uint16_t val = kv_cache(5, 0, 3, 100, 64);  // 0=K, 1=V
+
+// Slice: all K vectors for layer 5, head 3, up to current token
+auto k_head = std::submdspan(kv_cache, 5, 0, 3,
+                              std::pair{0, seq_pos},
+                              std::full_extent);
+// k_head has shape [seq_pos, 128] -- zero-copy view
+```
+
+**Why static head_dim matters:** The innermost loop of attention computation iterates over the 128-dimensional head. With static head_dim=128, the compiler can unroll this loop completely or generate optimised SIMD code (AVX-512 handles 128 floats in 4 AVX-512 registers). With dynamic head_dim, the compiler cannot unroll without runtime checks.
+
