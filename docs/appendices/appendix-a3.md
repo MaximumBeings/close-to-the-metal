@@ -312,6 +312,410 @@ Verification (dL/dx check):
       dL/dx[0] approx = (-0.2005 - (-0.2)) / 0.001 = -0.5  CONFIRMED
 ```
 
+### A3.4.3 Additional Jacobian Worked Examples
+
+The following five examples build from the diagonal special case through the fully dense, rank-deficient, and composition cases that appear throughout transformer inference.
+
+---
+
+**Worked Example A3.6-J1 — Softmax Jacobian (non-diagonal, 3-class)**
+
+Softmax is the only common activation whose Jacobian is *not* diagonal. Every output depends on every input through the denominator. This is why its backward pass is often memorized as a VJP shortcut rather than computed through the full matrix.
+
+```
+f(x) = softmax(x),   x = [2.0, 1.0, 0.0]
+
+Step 1 — compute softmax probabilities:
+  exp(x) = [e^2, e^1, e^0] = [7.389, 2.718, 1.000]
+  Z      = 7.389 + 2.718 + 1.000 = 11.107
+  p      = [7.389/11.107, 2.718/11.107, 1.000/11.107]
+         = [0.6652, 0.2447, 0.0900]
+
+Step 2 — derive J[i,j] = dp_i / dx_j:
+
+  When i == j:
+    dp_i/dx_i = d/dx_i [exp(x_i)/Z]
+              = [exp(x_i)*Z - exp(x_i)^2] / Z^2
+              = p_i - p_i^2
+              = p_i * (1 - p_i)
+
+  When i != j:
+    dp_i/dx_j = d/dx_j [exp(x_i)/Z]           (exp(x_i) is constant w.r.t. x_j)
+              = exp(x_i) * (-exp(x_j)) / Z^2
+              = -p_i * p_j
+
+  In matrix form:  J[i,j] = p_i * (delta_{ij} - p_j)
+                           = diag(p) - p * p^T
+
+Step 3 — compute J explicitly for p = [0.6652, 0.2447, 0.0900]:
+
+  diag(p) = [[0.6652, 0,      0     ],
+             [0,      0.2447, 0     ],
+             [0,      0,      0.0900]]
+
+  p*p^T   = [[0.6652*0.6652, 0.6652*0.2447, 0.6652*0.0900],
+             [0.2447*0.6652, 0.2447*0.2447, 0.2447*0.0900],
+             [0.0900*0.6652, 0.0900*0.2447, 0.0900*0.0900]]
+           = [[0.4425, 0.1628, 0.0599],
+              [0.1628, 0.0599, 0.0220],
+              [0.0599, 0.0220, 0.0081]]
+
+  J = diag(p) - p*p^T
+    = [[0.6652-0.4425,  0-0.1628,       0-0.0599      ],
+       [0-0.1628,       0.2447-0.0599,  0-0.0220      ],
+       [0-0.0599,       0-0.0220,       0.0900-0.0081 ]]
+    = [[ 0.2227, -0.1628, -0.0599],
+       [-0.1628,  0.1848, -0.0220],
+       [-0.0599, -0.0220,  0.0819]]
+
+Step 4 — verify two properties:
+
+  (a) Row sums equal zero (softmax sums to 1, so dp_i/dsum(x) = 0):
+      Row 0: 0.2227 - 0.1628 - 0.0599 = 0.0000  CONFIRMED
+      Row 1: -0.1628 + 0.1848 - 0.0220 = 0.0000  CONFIRMED
+      Row 2: -0.0599 - 0.0220 + 0.0819 = 0.0000  CONFIRMED
+
+  (b) Column sums equal zero (shifting all x_j by constant changes nothing):
+      Col 0: 0.2227 - 0.1628 - 0.0599 = 0.0000  CONFIRMED
+
+Step 5 — VJP given upstream g = [1.0, 0.0, 0.0]  (gradient of L = p[0]):
+
+  Explicit:  grad_x = J^T * g = J * g  (J is symmetric)
+             = [0.2227*1 + (-0.1628)*0 + (-0.0599)*0,
+                (-0.1628)*1 + 0.1848*0 + (-0.0220)*0,
+                (-0.0599)*1 + (-0.0220)*0 + 0.0819*0]
+             = [0.2227, -0.1628, -0.0599]
+
+  VJP shortcut (never form J):
+    grad_x = p * (g - dot(g, p))
+    dot(g, p) = 1.0*0.6652 + 0.0*0.2447 + 0.0*0.0900 = 0.6652
+    p * (g - 0.6652):
+      = [0.6652*(1.0-0.6652), 0.2447*(0.0-0.6652), 0.0900*(0.0-0.6652)]
+      = [0.6652*0.3348,       0.2447*(-0.6652),    0.0900*(-0.6652)]
+      = [0.2227, -0.1628, -0.0599]  CONFIRMED -- identical to explicit J^T*g
+
+Key insight: The VJP costs O(n) not O(n^2). For a 128k-token softmax,
+the explicit Jacobian would require 128k*128k = 16 billion floats (~64 GB).
+The VJP fits in a single vector.
+```
+
+---
+
+**Worked Example A3.6-J2 — L2-Normalization Jacobian**
+
+L2-normalization appears in embedding models (cosine similarity), in RMSNorm pre-normalization, and inside the query/key normalization used by Gemma and Llama 3 to stabilize attention.
+
+```
+f(x) = x / ||x||,   x = [3.0, 4.0]
+
+Step 1 — forward:
+  ||x|| = sqrt(9 + 16) = sqrt(25) = 5.0
+  y = f(x) = [3/5, 4/5] = [0.6, 0.8]
+
+Step 2 — derive J[i,j] = dy_i / dx_j:
+
+  y_i = x_i / ||x||,   ||x|| = sqrt(sum_k x_k^2)
+
+  When i == j:
+    dy_i/dx_i = 1/||x|| - x_i^2/||x||^3
+              = (||x||^2 - x_i^2) / ||x||^3
+              = (1 - (x_i/||x||)^2) / ||x||
+              = (1 - y_i^2) / ||x||
+
+  When i != j:
+    dy_i/dx_j = -x_i * x_j / ||x||^3
+              = -(x_i/||x||) * (x_j/||x||) / ||x||
+              = -y_i * y_j / ||x||
+
+  Compact form:  J = (I - y*y^T) / ||x||
+
+Step 3 — compute J for x = [3,4], y = [0.6, 0.8], ||x|| = 5:
+
+  I - y*y^T = [[1, 0], [0, 1]] - [[0.36, 0.48], [0.48, 0.64]]
+            = [[0.64, -0.48], [-0.48, 0.36]]
+
+  J = [[0.64, -0.48], [-0.48, 0.36]] / 5
+    = [[0.128, -0.096], [-0.096, 0.072]]
+
+Step 4 — verify: J * x should equal 0 (scaling x does not change direction):
+  J * x = [[0.128*3 + (-0.096)*4],
+           [(-0.096)*3 + 0.072*4]]
+        = [[0.384 - 0.384],
+           [-0.288 + 0.288]]
+        = [0.0, 0.0]  CONFIRMED -- J is projection onto the hyperplane
+                                   perpendicular to y, rank = n-1.
+
+Step 5 — VJP with upstream g = [1.0, 0.0]:
+  grad_x = J^T * g = J * g  (J is symmetric)
+         = [0.128*1.0 + (-0.096)*0.0,
+            (-0.096)*1.0 + 0.072*0.0]
+         = [0.128, -0.096]
+
+  Equivalently:
+    grad_x = (g - dot(g, y) * y) / ||x||
+    dot(g, y) = 1.0*0.6 + 0.0*0.8 = 0.6
+    g - 0.6*y = [1.0 - 0.6*0.6,  0.0 - 0.6*0.8]
+              = [1.0 - 0.36,      -0.48]
+              = [0.64,  -0.48]
+    / 5.0     = [0.128, -0.096]  CONFIRMED
+
+Geometric interpretation: the gradient of L w.r.t. x is the component
+of the upstream gradient g that is *orthogonal* to y (i.e., perpendicular
+to the current unit vector), scaled by 1/||x||. Moving x along its own
+direction cannot change y = x/||x||, so that component contributes nothing.
+```
+
+---
+
+**Worked Example A3.6-J3 — GeLU Jacobian (diagonal with non-trivial derivative)**
+
+GeLU (Gaussian Error Linear Unit) is the activation used in GPT-2, BERT, and most modern transformers. Its Jacobian is diagonal but its diagonal entries are more interesting than ReLU's binary mask.
+
+```
+f(x) = x * Phi(x),  where Phi is the standard normal CDF
+     = x * (1 + erf(x/sqrt(2))) / 2
+
+Approximate (used in practice): f(x) ≈ 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715*x^3)))
+
+Exact derivative:
+  f'(x) = Phi(x) + x * phi(x),  where phi = standard normal PDF = exp(-x^2/2)/sqrt(2*pi)
+         = 0.5*(1 + erf(x/sqrt(2))) + x * exp(-x^2/2) / sqrt(2*pi)
+
+For the tanh approximation:
+  Let a = sqrt(2/pi) = 0.7979,  c = 0.044715
+  u = a*(x + c*x^3)
+  f(x) ≈ 0.5 * x * (1 + tanh(u))
+
+  f'(x) = 0.5*(1 + tanh(u)) + 0.5*x*(1-tanh^2(u))*(a + 3*a*c*x^2)
+
+Worked example with x = [0.0, 1.0, -1.0, 2.0]:
+
+  x=0.0:
+    u = 0.7979*(0 + 0) = 0.0,  tanh(0) = 0.0
+    f'(0) = 0.5*(1+0) + 0.5*0*(...) = 0.5
+
+  x=1.0:
+    u = 0.7979*(1 + 0.044715) = 0.7979*1.044715 = 0.8337
+    tanh(0.8337) = 0.6831
+    1 - tanh^2 = 1 - 0.4666 = 0.5334
+    a + 3*a*c*x^2 = 0.7979 + 3*0.7979*0.044715*1 = 0.7979 + 0.1070 = 0.9049
+    f'(1) = 0.5*(1+0.6831) + 0.5*1*0.5334*0.9049
+           = 0.5*1.6831 + 0.5*0.4826
+           = 0.8416 + 0.2413
+           = 1.0829   (> 1 -- GeLU gradient CAN exceed 1, unlike sigmoid)
+
+  x=-1.0:  by odd symmetry of tanh:  u = -0.8337, tanh = -0.6831
+    f'(-1) = 0.5*(1-0.6831) + 0.5*(-1)*0.5334*0.9049
+            = 0.5*0.3169 + (-0.2413)
+            = 0.1585 - 0.2413
+            = -0.0829   (NEGATIVE -- GeLU can gate the gradient to near zero or negative)
+
+  x=2.0:
+    u = 0.7979*(2 + 0.044715*8) = 0.7979*(2 + 0.3577) = 0.7979*2.3577 = 1.8813
+    tanh(1.8813) = 0.9545
+    1 - tanh^2 = 1 - 0.9111 = 0.0889
+    a + 3*a*c*(4) = 0.7979 + 3*0.7979*0.044715*4 = 0.7979 + 0.4280 = 1.2259
+    f'(2) = 0.5*(1+0.9545) + 0.5*2*0.0889*1.2259
+           = 0.5*1.9545 + 0.1090
+           = 0.9773 + 0.1090
+           = 1.0863
+
+Jacobian J = diag([f'(x_i)]) = diag([0.5000, 1.0829, -0.0829, 1.0863])
+
+Summary of diagonal values:
+  x =    [ 0.0,   1.0,  -1.0,   2.0]
+  f(x) = [ 0.0,   0.841, -0.159, 1.955]
+  f'(x)= [ 0.5,   1.083, -0.083, 1.086]
+
+Given upstream g = [1.0, 1.0, 1.0, 1.0]:
+  grad_x = diag(f'(x)) * g = [0.5000, 1.0829, -0.0829, 1.0863]
+
+Comparison vs ReLU on same x = [0, 1, -1, 2]:
+  ReLU f'(x) = [0, 1, 0, 1]  -- hard gate, no gradient at x=0
+  GeLU f'(x) = [0.5, 1.083, -0.083, 1.086]  -- smooth, non-zero everywhere,
+               can exceed 1 at positive x (helps avoid vanishing gradient)
+```
+
+---
+
+**Worked Example A3.6-J4 — Jacobian of a Two-Layer Composition (Chain Rule Applied)**
+
+This example makes the matrix chain rule concrete: two linear layers composed, showing how the Jacobian of the composition equals the product of individual Jacobians.
+
+```
+Layer 1:  h = W1 @ x + b1,     W1 = [[1, 2], [3, 4], [5, 6]]  shape [3,2]
+                                x = [1.0, -0.5]
+Layer 2:  y = W2 @ h + b2,     W2 = [[1, 0, -1], [0, 1, 0]]   shape [2,3]
+
+Biases both zero for clarity.
+
+Forward pass:
+  h = W1 @ x = [[1*1 + 2*(-0.5)],
+                [3*1 + 4*(-0.5)],
+                [5*1 + 6*(-0.5)]]
+             = [[1 - 1],
+                [3 - 2],
+                [5 - 3]]
+             = [0.0, 1.0, 2.0]
+
+  y = W2 @ h = [[1*0 + 0*1 + (-1)*2],
+                [0*0 + 1*1 + 0*2]]
+             = [-2.0, 1.0]
+
+Individual Jacobians:
+  J1 = dy/dh = W2   shape [2,3]  (Jacobian of layer 2 w.r.t. its input h)
+     = [[1, 0, -1],
+        [0, 1,  0]]
+
+  J2 = dh/dx = W1   shape [3,2]  (Jacobian of layer 1 w.r.t. its input x)
+     = [[1, 2],
+        [3, 4],
+        [5, 6]]
+
+Composed Jacobian (chain rule):
+  dy/dx = J1 @ J2 = W2 @ W1   shape [2,2]
+
+  W2 @ W1 = [[1,0,-1],[0,1,0]] @ [[1,2],[3,4],[5,6]]
+           = [[1*1 + 0*3 + (-1)*5,  1*2 + 0*4 + (-1)*6],
+              [0*1 + 1*3 + 0*5,     0*2 + 1*4 + 0*6   ]]
+           = [[1 + 0 - 5,  2 + 0 - 6],
+              [3,           4         ]]
+           = [[-4, -4],
+              [ 3,  4]]
+
+Verification — finite difference on y[0] w.r.t. x[0]:
+  x + [0.001, 0] = [1.001, -0.5]
+  h' = W1 @ [1.001, -0.5] = [0.001, 1.003, 2.005]
+  y' = W2 @ h' = [0.001 + 0 - 2.005, 0 + 1.003 + 0] = [-2.004, 1.003]
+  dy[0]/dx[0] ≈ (-2.004 - (-2.000)) / 0.001 = -0.004/0.001 = -4.0
+  Composed J[0,0] = -4  CONFIRMED
+
+Upstream gradient g = dL/dy = [1.0, 0.5]:
+
+  dL/dx = (dy/dx)^T * g = (W2@W1)^T * g
+  (W2@W1)^T = [[-4,  3],
+               [-4,  4]]
+  dL/dx = [[-4*1 + 3*0.5],
+            [-4*1 + 4*0.5]]
+         = [[-4 + 1.5],
+            [-4 + 2.0]]
+         = [-2.5, -2.0]
+
+  Efficient backward (never form composed Jacobian -- propagate upstream):
+    Step 1: dL/dh = W2^T * g = [[1,0],[0,1],[-1,0]] * [1.0, 0.5]
+                              = [1.0, 0.5, -1.0]
+    Step 2: dL/dx = W1^T * (dL/dh)
+                  = [[1,3,5],[2,4,6]] * [1.0, 0.5, -1.0]
+                  = [1.0 + 1.5 - 5.0,  2.0 + 2.0 - 6.0]
+                  = [-2.5, -2.0]  CONFIRMED -- same result, no n^2 matrix
+
+Key: the composed Jacobian is correct, but in practice you never compute it.
+You propagate gradients backward layer by layer -- each step is O(n*m),
+whereas forming the explicit composed Jacobian of a 1000-layer network
+would be astronomically expensive.
+```
+
+---
+
+**Worked Example A3.6-J5 — Jacobian of Concatenation and Split**
+
+Concatenation and split are used constantly in transformer inference: Q/K/V projection, head merging, KV caching. Their Jacobians are trivially sparse but worth making explicit.
+
+```
+Operation: y = concat(a, b)
+  a = [1.0, 2.0]  (shape [2])
+  b = [3.0, 4.0, 5.0]  (shape [3])
+  y = [1.0, 2.0, 3.0, 4.0, 5.0]  (shape [5])
+
+Jacobian dy/da  shape [5, 2]:
+  Each output y[i] depends on a[j] only if i == j and i < 2.
+
+  dy/da = [[1, 0],
+           [0, 1],
+           [0, 0],
+           [0, 0],
+           [0, 0]]
+
+  This is just the top identity block: [I_2; 0_{3x2}]
+
+Jacobian dy/db  shape [5, 3]:
+  dy/db = [[0, 0, 0],
+           [0, 0, 0],
+           [1, 0, 0],
+           [0, 1, 0],
+           [0, 0, 1]]
+
+  This is the bottom identity block: [0_{2x3}; I_3]
+
+Upstream gradient g = dL/dy = [0.1, 0.2, 0.3, 0.4, 0.5]:
+
+  dL/da = (dy/da)^T * g = I_2 extended * g = g[0:2] = [0.1, 0.2]
+  dL/db = (dy/db)^T * g = I_3 extended * g = g[2:5] = [0.3, 0.4, 0.5]
+
+In code:  dL/da, dL/db = torch.split(g, [2, 3], dim=-1)
+          No matrix multiplication needed -- split is the gradient of concat.
+
+Multi-head attention context:
+  QKV projection: y = W_qkv @ x  shape [3*d_head, d_model]
+  Q, K, V = y.split(d_head)       shapes [d_head, d_head, d_head]
+  dL/d(W_qkv) = concat(dL/dQ, dL/dK, dL/dV) @ x^T -- three outer products stacked
+
+  The Jacobian of the split is identity sub-blocks, so the gradient of the
+  weight matrix is simply the vertical concatenation of the three upstream
+  gradients. This is why vLLM and TensorRT-LLM store Q/K/V as a single fused
+  weight matrix rather than three separate ones -- one GEMM, one backward.
+
+Jacobian of reshape / view:
+  y = x.view(new_shape)
+  J = identity (reshape is a lossless bijection on the element buffer)
+  dL/dx = dL/dy.view(x.shape)  -- no multiply needed, just re-view the gradient
+
+Summary: sparse/structured Jacobians arise from:
+  - Elementwise ops:       diagonal J        (ReLU, sigmoid, GeLU)
+  - L2-norm:               rank-(n-1) J      (I - yy^T)/||x||
+  - Softmax:               rank-(n-1) J      diag(p) - pp^T
+  - Linear y=Wx:           full J = W        (dense, no sparsity)
+  - Concatenation/split:   block-identity J  (free in backward -- just index)
+  - Reshape/view:          identity J        (free in backward -- just re-view)
+```
+
+---
+
+### A3.4.4 Jacobian Rank and the Implicit Dimensionality of Gradient Flow
+
+The rank of the Jacobian determines how much information passes through a layer during the backward pass. This has direct implications for training stability and quantization sensitivity.
+
+```
+Jacobian rank summary:
+
+  Function         J shape    rank        Implication
+  -------          --------   ----        -----------
+  ReLU(x)          [n,n]      <= n        Dead neurons: rank drops for each x_i < 0.
+                                          50% dead at init => effective rank ≈ n/2.
+  sigmoid(x)       [n,n]      n           Full rank but entries shrink exponentially.
+                                          Rank preserved; magnitude is the problem.
+  softmax(x)       [n,n]      n-1         Always rank-deficient. Shifting x by a
+                                          constant c leaves softmax unchanged,
+                                          so the constant direction is null.
+  L2-norm f(x)     [n,n]      n-1         Same structure: scaling x by c leaves
+                                          direction unchanged (null space = x itself).
+  y = Wx           [m,n]      min(m,n)    A bottleneck layer (m < n) compresses
+                                          gradient flow to m dimensions.
+  concat(a,b)      [n+m, n+m] n+m         Full rank -- concat is invertible.
+  QAT round(x)     [n,n]      n (STE)     Zero almost everywhere; STE sets rank=n
+                                          by ignoring the true Jacobian (= 0).
+
+Practical consequence for LLM inference:
+  When quantizing a weight matrix W (shape [m,n]) to INT8:
+    - The Jacobian of the fake-quantize node has rank 0 almost everywhere
+      (round() has zero derivative everywhere except measure-zero breakpoints).
+    - QAT uses the straight-through estimator (STE) to set the Jacobian = I,
+      allowing gradient signal to flow through as if quantization did not exist.
+    - The STE can be interpreted as choosing a Jacobian of rank n even though
+      the true Jacobian has rank 0. This is a deliberate, theoretically
+      unjustified but empirically effective hack.
+```
+
 ---
 
 ## A3.5 Matrix Chain Rule
