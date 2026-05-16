@@ -90,6 +90,75 @@ https://arxiv.org/abs/1805.02867
 
 ---
 
+**FlashDecoding: Parallelizing Attention for Efficient Long-Context Inference**
+Dao, T., Haziza, D., Massa, F., Sizov, G. (2023). Together.ai / Meta.
+https://tri.dao/blog/flashdecoding
+
+*Extends FlashAttention to parallelize along the K/V sequence dimension during single-token decoding. Near-linear scaling with GPU SM count. Enables practical 128K+ context inference. Chapter 5.11, Chapter 15.5.*
+
+---
+
+## I.2a Attention Variants and Architectural Alternatives
+
+**Fast Transformer Decoding: One Write-Head is All You Need**
+Shazeer, N. (2019). Google.
+https://arxiv.org/abs/1911.02150
+
+*Introduced Multi-Query Attention (MQA): all query heads share a single KV head, reducing the KV cache by n_heads×. The precursor to GQA. Chapter 4.*
+
+---
+
+**DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model**
+DeepSeek-AI (2024).
+https://arxiv.org/abs/2405.04434
+
+*Introduced Multi-head Latent Attention (MLA): compresses the KV cache into a low-rank latent vector C_KV, achieving >10× KV size reduction vs MHA with negligible quality loss. The MLA mechanism described in Chapter 4 originates here. DeepSeek-V3 (Chapter 34) builds directly on this design.*
+
+---
+
+**Mistral 7B**
+Jiang, A.Q., Sablayrolles, A., Mensch, A., Bamford, C., Chaplot, D.S., Casas, D., Bressand, F., Lengyel, G., Lample, G., Saulnier, L., Lavaud, L.R., Lachaux, M.A., Stock, P., Scao, T.L., Lavril, T., Wang, T., Lacroix, T., Sayed, W.E. (2023).
+https://arxiv.org/abs/2310.06825
+
+*First major production model to deploy Sliding Window Attention (W=4096) and GQA together. Reference implementation of sparse attention in open-weight models. Chapter 4, Chapter 4.5.*
+
+---
+
+**Longformer: The Long-Document Transformer**
+Beltagy, I., Peters, M.E., Cohan, A. (2020). Allen Institute for AI.
+*ICLR 2020.*
+https://arxiv.org/abs/2004.05150
+
+*Introduced sliding window local attention combined with global attention tokens — the O(N) sparse attention pattern that Chapter 4 refers to as the "Longformer pattern." Chapter 4.*
+
+---
+
+**Big Bird: Transformers for Longer Sequences**
+Zaheer, M., Guruganesh, G., Dubey, K.A., Ainslie, J., Alberti, C., Ontanon, S., Pham, P., Ravula, A., Wang, Q., Yang, L., Ahmed, A. (2020). Google.
+*NeurIPS 2020.*
+https://arxiv.org/abs/2007.14062
+
+*Introduced a sparse attention pattern combining local window, global, and random attention — proving that O(N) sparse attention is Turing complete. Chapter 4 cites the "BigBird/Longformer pattern" for structured sparse masks.*
+
+---
+
+**Transformers are RNNs: Fast Autoregressive Transformers with Linear Attention**
+Katharopoulos, A., Vyas, A., Pappas, N., Fleuret, F. (2020). EPFL.
+*ICML 2020.*
+https://arxiv.org/abs/2006.16236
+
+*Introduced Linear Attention: replacing the softmax with a kernel feature map φ so that Q(K^T V) can be computed left-to-right as a running outer-product state S_t = S_{t-1} + φ(K_t)^T V_t. Reduces KV memory from O(N) to O(1). Chapter 4.5.*
+
+---
+
+**Mamba: Linear-Time Sequence Modeling with Selective State Spaces**
+Gu, A., Dao, T. (2023).
+https://arxiv.org/abs/2312.00752
+
+*Introduced the selective state space model (selective SSM): per-token, input-dependent discretisation parameters (Δ_t, B_t, C_t) that allow the model to selectively remember or forget information at each step. O(1) inference cache at constant size regardless of sequence length. Chapter 4.5.*
+
+---
+
 ## I.3 KV Cache and Memory Management
 
 **Efficient Memory Management for Large Language Model Serving with PagedAttention**
@@ -409,7 +478,9 @@ https://lilianweng.github.io/posts/2023-01-10-inference-optimization/
 
 | Chapter | Key Papers |
 |---|---|
-| Ch. 5 (Flash Attention) | Dao 2022, Dao 2023, Dao 2024, Milakov 2018 |
+| Ch. 4 (Attention Mechanisms) | Shazeer 2019 (MQA), Ainslie 2023 (GQA), DeepSeek-AI 2024 (MLA/V2), Jiang 2023 (Mistral/SWA), Beltagy 2020 (Longformer), Zaheer 2020 (BigBird) |
+| Ch. 4.5 (Attention Alternatives) | Katharopoulos 2020 (Linear Attention), Gu & Dao 2023 (Mamba) |
+| Ch. 5 (Flash Attention) | Dao 2022 (FlashAttention), Dao 2023 (FlashAttention-2), Milakov 2018 (Online Softmax), Dao 2023 (FlashDecoding), Shah 2024 (FlashAttention-3) |
 | Ch. 6 (PagedAttention) | Kwon 2023 |
 | Ch. 7 (Scheduler) | Yu 2022 (Orca) |
 | Ch. 10 (Quantization) | Frantar 2022 (GPTQ), Lin 2023 (AWQ), Dettmers 2022 (INT8), Peng 2023 (FP8) |
@@ -418,7 +489,7 @@ https://lilianweng.github.io/posts/2023-01-10-inference-optimization/
 | Ch. 18 (Disaggregated) | Patel 2024 (Splitwise), Zhong 2024 (DistServe) |
 | Ch. 23 (Speculative) | Leviathan 2022, Chen 2023, Cai 2024 (Medusa) |
 | Ch. 27 (Long Context) | Peng 2023 (YaRN), Ding 2024 (LongRoPE) |
-| Ch. 34 (DeepSeek) | DeepSeek-AI 2024 (V3), DeepSeek-AI 2025 (R1) |
+| Ch. 34 (DeepSeek) | DeepSeek-AI 2024 (MLA/V2), DeepSeek-AI 2024 (V3), DeepSeek-AI 2025 (R1) |
 | Ch. 35 (Qwen) | Qwen Team 2024 (2.5), Qwen Team 2025 (3) |
 | Ch. 36 (Kimi) | Moonshot AI 2025 |
 | Ch. 37 (Nemotron) | NVIDIA 2024 |
