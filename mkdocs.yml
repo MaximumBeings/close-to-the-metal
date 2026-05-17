@@ -206,6 +206,6 @@ nav:
     - "S — CI/CD Pipelines for LLM Inference Systems": appendices/appendix-s.md
     - "T — Embedding and Reranker Model Serving": appendices/appendix-t.md
     - "U — Quantization Calibration Workflow: AWQ, GPTQ, FP8, and GGUF": appendices/appendix-u.md
-    - "V — TurboQuant (Addendum)": appendices/appendix-v.md
+    - "V — TurboQuant": appendices/appendix-v.md
     - "W — Glossary": appendices/appendix-w.md
     - "X — References": appendices/appendix-x.md
