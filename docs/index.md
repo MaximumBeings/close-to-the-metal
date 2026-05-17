@@ -169,7 +169,7 @@ hide:
       </div>
       <div class="toc-entries">
         <a href="appendices/appendix-a.html" class="toc-entry"><span class="toc-num">A</span><span class="toc-etitle">Mathematical Foundations</span></a>
-        <a href="appendices/appendix-a2.html" class="toc-entry"><span class="toc-num">A.2</span><span class="toc-etitle">Tensor Contractions — 2D/3D/5D/ND with CUDA, Triton, CUTLASS, Mojo</span></a>
+        <a href="appendices/appendix-a2.html" class="toc-entry"><span class="toc-num">A.2</span><span class="toc-etitle">Tensor Contractions — 2D/3D/5D/ND with CUDA, Triton, CUTLASS, Mojo — Manual Worked Examples</span></a>
         <a href="appendices/appendix-a3.html" class="toc-entry"><span class="toc-num">A.3</span><span class="toc-etitle">The Chain Rule — From Scalars to Transformer Backpropagation</span></a>
         <a href="appendices/appendix-b.html" class="toc-entry"><span class="toc-num">B</span><span class="toc-etitle">Installation Guide — vLLM and llama.cpp</span></a>
         <a href="appendices/appendix-c.html" class="toc-entry"><span class="toc-num">C</span><span class="toc-etitle">PyTorch for LLM Inference — Tensors, Devices, Compile, Quantization</span></a>

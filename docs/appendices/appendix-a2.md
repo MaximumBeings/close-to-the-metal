@@ -1591,7 +1591,312 @@ Prefill (B=8, S=2048): attention Q@K^T becomes compute-bound (AI >> 156)
 
 ---
 
-## A2.10 Self-Check Questions
+---
+
+## A2.10 Manual Worked Examples — Step-by-Step Index Arithmetic
+
+These examples walk through each contraction *by hand*, writing out every summed index explicitly. Working through small cases in pencil-and-paper style builds the intuition that `torch.einsum` and CUDA kernels rely on implicitly.
+
+---
+
+### A2.10.1 2D Matrix Multiply: `C[i,k] = Σ_j A[i,j] · B[j,k]`
+
+Let A be 2×3 and B be 3×2. The output C is 2×2.
+
+```
+        B
+     [j=0  j=1]
+A    k=0   k=1
+
+i=0  [ 1   2   3 ]    [  7  10  ]
+i=1  [ 4   5   6 ]    [ 16  22  ]
+                B:
+              j=0  j=1
+            k=0 [ 1   4  ]
+            k=1 [ 2   5  ]
+            k=2 [ 3   6  ]
+```
+
+Every element C[i,k] requires summing the product of a full row of A against a full column of B:
+
+```
+C[0,0] = A[0,0]*B[0,0] + A[0,1]*B[1,0] + A[0,2]*B[2,0]
+       = 1*1 + 2*2 + 3*3
+       = 1 + 4 + 9
+       = 14   ← one dot product of length 3
+
+C[0,1] = A[0,0]*B[0,1] + A[0,1]*B[1,1] + A[0,2]*B[2,1]
+       = 1*4 + 2*5 + 3*6
+       = 4 + 10 + 18
+       = 32
+
+C[1,0] = A[1,0]*B[0,0] + A[1,1]*B[1,0] + A[1,2]*B[2,0]
+       = 4*1 + 5*2 + 6*3
+       = 4 + 10 + 18
+       = 32
+
+C[1,1] = A[1,0]*B[0,1] + A[1,1]*B[1,1] + A[1,2]*B[2,1]
+       = 4*4 + 5*5 + 6*6
+       = 16 + 25 + 36
+       = 77
+```
+
+Verification with Python:
+
+```python
+import numpy as np
+A = np.array([[1,2,3],[4,5,6]])
+B = np.array([[1,4],[2,5],[3,6]])
+print(np.einsum('ij,jk->ik', A, B))
+# [[ 14  32]
+#  [ 32  77]]
+```
+
+**Key observation:** The shared index `j` runs over 3 values. Each output element costs 3 multiplications and 2 additions — 6 FLOPs in the multiply-accumulate sense. Total FLOPs = 2×2×3×2 = 24. Total IO = (2×3 + 3×2 + 2×2)×4 bytes (FP32) = 64 bytes. AI = 24/64 = 0.375 FLOP/byte — deeply memory-bound even at this tiny scale.
+
+---
+
+### A2.10.2 3D Batched Matmul: `C[b,i,k] = Σ_j A[b,i,j] · B[b,j,k]`
+
+The batch index `b` is a *free* index — it appears in all three tensors and is never summed. For each batch slice, an independent 2D matmul runs.
+
+Let A be shape (2,2,2) and B be shape (2,2,2):
+
+```
+A[b=0] = [[1, 2],      A[b=1] = [[5, 6],
+           [3, 4]]                [7, 8]]
+
+B[b=0] = [[1, 0],      B[b=1] = [[0, 1],
+           [0, 1]]                [1, 0]]
+```
+
+**Batch 0** (B[b=0] is identity, so C[b=0] = A[b=0]):
+
+```
+C[0,0,0] = A[0,0,0]*B[0,0,0] + A[0,0,1]*B[0,1,0] = 1*1 + 2*0 = 1
+C[0,0,1] = A[0,0,0]*B[0,0,1] + A[0,0,1]*B[0,1,1] = 1*0 + 2*1 = 2
+C[0,1,0] = A[0,1,0]*B[0,0,0] + A[0,1,1]*B[0,1,0] = 3*1 + 4*0 = 3
+C[0,1,1] = A[0,1,0]*B[0,0,1] + A[0,1,1]*B[0,1,1] = 3*0 + 4*1 = 4
+
+C[b=0] = [[1, 2], [3, 4]]   (unchanged — multiplied by identity)
+```
+
+**Batch 1** (B[b=1] swaps columns):
+
+```
+C[1,0,0] = A[1,0,0]*B[1,0,0] + A[1,0,1]*B[1,1,0] = 5*0 + 6*1 = 6
+C[1,0,1] = A[1,0,0]*B[1,0,1] + A[1,0,1]*B[1,1,1] = 5*1 + 6*0 = 5
+C[1,1,0] = A[1,1,0]*B[1,0,0] + A[1,1,1]*B[1,1,0] = 7*0 + 8*1 = 8
+C[1,1,1] = A[1,1,0]*B[1,0,1] + A[1,1,1]*B[1,1,1] = 7*1 + 8*0 = 7
+
+C[b=1] = [[6, 5], [8, 7]]   (columns swapped)
+```
+
+```python
+import numpy as np
+A = np.array([[[1,2],[3,4]], [[5,6],[7,8]]])
+B = np.array([[[1,0],[0,1]], [[0,1],[1,0]]])
+print(np.einsum('bij,bjk->bik', A, B))
+# [[[1 2] [3 4]]
+#  [[6 5] [8 7]]]
+```
+
+**Rewrite as token projection:** In a transformer, `X[b,s,d] @ W[d,n] → Y[b,s,n]` is a 3D contraction where `b` and `s` are both free indices. The weight matrix W has no batch dimension — it is *broadcast* over `b`. Written as einsum: `bsd,dn->bsn`. Every sequence position and every batch element compute an independent linear projection sharing the same W.
+
+---
+
+### A2.10.3 4D Attention Score: `S[b,h,i,j] = Σ_d Q[b,h,i,d] · K[b,h,j,d]`
+
+The two free indices inside the heads are the *query position* `i` and the *key position* `j`. The contracted index `d` is the head dimension.
+
+Tiny example: B=1, H=1, S=3 tokens, D=2.
+
+```
+Q[0,0] = [[1, 0],      K[0,0] = [[1, 1],
+           [0, 1],                [0, 1],
+           [1, 1]]                [1, 0]]
+```
+
+Computing S[0,0,i,j] = Q[0,0,i,:] · K[0,0,j,:] (dot product over d=2):
+
+```
+S[0,0,0,0] = Q[0,0,0,0]*K[0,0,0,0] + Q[0,0,0,1]*K[0,0,0,1]
+           = 1*1 + 0*1 = 1
+
+S[0,0,0,1] = Q[0,0,0,0]*K[0,0,1,0] + Q[0,0,0,1]*K[0,0,1,1]
+           = 1*0 + 0*1 = 0
+
+S[0,0,0,2] = Q[0,0,0,0]*K[0,0,2,0] + Q[0,0,0,1]*K[0,0,2,1]
+           = 1*1 + 0*0 = 1
+
+S[0,0,1,0] = Q[0,0,1,0]*K[0,0,0,0] + Q[0,0,1,1]*K[0,0,0,1]
+           = 0*1 + 1*1 = 1
+
+S[0,0,1,1] = 0*0 + 1*1 = 1
+S[0,0,1,2] = 0*1 + 1*0 = 0
+
+S[0,0,2,0] = 1*1 + 1*1 = 2
+S[0,0,2,1] = 1*0 + 1*1 = 1
+S[0,0,2,2] = 1*1 + 1*0 = 1
+
+S[0,0] = [[1, 0, 1],
+           [1, 1, 0],
+           [2, 1, 1]]
+```
+
+Scaled by 1/√D = 1/√2 ≈ 0.707:
+
+```
+S_scaled = [[0.707, 0.000, 0.707],
+             [0.707, 0.707, 0.000],
+             [1.414, 0.707, 0.707]]
+```
+
+After causal masking (upper triangle → -∞) and row-wise softmax:
+
+```
+Row 0: softmax([0.707, -inf, -inf]) = [1.000, 0.000, 0.000]
+Row 1: softmax([0.707,  0.707, -inf]) = [0.500, 0.500, 0.000]
+Row 2: softmax([1.414,  0.707, 0.707]) = [0.506, 0.247, 0.247]
+```
+
+**FLOPs for attention scores:** 2 × B × H × S × S × D = 2×1×1×3×3×2 = 36. Total outputs = 9. Each output is one dot product of length D=2 costing 2D FLOPs.
+
+```python
+import numpy as np
+Q = np.array([[[[1,0],[0,1],[1,1]]]])   # [1,1,3,2]
+K = np.array([[[[1,1],[0,1],[1,0]]]])   # [1,1,3,2]
+S = np.einsum('bhid,bhjd->bhij', Q, K)
+print(S)
+# [[[[1 0 1]
+#    [1 1 0]
+#    [2 1 1]]]]
+```
+
+---
+
+### A2.10.4 5D MoE Expert Contraction: `Y[b,s,e,m] = Σ_d X[b,s,e,d] · W[e,d,m]`
+
+In a Mixture-of-Experts layer, each token is routed to E experts. The weight tensor W has a leading expert dimension `e` — each expert maintains its own d×m weight matrix.
+
+Tiny example: B=1, S=1, E=2 experts, D=2 input, M=2 output.
+
+```
+X[0,0]  = [[1, 2],     ← token, 2 expert slots, each D=2
+            [3, 4]]
+
+W[e=0]  = [[1, 0],     ← expert 0: 2×2 weight matrix
+            [0, 1]]
+
+W[e=1]  = [[0, 1],     ← expert 1: 2×2 weight matrix
+            [1, 0]]
+```
+
+For each expert `e`, independently:
+
+```
+Expert e=0:
+  Y[0,0,0,0] = X[0,0,0,0]*W[0,0,0] + X[0,0,0,1]*W[0,1,0]
+             = 1*1 + 2*0 = 1
+  Y[0,0,0,1] = X[0,0,0,0]*W[0,0,1] + X[0,0,0,1]*W[0,1,1]
+             = 1*0 + 2*1 = 2
+  Y[0,0,0,:] = [1, 2]   (expert 0 passes through X unchanged — identity W)
+
+Expert e=1:
+  Y[0,0,1,0] = X[0,0,1,0]*W[1,0,0] + X[0,0,1,1]*W[1,1,0]
+             = 3*0 + 4*1 = 4
+  Y[0,0,1,1] = X[0,0,1,0]*W[1,0,1] + X[0,0,1,1]*W[1,1,1]
+             = 3*1 + 4*0 = 3
+  Y[0,0,1,:] = [4, 3]   (expert 1 swaps dimensions)
+```
+
+```python
+import numpy as np
+X = np.array([[[[1,2],[3,4]]]])         # [1,1,2,2]
+W = np.array([[[1,0],[0,1]], [[0,1],[1,0]]])  # [2,2,2]
+Y = np.einsum('bsed,edm->bsem', X, W)
+print(Y)
+# [[[[1 2]
+#    [4 3]]]]
+```
+
+**Why this cannot be a single matmul without reshaping:** Standard `torch.matmul` expects the expert dimension to be a batch dimension aligned the same way in both operands. Because X has shape `[b,s,e,d]` and W has shape `[e,d,m]`, you need to either: (a) use `torch.einsum('bsed,edm->bsem', X, W)` directly, or (b) reshape to `[b*s, e, d]` and use `torch.bmm` across the e axis. The einsum route avoids the reshape copies.
+
+---
+
+### A2.10.5 ND Broadcast Contraction: `Y[...,i,k] = Σ_j X[...,i,j] · W[j,k]`
+
+When a weight matrix W has no batch dimensions, it is broadcast over all leading dimensions of X. The einsum `'...ij,...jk->...ik'` generalizes matmul to any prefix of batch dimensions.
+
+```
+X shape: [2, 3, 4, 5]   (arbitrary batch prefix [2,3,4], then [5] = in_features)
+W shape: [5, 8]          (5 in_features, 8 out_features)
+
+Y shape: [2, 3, 4, 8]
+
+For any fixed (b0, b1, b2):
+  Y[b0, b1, b2, k] = Σ_{j=0}^{4} X[b0, b1, b2, j] * W[j, k]
+```
+
+This is exactly what happens in a transformer FFN applied over all positions in all batch elements simultaneously. The 24 independent positions (2×3×4) each run the same linear layer — W is read once and amortized over all positions.
+
+```python
+import numpy as np
+X = np.random.randn(2, 3, 4, 5)
+W = np.random.randn(5, 8)
+Y = np.einsum('...j,jk->...k', X, W)
+print(Y.shape)   # (2, 3, 4, 8)
+# Equivalent: Y = X @ W   ← PyTorch broadcasts W over leading dims
+```
+
+---
+
+### A2.10.6 FLOPs and Memory: Worked Arithmetic
+
+The following table traces the full arithmetic for representative LLM contraction shapes (Llama 3 8B, BF16, batch=1, prefill S=512):
+
+```
+Contraction          Shape                 FLOPs                  IO (BF16)   AI
+─────────────────────────────────────────────────────────────────────────────────────────
+Q projection         [1,512,4096]@[4096,4096]
+                     B=1,S=512,D=4096,N=4096
+                     FLOPs = 2*512*4096*4096 = 17.2 GFLOPs
+                     IO = (512*4096 + 4096*4096 + 512*4096)*2B
+                        = (2.1M + 16.8M + 2.1M)*2 = 42.0 MB
+                     AI = 17.2G / 42.0M = 409 FLOP/byte  → COMPUTE-BOUND
+
+Attention Q@K^T      [1,32,512,128]@[1,32,128,512]
+                     B=1,H=32,S=512,D=128
+                     FLOPs = 2*1*32*512*512*128 = 4.3 GFLOPs
+                     IO = 2*(1*32*512*128)*2B + (1*32*512*512)*2B
+                        = 67.1MB + 33.6MB = 100.7 MB
+                     AI = 4.3G / 100.7M = 42.7 FLOP/byte  → MEMORY-BOUND
+
+FFN gate (SwiGLU)    [1,512,4096]@[4096,14336]
+                     B=1,S=512,D=4096,FF=14336
+                     FLOPs = 2*512*4096*14336 = 60.1 GFLOPs
+                     IO = (512*4096 + 4096*14336 + 512*14336)*2B
+                        = (4.2M + 58.7M + 14.7M)*2 = 155.1 MB
+                     AI = 60.1G / 155.1M = 387 FLOP/byte  → COMPUTE-BOUND
+
+Decode Q projection  [1,1,4096]@[4096,4096]   (S=1)
+                     FLOPs = 2*1*1*4096*4096 = 33.6 MFLOPs
+                     IO = (1*4096 + 4096*4096 + 1*4096)*2B = 33.6 MB
+                     AI = 33.6M / 33.6M = 1.0 FLOP/byte   → MEMORY-BOUND
+
+─────────────────────────────────────────────────────────────────────────────────────────
+A100 ridge (BF16): 312 TFLOPS / 2.0 TB/s = 156 FLOP/byte
+H100 ridge (BF16): 989 TFLOPS / 3.35 TB/s = 295 FLOP/byte
+Compute-bound if AI > ridge; memory-bound if AI < ridge.
+─────────────────────────────────────────────────────────────────────────────────────────
+```
+
+**Pattern:** Prefill operations (large S) push Q projections and FFN layers into compute-bound territory — these saturate the tensor cores. Decode operations (S=1) collapse to AI≈1, making every contraction memory-bound regardless of model size.
+
+---
+
+
+## A2.11 Self-Check Questions
 
 1. A 3D token projection has shape `X[8,2048,4096] @ W[4096,4096]`. Calculate
    the exact FLOPs, read bandwidth, and arithmetic intensity. Is this contraction
@@ -1832,5 +2137,3 @@ Triton kernels add software pipelining (`num_stages=3`) to further hide HBM
 latency via async copies.
 """
 
-with open("/Users/oluwaseyiawoga/Documents/KV_Cache_Write_UP/vllm_book_site/docs/appendices/appendix-a2.md", "w") as f:
-    f.write(content)
