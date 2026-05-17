@@ -134,6 +134,7 @@ nav:
   - "⌨ Companion Code":
     - "Code 01 — Two Engines": code/chapter_01.md
     - "Code 02 — Memory Landscapes": code/chapter_02.md
+    - "Code 2.5 — GPU Memory Architecture (Tiled GEMM Harness)": code/chapter_02b.md
     - "Code 03 — Tokens and Batches": code/chapter_03.md
     - "Code 3.5 — The Transformer Block": code/chapter_03b.md
     - "Code 04 — Attention Mechanics": code/chapter_04.md

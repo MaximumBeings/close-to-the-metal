@@ -1092,3 +1092,33 @@ The AI at which decode becomes compute-bound:
 
 Chapter 3 builds on this foundation to explain tokens, sequences, and the batch — how the memory pressure analyzed here scales when serving many users simultaneously, and how the batch size determines whether the GPU is memory-bandwidth-bound or compute-bound. Chapter 5 returns to FlashAttention in full algorithmic detail, with the tiling strategy derived from first principles using exactly the SMEM and register constraints mapped in this chapter.
 
+
+---
+
+## Companion Code — `tiled_gemm_harness.cu`
+
+The full test harness for every kernel in this chapter is in the companion code section. It includes:
+
+- **Correctness check** — all five kernels verified against a single-threaded CPU reference using `max_abs_error`
+- **Performance benchmark** — GFLOP/s, % of FP32 peak, and wall-clock ms per kernel across 20 runs
+- **Coalescing penalty** — isolated pure-bandwidth kernels measuring the full 10–32× gap without arithmetic noise
+- **Occupancy report** — `cudaOccupancyMaxActiveBlocksPerMultiprocessor` for each kernel showing which resource is the binding constraint
+- **Arithmetic intensity sweep** — TILE = 4 through 128, showing how AI grows toward (but stays below) the ridge point for FP32
+- **Bank conflict timing** — direct comparison of `tiled_gemm<32>` vs `tiled_padded<32>` at N=4096
+
+```bash
+# Compile
+nvcc -O3 -arch=sm_80 -std=c++17 -lineinfo \
+     -o tiled_gemm_harness tiled_gemm_harness.cu
+
+# Run all sections
+./tiled_gemm_harness
+
+# Profile shared memory bank conflicts with Nsight Compute
+ncu --metrics \
+  l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_ld.sum,\
+  l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_st.sum \
+  ./tiled_gemm_harness
+```
+
+→ [View full harness source](../code/chapter_02b.md)
