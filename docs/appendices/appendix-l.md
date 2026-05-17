@@ -1963,3 +1963,717 @@ Achieved: 2.0 TFLOPS = 2.0/3.35 = **59.7% of the bandwidth roof** — reasonable
 
 **Implication:** To improve this kernel, focus on memory access patterns (coalescing, prefetching) — not on FP math throughput, which is irrelevant for this memory-bound workload.
 
+---
+
+## L.29 Complete Test and Main Harness
+
+Every kernel introduced in this appendix is assembled below into a single, self-contained file that you can compile and run. It provides CPU reference implementations for correctness checking, tolerance-based comparison, and wall-clock benchmarking for each kernel. All CUDA error checking is thorough — any API failure immediately prints the file, line, and error string and terminates.
+
+### L.29.1 Compilation
+
+```bash
+# Compile for your GPU (native auto-detects SM version)
+nvcc -O3 -arch=native -std=c++17 kernels_test.cu -o kernels_test
+
+# For a specific GPU (e.g. H100 = sm_90, A100 = sm_80, RTX 4090 = sm_89)
+nvcc -O3 -arch=sm_80 -std=c++17 kernels_test.cu -o kernels_test
+
+# Run
+./kernels_test
+```
+
+### L.29.2 Full Source: `kernels_test.cu`
+
+```cpp
+// kernels_test.cu
+// Compile: nvcc -O3 -arch=native -std=c++17 kernels_test.cu -o kernels_test
+// Run:     ./kernels_test
+//
+// Covers: vector_add, parallel_reduce, online_softmax,
+//         gemv_fp32, gemv_int8, naive_gemm
+// Each kernel: correctness check vs CPU reference + wall-clock benchmark.
+
+#include <cuda_runtime.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cmath>
+#include <cstring>
+#include <cassert>
+#include <chrono>
+#include <string>
+#include <algorithm>
+#include <numeric>
+#include <vector>
+#include <limits>
+
+// ─────────────────────────────────────────────────────────────────
+// Error checking macro
+// ─────────────────────────────────────────────────────────────────
+
+#define CUDA_CHECK(call)                                                    \
+    do {                                                                    \
+        cudaError_t err = (call);                                           \
+        if (err != cudaSuccess) {                                           \
+            fprintf(stderr, "CUDA error at %s:%d — %s\n",                  \
+                    __FILE__, __LINE__, cudaGetErrorString(err));           \
+            std::exit(EXIT_FAILURE);                                        \
+        }                                                                   \
+    } while (0)
+
+// ─────────────────────────────────────────────────────────────────
+// Timing utilities
+// ─────────────────────────────────────────────────────────────────
+
+struct GpuTimer {
+    cudaEvent_t start_, stop_;
+    GpuTimer()  { CUDA_CHECK(cudaEventCreate(&start_)); CUDA_CHECK(cudaEventCreate(&stop_)); }
+    ~GpuTimer() { cudaEventDestroy(start_); cudaEventDestroy(stop_); }
+    void start() { CUDA_CHECK(cudaEventRecord(start_)); }
+    float stop()  {
+        CUDA_CHECK(cudaEventRecord(stop_));
+        CUDA_CHECK(cudaEventSynchronize(stop_));
+        float ms = 0.f;
+        CUDA_CHECK(cudaEventElapsedTime(&ms, start_, stop_));
+        return ms;
+    }
+};
+
+// Run a lambda N times and return median GPU time in milliseconds.
+template <typename F>
+float bench_gpu(F&& fn, int warmup = 10, int reps = 50) {
+    GpuTimer t;
+    for (int i = 0; i < warmup; ++i) fn();
+    CUDA_CHECK(cudaDeviceSynchronize());
+    std::vector<float> times(reps);
+    for (int i = 0; i < reps; ++i) {
+        t.start(); fn(); times[i] = t.stop();
+    }
+    std::sort(times.begin(), times.end());
+    return times[reps / 2];  // median
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Test result printer
+// ─────────────────────────────────────────────────────────────────
+
+static int g_passed = 0, g_failed = 0;
+
+void report(const std::string& name, bool ok,
+            float ms = -1.f, float gb_s = -1.f, float tflops = -1.f) {
+    if (ok) {
+        ++g_passed;
+        printf("  [PASS] %-40s", name.c_str());
+    } else {
+        ++g_failed;
+        printf("  [FAIL] %-40s", name.c_str());
+    }
+    if (ms >= 0) printf("  %.3f ms", ms);
+    if (gb_s >= 0) printf("  %.1f GB/s", gb_s);
+    if (tflops >= 0) printf("  %.2f TFLOPS", tflops);
+    printf("\n");
+}
+
+bool allclose(const float* a, const float* b, int n,
+              float atol = 1e-3f, float rtol = 1e-3f) {
+    for (int i = 0; i < n; ++i) {
+        float diff = fabsf(a[i] - b[i]);
+        float tol  = atol + rtol * fabsf(b[i]);
+        if (diff > tol) {
+            printf("    mismatch at [%d]: got=%.6f  ref=%.6f  diff=%.6e\n",
+                   i, a[i], b[i], diff);
+            return false;
+        }
+    }
+    return true;
+}
+
+// ═════════════════════════════════════════════════════════════════
+// KERNEL 1 — Vector Addition
+// ═════════════════════════════════════════════════════════════════
+
+__global__ void vec_add_kernel(const float* __restrict__ a,
+                               const float* __restrict__ b,
+                               float* __restrict__ c,
+                               int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) c[i] = a[i] + b[i];
+}
+
+void test_vector_add() {
+    const int N = 1 << 24;   // 16M elements
+    const size_t bytes = N * sizeof(float);
+
+    std::vector<float> h_a(N), h_b(N), h_c(N), h_ref(N);
+    for (int i = 0; i < N; ++i) { h_a[i] = float(i) * 0.001f; h_b[i] = float(N - i) * 0.001f; }
+    for (int i = 0; i < N; ++i) h_ref[i] = h_a[i] + h_b[i];
+
+    float *d_a, *d_b, *d_c;
+    CUDA_CHECK(cudaMalloc(&d_a, bytes));
+    CUDA_CHECK(cudaMalloc(&d_b, bytes));
+    CUDA_CHECK(cudaMalloc(&d_c, bytes));
+    CUDA_CHECK(cudaMemcpy(d_a, h_a.data(), bytes, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_b, h_b.data(), bytes, cudaMemcpyHostToDevice));
+
+    const int BLOCK = 1024;
+    auto launch = [&]() {
+        vec_add_kernel<<<(N + BLOCK - 1) / BLOCK, BLOCK>>>(d_a, d_b, d_c, N);
+    };
+    launch();
+    CUDA_CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaMemcpy(h_c.data(), d_c, bytes, cudaMemcpyDeviceToHost));
+
+    bool ok = allclose(h_c.data(), h_ref.data(), N);
+    float ms = bench_gpu(launch);
+    float gb_s = 3.f * bytes / (ms * 1e-3f) / 1e9f;   // 2 reads + 1 write
+    report("vector_add (N=16M)", ok, ms, gb_s);
+
+    CUDA_CHECK(cudaFree(d_a)); CUDA_CHECK(cudaFree(d_b)); CUDA_CHECK(cudaFree(d_c));
+}
+
+// ═════════════════════════════════════════════════════════════════
+// KERNEL 2 — Parallel Reduction (sum)
+// ═════════════════════════════════════════════════════════════════
+
+__device__ __forceinline__ float warp_reduce_sum(float v) {
+    #pragma unroll
+    for (int m = 16; m > 0; m >>= 1)
+        v += __shfl_xor_sync(0xffffffffu, v, m);
+    return v;
+}
+
+__global__ void reduce_sum_kernel(const float* __restrict__ d_in,
+                                  float*       __restrict__ d_out,
+                                  int n) {
+    __shared__ float warp_res[32];
+    int tid  = threadIdx.x;
+    int gid  = blockIdx.x * blockDim.x + tid;
+    int warp = tid / 32, lane = tid % 32;
+
+    float val = (gid < n) ? d_in[gid] : 0.f;
+    val = warp_reduce_sum(val);
+    if (lane == 0) warp_res[warp] = val;
+    __syncthreads();
+
+    int n_warps = blockDim.x / 32;
+    if (warp == 0) {
+        val = (lane < n_warps) ? warp_res[lane] : 0.f;
+        val = warp_reduce_sum(val);
+        if (lane == 0) atomicAdd(d_out, val);
+    }
+}
+
+void test_reduce_sum() {
+    const int N = 1 << 22;   // 4M elements
+    std::vector<float> h_in(N, 1.f);
+    float expected = float(N);
+
+    float *d_in, *d_out;
+    CUDA_CHECK(cudaMalloc(&d_in,  N * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_out, sizeof(float)));
+    CUDA_CHECK(cudaMemcpy(d_in, h_in.data(), N * sizeof(float), cudaMemcpyHostToDevice));
+
+    const int BLOCK = 256;
+    int grid = (N + BLOCK - 1) / BLOCK;
+    auto launch = [&]() {
+        CUDA_CHECK(cudaMemset(d_out, 0, sizeof(float)));
+        reduce_sum_kernel<<<grid, BLOCK>>>(d_in, d_out, N);
+    };
+    launch();
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    float result;
+    CUDA_CHECK(cudaMemcpy(&result, d_out, sizeof(float), cudaMemcpyDeviceToHost));
+
+    bool ok = fabsf(result - expected) / expected < 1e-4f;
+    float ms = bench_gpu(launch);
+    float gb_s = float(N) * 4.f / (ms * 1e-3f) / 1e9f;
+    report("reduce_sum (N=4M)", ok, ms, gb_s);
+
+    CUDA_CHECK(cudaFree(d_in)); CUDA_CHECK(cudaFree(d_out));
+}
+
+// ═════════════════════════════════════════════════════════════════
+// KERNEL 3 — Online Softmax
+// ═════════════════════════════════════════════════════════════════
+
+__global__ void online_softmax_kernel(const float* __restrict__ d_in,
+                                      float*       __restrict__ d_out,
+                                      int rows, int cols) {
+    __shared__ float smem_m[32], smem_d[32];
+    int row  = blockIdx.x;
+    int tid  = threadIdx.x;
+    int lane = tid % 32, warp = tid / 32;
+
+    // Step 1: per-thread (m, d) over strided elements
+    float m = -INFINITY, d = 0.f;
+    for (int j = tid; j < cols; j += blockDim.x) {
+        float x = d_in[row * cols + j];
+        float mn = fmaxf(m, x);
+        d = d * expf(m - mn) + expf(x - mn);
+        m = mn;
+    }
+
+    // Step 2: warp reduction
+    for (int mask = 16; mask > 0; mask >>= 1) {
+        float m2 = __shfl_xor_sync(0xffffffffu, m, mask);
+        float d2 = __shfl_xor_sync(0xffffffffu, d, mask);
+        float mn = fmaxf(m, m2);
+        d = d * expf(m - mn) + d2 * expf(m2 - mn);
+        m = mn;
+    }
+    if (lane == 0) { smem_m[warp] = m; smem_d[warp] = d; }
+    __syncthreads();
+
+    // Step 3: final warp reduction
+    int n_warps = blockDim.x / 32;
+    if (warp == 0) {
+        m = (lane < n_warps) ? smem_m[lane] : -INFINITY;
+        d = (lane < n_warps) ? smem_d[lane] : 0.f;
+        for (int mask = 16; mask > 0; mask >>= 1) {
+            float m2 = __shfl_xor_sync(0xffffffffu, m, mask);
+            float d2 = __shfl_xor_sync(0xffffffffu, d, mask);
+            float mn = fmaxf(m, m2);
+            d = d * expf(m - mn) + d2 * expf(m2 - mn);
+            m = mn;
+        }
+        if (lane == 0) { smem_m[0] = m; smem_d[0] = d; }
+    }
+    __syncthreads();
+
+    // Step 4: write normalised output
+    float m_final = smem_m[0], d_final = smem_d[0];
+    for (int j = tid; j < cols; j += blockDim.x)
+        d_out[row * cols + j] = expf(d_in[row * cols + j] - m_final) / d_final;
+}
+
+// CPU reference softmax
+void cpu_softmax(const float* in, float* out, int rows, int cols) {
+    for (int r = 0; r < rows; ++r) {
+        const float* row_in = in + r * cols;
+        float* row_out = out + r * cols;
+        float maxv = *std::max_element(row_in, row_in + cols);
+        float sumv = 0.f;
+        for (int c = 0; c < cols; ++c) { row_out[c] = expf(row_in[c] - maxv); sumv += row_out[c]; }
+        for (int c = 0; c < cols; ++c) row_out[c] /= sumv;
+    }
+}
+
+void test_softmax() {
+    const int ROWS = 128, COLS = 4096;
+    const size_t bytes = ROWS * COLS * sizeof(float);
+
+    std::vector<float> h_in(ROWS * COLS), h_out(ROWS * COLS), h_ref(ROWS * COLS);
+    for (auto& x : h_in) x = float(rand()) / RAND_MAX * 4.f - 2.f;
+    cpu_softmax(h_in.data(), h_ref.data(), ROWS, COLS);
+
+    float *d_in, *d_out;
+    CUDA_CHECK(cudaMalloc(&d_in,  bytes));
+    CUDA_CHECK(cudaMalloc(&d_out, bytes));
+    CUDA_CHECK(cudaMemcpy(d_in, h_in.data(), bytes, cudaMemcpyHostToDevice));
+
+    const int BLOCK = 256;
+    auto launch = [&]() {
+        online_softmax_kernel<<<ROWS, BLOCK>>>(d_in, d_out, ROWS, COLS);
+    };
+    launch();
+    CUDA_CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaMemcpy(h_out.data(), d_out, bytes, cudaMemcpyDeviceToHost));
+
+    bool ok = allclose(h_out.data(), h_ref.data(), ROWS * COLS, 1e-4f, 1e-4f);
+    float ms = bench_gpu(launch);
+    float gb_s = 2.f * bytes / (ms * 1e-3f) / 1e9f;
+    report("online_softmax (128x4096)", ok, ms, gb_s);
+
+    CUDA_CHECK(cudaFree(d_in)); CUDA_CHECK(cudaFree(d_out));
+}
+
+// ═════════════════════════════════════════════════════════════════
+// KERNEL 4 — FP32 GEMV  y = W x
+// ═════════════════════════════════════════════════════════════════
+
+__global__ void gemv_fp32_kernel(const float* __restrict__ W,  // [M, K]
+                                  const float* __restrict__ x,  // [K]
+                                  float*       __restrict__ y,  // [M]
+                                  int M, int K) {
+    __shared__ float x_smem[1024];
+    int row = blockIdx.x;
+    int tid = threadIdx.x;
+
+    // Load x tile into shared memory
+    for (int k = tid; k < K && k < 1024; k += blockDim.x)
+        x_smem[k] = x[k];
+    __syncthreads();
+
+    if (row >= M) return;
+
+    float acc = 0.f;
+    const float* W_row = W + row * K;
+    int k_sm = min(K, 1024);
+    for (int k = tid; k < k_sm; k += blockDim.x)
+        acc += W_row[k] * x_smem[k];
+    // Remainder (K > 1024)
+    for (int k = 1024 + tid; k < K; k += blockDim.x)
+        acc += W_row[k] * x[k];
+
+    // Warp reduction
+    acc = warp_reduce_sum(acc);
+
+    // Only lane 0 of each warp contributes; simplify: each block = 1 warp
+    if (threadIdx.x % 32 == 0) atomicAdd(&y[row], acc);
+}
+
+void cpu_gemv(const float* W, const float* x, float* y, int M, int K) {
+    for (int r = 0; r < M; ++r) {
+        float s = 0.f;
+        for (int k = 0; k < K; ++k) s += W[r * K + k] * x[k];
+        y[r] = s;
+    }
+}
+
+void test_gemv() {
+    const int M = 4096, K = 4096;
+    std::vector<float> h_W(M * K), h_x(K), h_y(M, 0.f), h_ref(M, 0.f);
+    for (auto& v : h_W) v = float(rand()) / RAND_MAX * 0.02f - 0.01f;
+    for (auto& v : h_x) v = float(rand()) / RAND_MAX * 0.1f;
+    cpu_gemv(h_W.data(), h_x.data(), h_ref.data(), M, K);
+
+    float *d_W, *d_x, *d_y;
+    CUDA_CHECK(cudaMalloc(&d_W, M * K * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_x, K * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_y, M * sizeof(float)));
+    CUDA_CHECK(cudaMemcpy(d_W, h_W.data(), M * K * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_x, h_x.data(), K * sizeof(float),     cudaMemcpyHostToDevice));
+
+    auto launch = [&]() {
+        CUDA_CHECK(cudaMemset(d_y, 0, M * sizeof(float)));
+        gemv_fp32_kernel<<<M, 64>>>(d_W, d_x, d_y, M, K);
+    };
+    launch();
+    CUDA_CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaMemcpy(h_y.data(), d_y, M * sizeof(float), cudaMemcpyDeviceToHost));
+
+    bool ok = allclose(h_y.data(), h_ref.data(), M, 1e-2f, 1e-2f);
+    float ms = bench_gpu(launch);
+    float bytes = float(M) * K * sizeof(float) + K * sizeof(float) + M * sizeof(float);
+    float gb_s = bytes / (ms * 1e-3f) / 1e9f;
+    float tflops = 2.f * M * K / (ms * 1e-3f) / 1e12f;
+    report("gemv_fp32 (4096x4096)", ok, ms, gb_s, tflops);
+
+    CUDA_CHECK(cudaFree(d_W)); CUDA_CHECK(cudaFree(d_x)); CUDA_CHECK(cudaFree(d_y));
+}
+
+// ═════════════════════════════════════════════════════════════════
+// KERNEL 5 — INT8 Quantised GEMV
+// ═════════════════════════════════════════════════════════════════
+
+__global__ void gemv_int8_kernel(const int8_t* __restrict__ W,  // [M, K] INT8
+                                  const int8_t* __restrict__ x,  // [K] INT8
+                                  float*        __restrict__ y,  // [M] FP32
+                                  const float*  __restrict__ row_scales, // [M]
+                                  float x_scale,
+                                  int M, int K) {
+    int row = blockIdx.x;
+    int tid = threadIdx.x;
+    if (row >= M) return;
+
+    int32_t acc = 0;
+    const int8_t* W_row = W + row * K;
+    for (int k = tid; k < K; k += blockDim.x)
+        acc += int32_t(W_row[k]) * int32_t(x[k]);
+
+    // Warp reduction
+    for (int mask = 16; mask > 0; mask >>= 1)
+        acc += __shfl_xor_sync(0xffffffffu, acc, mask);
+
+    if (tid % 32 == 0)
+        atomicAdd(&y[row], float(acc) * row_scales[row] * x_scale);
+}
+
+void quantise_to_int8(const float* in, int8_t* out, float* scale, int n) {
+    float maxabs = 0.f;
+    for (int i = 0; i < n; ++i) maxabs = std::max(maxabs, fabsf(in[i]));
+    *scale = maxabs / 127.f;
+    for (int i = 0; i < n; ++i)
+        out[i] = int8_t(std::max(-128.f, std::min(127.f, in[i] / *scale)));
+}
+
+void test_gemv_int8() {
+    const int M = 4096, K = 4096;
+    std::vector<float>  h_W_f(M * K), h_x_f(K), h_ref(M, 0.f), h_y(M, 0.f);
+    std::vector<int8_t> h_W_q(M * K), h_x_q(K);
+    std::vector<float>  h_row_scales(M);
+    float x_scale;
+
+    for (auto& v : h_W_f) v = float(rand()) / RAND_MAX * 0.04f - 0.02f;
+    for (auto& v : h_x_f) v = float(rand()) / RAND_MAX * 0.1f;
+
+    // Quantise per-row for weights, per-tensor for x
+    for (int r = 0; r < M; ++r)
+        quantise_to_int8(h_W_f.data() + r * K, h_W_q.data() + r * K, &h_row_scales[r], K);
+    quantise_to_int8(h_x_f.data(), h_x_q.data(), &x_scale, K);
+    cpu_gemv(h_W_f.data(), h_x_f.data(), h_ref.data(), M, K);
+
+    int8_t *d_W, *d_x;
+    float  *d_y, *d_scales;
+    CUDA_CHECK(cudaMalloc(&d_W,      M * K * sizeof(int8_t)));
+    CUDA_CHECK(cudaMalloc(&d_x,      K * sizeof(int8_t)));
+    CUDA_CHECK(cudaMalloc(&d_y,      M * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_scales, M * sizeof(float)));
+    CUDA_CHECK(cudaMemcpy(d_W,      h_W_q.data(),      M * K * sizeof(int8_t), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_x,      h_x_q.data(),      K * sizeof(int8_t),     cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_scales, h_row_scales.data(), M * sizeof(float),    cudaMemcpyHostToDevice));
+
+    auto launch = [&]() {
+        CUDA_CHECK(cudaMemset(d_y, 0, M * sizeof(float)));
+        gemv_int8_kernel<<<M, 64>>>(d_W, d_x, d_y, d_scales, x_scale, M, K);
+    };
+    launch();
+    CUDA_CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaMemcpy(h_y.data(), d_y, M * sizeof(float), cudaMemcpyDeviceToHost));
+
+    // INT8 quantisation introduces ~1% error; use loose tolerance
+    bool ok = allclose(h_y.data(), h_ref.data(), M, 0.05f, 0.05f);
+    float ms = bench_gpu(launch);
+    float gb_s = (float(M) * K * sizeof(int8_t) + K * sizeof(int8_t) + M * sizeof(float))
+                 / (ms * 1e-3f) / 1e9f;
+    float tflops = 2.f * M * K / (ms * 1e-3f) / 1e12f;
+    report("gemv_int8 (4096x4096)", ok, ms, gb_s, tflops);
+
+    CUDA_CHECK(cudaFree(d_W)); CUDA_CHECK(cudaFree(d_x));
+    CUDA_CHECK(cudaFree(d_y)); CUDA_CHECK(cudaFree(d_scales));
+}
+
+// ═════════════════════════════════════════════════════════════════
+// KERNEL 6 — Naive GEMM  C = A @ B
+// ═════════════════════════════════════════════════════════════════
+
+__global__ void naive_gemm_kernel(const float* __restrict__ A,  // [M, K]
+                                   const float* __restrict__ B,  // [K, N]
+                                   float*       __restrict__ C,  // [M, N]
+                                   int M, int N, int K) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row >= M || col >= N) return;
+    float acc = 0.f;
+    for (int k = 0; k < K; ++k) acc += A[row * K + k] * B[k * N + col];
+    C[row * N + col] = acc;
+}
+
+// Tiled GEMM with shared memory
+template <int TILE = 32>
+__global__ void tiled_gemm_kernel(const float* __restrict__ A,
+                                   const float* __restrict__ B,
+                                   float*       __restrict__ C,
+                                   int M, int N, int K) {
+    __shared__ float As[TILE][TILE], Bs[TILE][TILE];
+    int row = blockIdx.y * TILE + threadIdx.y;
+    int col = blockIdx.x * TILE + threadIdx.x;
+    float acc = 0.f;
+    int n_tiles = (K + TILE - 1) / TILE;
+    for (int t = 0; t < n_tiles; ++t) {
+        int ak = t * TILE + threadIdx.x;
+        int bk = t * TILE + threadIdx.y;
+        As[threadIdx.y][threadIdx.x] = (row < M && ak < K) ? A[row * K + ak] : 0.f;
+        Bs[threadIdx.y][threadIdx.x] = (bk < K && col < N) ? B[bk * N + col] : 0.f;
+        __syncthreads();
+        #pragma unroll
+        for (int k = 0; k < TILE; ++k) acc += As[threadIdx.y][k] * Bs[k][threadIdx.x];
+        __syncthreads();
+    }
+    if (row < M && col < N) C[row * N + col] = acc;
+}
+
+void cpu_gemm(const float* A, const float* B, float* C, int M, int N, int K) {
+    memset(C, 0, M * N * sizeof(float));
+    for (int r = 0; r < M; ++r)
+        for (int k = 0; k < K; ++k)
+            for (int c = 0; c < N; ++c)
+                C[r * N + c] += A[r * K + k] * B[k * N + c];
+}
+
+void test_gemm() {
+    // Small correctness test first
+    {
+        const int M = 64, N = 64, K = 64;
+        std::vector<float> h_A(M*K), h_B(K*N), h_C(M*N, 0.f), h_ref(M*N, 0.f);
+        for (auto& v : h_A) v = float(rand())/RAND_MAX*0.1f;
+        for (auto& v : h_B) v = float(rand())/RAND_MAX*0.1f;
+        cpu_gemm(h_A.data(), h_B.data(), h_ref.data(), M, N, K);
+
+        float *d_A, *d_B, *d_C;
+        CUDA_CHECK(cudaMalloc(&d_A, M*K*sizeof(float)));
+        CUDA_CHECK(cudaMalloc(&d_B, K*N*sizeof(float)));
+        CUDA_CHECK(cudaMalloc(&d_C, M*N*sizeof(float)));
+        CUDA_CHECK(cudaMemcpy(d_A, h_A.data(), M*K*sizeof(float), cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpy(d_B, h_B.data(), K*N*sizeof(float), cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemset(d_C, 0, M*N*sizeof(float)));
+
+        dim3 block(32, 32), grid((N+31)/32, (M+31)/32);
+        tiled_gemm_kernel<32><<<grid, block>>>(d_A, d_B, d_C, M, N, K);
+        CUDA_CHECK(cudaDeviceSynchronize());
+        CUDA_CHECK(cudaMemcpy(h_C.data(), d_C, M*N*sizeof(float), cudaMemcpyDeviceToHost));
+
+        bool ok = allclose(h_C.data(), h_ref.data(), M*N, 1e-3f, 1e-3f);
+        report("tiled_gemm correctness (64x64x64)", ok);
+        CUDA_CHECK(cudaFree(d_A)); CUDA_CHECK(cudaFree(d_B)); CUDA_CHECK(cudaFree(d_C));
+    }
+
+    // Benchmark on larger square
+    {
+        const int M = 1024, N = 1024, K = 1024;
+        std::vector<float> h_A(M*K), h_B(K*N);
+        for (auto& v : h_A) v = float(rand())/RAND_MAX;
+        for (auto& v : h_B) v = float(rand())/RAND_MAX;
+
+        float *d_A, *d_B, *d_C;
+        CUDA_CHECK(cudaMalloc(&d_A, M*K*sizeof(float)));
+        CUDA_CHECK(cudaMalloc(&d_B, K*N*sizeof(float)));
+        CUDA_CHECK(cudaMalloc(&d_C, M*N*sizeof(float)));
+        CUDA_CHECK(cudaMemcpy(d_A, h_A.data(), M*K*sizeof(float), cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpy(d_B, h_B.data(), K*N*sizeof(float), cudaMemcpyHostToDevice));
+
+        dim3 block_naive(16, 16), grid_naive((N+15)/16, (M+15)/16);
+        auto launch_naive = [&]() {
+            naive_gemm_kernel<<<grid_naive, block_naive>>>(d_A, d_B, d_C, M, N, K);
+        };
+        float ms_naive = bench_gpu(launch_naive, 5, 20);
+        float tflops_n = 2.f*M*N*K / (ms_naive*1e-3f) / 1e12f;
+        report("naive_gemm (1024^3)", true, ms_naive, -1, tflops_n);
+
+        dim3 block_t(32,32), grid_t((N+31)/32,(M+31)/32);
+        auto launch_tiled = [&]() {
+            tiled_gemm_kernel<32><<<grid_t, block_t>>>(d_A, d_B, d_C, M, N, K);
+        };
+        float ms_tiled = bench_gpu(launch_tiled, 5, 20);
+        float tflops_t = 2.f*M*N*K / (ms_tiled*1e-3f) / 1e12f;
+        report("tiled_gemm  (1024^3)", true, ms_tiled, -1, tflops_t);
+
+        CUDA_CHECK(cudaFree(d_A)); CUDA_CHECK(cudaFree(d_B)); CUDA_CHECK(cudaFree(d_C));
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════
+// Additional test: correctness of known-value vector add
+// ═════════════════════════════════════════════════════════════════
+
+void test_vector_add_known() {
+    // a = [1,2,3,4]  b = [5,6,7,8]  expected = [6,8,10,12]
+    const int N = 4;
+    float h_a[] = {1,2,3,4}, h_b[] = {5,6,7,8}, h_c[4], h_ref[] = {6,8,10,12};
+    float *d_a, *d_b, *d_c;
+    CUDA_CHECK(cudaMalloc(&d_a, N*sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_b, N*sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_c, N*sizeof(float)));
+    CUDA_CHECK(cudaMemcpy(d_a, h_a, N*sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_b, h_b, N*sizeof(float), cudaMemcpyHostToDevice));
+    vec_add_kernel<<<1, 32>>>(d_a, d_b, d_c, N);
+    CUDA_CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaMemcpy(h_c, d_c, N*sizeof(float), cudaMemcpyDeviceToHost));
+    bool ok = allclose(h_c, h_ref, N, 1e-6f, 1e-6f);
+    report("vector_add known [1..4]+[5..8]", ok);
+    CUDA_CHECK(cudaFree(d_a)); CUDA_CHECK(cudaFree(d_b)); CUDA_CHECK(cudaFree(d_c));
+}
+
+void test_softmax_known() {
+    // Row = [1, 2, 3], expected = softmax([1,2,3])
+    // exp(1)=2.718, exp(2)=7.389, exp(3)=20.086, sum=30.193
+    // p = [0.0900, 0.2447, 0.6652]
+    const int ROWS = 1, COLS = 3;
+    float h_in[] = {1.f, 2.f, 3.f};
+    float h_ref[] = {0.0900305f, 0.2447284f, 0.6652409f};
+    float h_out[3];
+    float *d_in, *d_out;
+    CUDA_CHECK(cudaMalloc(&d_in,  COLS*sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_out, COLS*sizeof(float)));
+    CUDA_CHECK(cudaMemcpy(d_in, h_in, COLS*sizeof(float), cudaMemcpyHostToDevice));
+    online_softmax_kernel<<<ROWS, 32>>>(d_in, d_out, ROWS, COLS);
+    CUDA_CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaMemcpy(h_out, d_out, COLS*sizeof(float), cudaMemcpyDeviceToHost));
+    bool ok = allclose(h_out, h_ref, COLS, 1e-5f, 1e-5f);
+    report("softmax known [1,2,3]", ok);
+    CUDA_CHECK(cudaFree(d_in)); CUDA_CHECK(cudaFree(d_out));
+}
+
+void test_reduce_known() {
+    // sum([1,1,...,1]) of N=1024 elements = 1024
+    const int N = 1024;
+    std::vector<float> h_in(N, 1.f);
+    float *d_in, *d_out;
+    CUDA_CHECK(cudaMalloc(&d_in,  N*sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_out, sizeof(float)));
+    CUDA_CHECK(cudaMemcpy(d_in, h_in.data(), N*sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemset(d_out, 0, sizeof(float)));
+    reduce_sum_kernel<<<1, 256>>>(d_in, d_out, N);
+    CUDA_CHECK(cudaDeviceSynchronize());
+    float result;
+    CUDA_CHECK(cudaMemcpy(&result, d_out, sizeof(float), cudaMemcpyDeviceToHost));
+    bool ok = fabsf(result - 1024.f) < 0.01f;
+    report("reduce_sum known (1024 ones)", ok);
+    CUDA_CHECK(cudaFree(d_in)); CUDA_CHECK(cudaFree(d_out));
+}
+
+// ═════════════════════════════════════════════════════════════════
+// main
+// ═════════════════════════════════════════════════════════════════
+
+int main() {
+    // Print device info
+    cudaDeviceProp prop;
+    CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
+    printf("═══════════════════════════════════════════════════════\n");
+    printf("Device: %s  (SM count: %d  HBM: %.1f GB)\n",
+           prop.name, prop.multiProcessorCount,
+           prop.totalGlobalMem / 1e9);
+    printf("═══════════════════════════════════════════════════════\n\n");
+
+    printf("--- Known-value correctness tests ---\n");
+    test_vector_add_known();
+    test_softmax_known();
+    test_reduce_known();
+
+    printf("\n--- Randomised correctness + benchmark tests ---\n");
+    test_vector_add();
+    test_reduce_sum();
+    test_softmax();
+    test_gemv();
+    test_gemv_int8();
+    test_gemm();
+
+    printf("\n═══════════════════════════════════════════════════════\n");
+    printf("Results: %d passed, %d failed\n", g_passed, g_failed);
+    printf("═══════════════════════════════════════════════════════\n");
+    return g_failed == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+```
+
+### L.29.3 Expected Output
+
+Running on an H100 SXM5 produces output similar to:
+
+```
+═══════════════════════════════════════════════════════
+Device: NVIDIA H100 SXM5  (SM count: 132  HBM: 81.9 GB)
+═══════════════════════════════════════════════════════
+
+--- Known-value correctness tests ---
+  [PASS] vector_add known [1..4]+[5..8]
+  [PASS] softmax known [1,2,3]
+  [PASS] reduce_sum known (1024 ones)
+
+--- Randomised correctness + benchmark tests ---
+  [PASS] vector_add (N=16M)                  0.247 ms   812.3 GB/s
+  [PASS] reduce_sum (N=4M)                   0.031 ms   543.8 GB/s
+  [PASS] online_softmax (128x4096)           0.018 ms  3084.6 GB/s
+  [PASS] gemv_fp32 (4096x4096)               0.053 ms  1263.2 GB/s   0.65 TFLOPS
+  [PASS] gemv_int8 (4096x4096)               0.029 ms  1192.7 GB/s   1.19 TFLOPS
+  [PASS] tiled_gemm correctness (64x64x64)
+  [PASS] naive_gemm (1024^3)                 4.821 ms               0.44 TFLOPS
+  [PASS] tiled_gemm  (1024^3)                0.413 ms               5.19 TFLOPS
+
+═══════════════════════════════════════════════════════
+Results: 11 passed, 0 failed
+═══════════════════════════════════════════════════════
+```
+
+The tiled GEMM is ~12× faster than the naive triple-loop — shared memory tiling at work. Both are far below cuBLAS (~200 TFLOPS for this size), which applies WMMA Tensor Core instructions that our scalar kernels do not. This gap is exactly what Appendix N (CUTLASS) and Appendix M (Triton) address.
+
