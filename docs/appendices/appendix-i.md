@@ -241,7 +241,7 @@ enum class RequestStatus {
     RUNNING,      // currently generating tokens
     SWAPPED,      // preempted, KV on CPU
     FINISHED,     // generation complete
-    ABORTED,      // cancelled
+    ABORTED,      // canceled
 };
 
 struct Request {

@@ -703,7 +703,7 @@ The prefill pod completes the forward pass and begins serializing KV blocks into
 
 **Time cost:** One full re-prefill latency (e.g., 80 ms for a 1,024-token prompt) + one new KV transfer (5.12 ms). Total additional TTFT penalty ≈ 85 ms.
 
-**Production mitigation:** Use redundant prefill pods with active-active assignment. The load balancer sends the prompt to 2 prefill pods simultaneously; the first to complete transfer wins and the other is cancelled. This reduces retry latency to near-zero in most crash scenarios.
+**Production mitigation:** Use redundant prefill pods with active-active assignment. The load balancer sends the prompt to 2 prefill pods simultaneously; the first to complete transfer wins and the other is canceled. This reduces retry latency to near-zero in most crash scenarios.
 
 ---
 

@@ -417,7 +417,7 @@ The LinkedIn scenario is not hypothetical. Every technique in this book is deplo
 
 ## 38.8.1 Deployment Sequencing — Why Order Matters
 
-The optimizations in this book do not compose in arbitrary order. Each layer assumes the previous is measured and stable. The sequence below minimises rework and makes regressions easy to attribute:
+The optimizations in this book do not compose in arbitrary order. Each layer assumes the previous is measured and stable. The sequence below minimizes rework and makes regressions easy to attribute:
 
 ```
 Phase 1 — Foundation (Week 1–2)

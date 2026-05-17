@@ -86,7 +86,7 @@ The critical difference:
 | Decode  | 1                    | N accumulated     | Memory-bandwidth-bound |
 
 During **prefill**, the GPU processes a large square-ish matrix (N tokens × d
-dimensions), fully utilising tensor cores.  During **decode**, it processes
+dimensions), fully utilizing tensor cores.  During **decode**, it processes
 one row at a time, spending most of its time waiting for weight reads from HBM.
 
 ---

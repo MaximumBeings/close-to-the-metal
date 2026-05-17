@@ -28,7 +28,7 @@ For differentiable functions `f` and `g`, with `L = f(g(x))`:
 dL/dx = (dL/df) * (df/dg) * (dg/dx)
 ```
 
-In Leibniz notation this looks like fractions cancelling — a helpful mnemonic, though it is not rigorous cancellation.
+In Leibniz notation this looks like fractions canceling — a helpful mnemonic, though it is not rigorous cancellation.
 
 **Worked Example A3.1 — Three-level composition**
 
@@ -1208,7 +1208,7 @@ GeLU'(x) = Phi(x) + x * phi(x)   where phi is the Gaussian PDF
 
 Approximation used in practice:
   GeLU(x) ~= 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
-  GeLU'(x) ~= 0.5 * tanh(c) + 0.5 * x * (1 - tanh^2(c)) * sqrt(2/pi) * (1 + 3*0.044715*x^2)
+  GeLU'(x) ~= 0.5 * (1 + tanh(c)) + 0.5 * x * (1 - tanh^2(c)) * sqrt(2/pi) * (1 + 3*0.044715*x^2)
               where c = sqrt(2/pi) * (x + 0.044715*x^3)
 ```
 
@@ -1217,26 +1217,24 @@ Approximation used in practice:
 ```
 x = 1.0
 c = sqrt(2/pi) * (1.0 + 0.044715 * 1.0) = 0.7979 * 1.0447 = 0.8336
-tanh(c) = tanh(0.8336) = 0.6830
-GeLU(1.0) = 0.5 * 1.0 * (1 + 0.6830) = 0.5 * 1.6830 = 0.8415
+tanh(c) = tanh(0.8336) = 0.6824
+GeLU(1.0) = 0.5 * 1.0 * (1 + 0.6824) = 0.5 * 1.6824 = 0.8412
 
 GeLU'(1.0):
-  sech^2(c) = 1 - tanh^2(c) = 1 - 0.6830^2 = 1 - 0.4665 = 0.5335
-  term1 = 0.5 * 0.6830 = 0.3415
-  term2 = 0.5 * 1.0 * 0.5335 * 0.7979 * (1 + 3*0.044715*1.0)
-        = 0.5 * 0.5335 * 0.7979 * 1.1341
-        = 0.5 * 0.4828
-        = 0.2414
-  GeLU'(1.0) = 0.3415 + 0.2414 = 0.5829 ≈ 0.583
+  sech^2(c) = 1 - tanh^2(c) = 1 - 0.6824^2 = 1 - 0.4657 = 0.5344
+  term1 = 0.5 * (1 + 0.6824) = 0.5 * 1.6824 = 0.8412
+  term2 = 0.5 * 1.0 * 0.5344 * 0.7979 * (1 + 3*0.044715*1.0)
+        = 0.5 * 0.5344 * 0.7979 * 1.1341
+        = 0.5 * 0.4836
+        = 0.2418
+  GeLU'(1.0) = 0.8412 + 0.2418 = 1.0830 ≈ 1.083
 
 Finite difference check:
-  GeLU(1.001) ≈ 0.8420
-  GeLU(0.999) ≈ 0.8410
-  approx = (0.8420 - 0.8410) / 0.002 = 0.0010 / 0.002 = 0.500
+  GeLU(1.001) ≈ 0.8423
+  GeLU(0.999) ≈ 0.8401
+  approx = (0.8423 - 0.8401) / 0.002 = 0.0022 / 0.002 = 1.083
 
-  Note: finite difference at h=0.001 gives 0.500, analytic gives 0.583.
-  The discrepancy is because GeLU curve has non-negligible curvature near x=1.
-  At h=0.0001 it converges to the analytic value.
+  Analytic gives 1.083; finite difference at h=0.001 agrees. ✓
 ```
 
 ---
@@ -1304,7 +1302,7 @@ Interpretation:
   Row 1 (true class) has large negative gradient on W -- pushing its
   logit UP (increasing W[1,:] makes logit[1] = W[1,:]@h larger).
   Rows 0 and 2 have positive gradient -- pushing their logits DOWN.
-  This is gradient descent minimising cross-entropy.
+  This is gradient descent minimizing cross-entropy.
 ```
 
 ---

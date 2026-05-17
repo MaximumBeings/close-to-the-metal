@@ -26,7 +26,7 @@ serve it — is foundational knowledge.
 ## 41.2 The Llama 3 Architecture
 
 Llama 3 is a decoder-only transformer. There is nothing exotic about its core
-design — it deliberately avoids architectural novelty in favour of scale and
+design — it deliberately avoids architectural novelty in favor of scale and
 training quality. What makes it interesting for inference engineering is the
 specific set of choices Meta made and their practical consequences.
 
@@ -155,7 +155,7 @@ projection in a single kernel call.
 
 ### 41.2.5 Tokenizer: tiktoken-based BPE
 
-Llama 3 abandons the SentencePiece tokenizer of Llama 2 in favour of a
+Llama 3 abandons the SentencePiece tokenizer of Llama 2 in favor of a
 tiktoken-compatible BPE tokenizer with a 128,256-token vocabulary (vs 32,000
 for Llama 2).
 
@@ -474,7 +474,7 @@ essential for SLA design.
 
 | Batch size | TTFT P50 (ms) | TTFT P95 (ms) | Decode tok/s | Notes |
 |---|---|---|---|---|
-| 1 | 95 | 115 | 52 | Lowest latency, lowest utilisation |
+| 1 | 95 | 115 | 52 | Lowest latency, lowest utilization |
 | 4 | 140 | 180 | 210 | Good balance for interactive use |
 | 8 | 220 | 290 | 415 | Near-saturation on A100 memory bandwidth |
 | 16 | 390 | 520 | 830 | TTFT exceeds 500ms — acceptable for async |
@@ -769,7 +769,7 @@ def test_kv_cache_per_token():
 
 def test_awq_sizing_500_users():
     weights_gb = 35      # Llama 3.1 70B AWQ INT4 ≈ 35 GB
-    total_gpu_gb = 4 * 80 * 0.90   # 4× A100 80GB at 90% utilisation = 288 GB
+    total_gpu_gb = 4 * 80 * 0.90   # 4× A100 80GB at 90% utilization = 288 GB
     available_gb = total_gpu_gb - weights_gb   # 253 GB
     bpt = kv_cache_bytes_per_token(N_LAYERS, N_KV_HEADS, HEAD_DIM, DTYPE_BYTES)
     max_conc = max_concurrent_requests(available_gb, bpt, context_tokens=1500)
@@ -827,7 +827,7 @@ quantization level, and supported across every major inference engine.
 The key numbers to internalise: 320 KB/token/layer for the 70B model's KV
 cache; 43 GB for Q4_K_M 70B weights; 4× hardware sizing for 500 concurrent
 users at realistic context lengths. Llama 3.3 70B gives you 405B-quality
-output at 70B cost — this is the production default for most organisations
+output at 70B cost — this is the production default for most organizations
 running self-hosted inference.
 
 ---

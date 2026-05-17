@@ -204,7 +204,7 @@ useless in practice):
     70B model: ~512 A100s for 1 week ≈ $500,000+
 
   Reward model quality is the ceiling:
-    If R_φ is miscalibrated, the actor optimises for proxy rewards,
+    If R_φ is miscalibrated, the actor optimizes for proxy rewards,
     not human intent. "Reward hacking" degrades quality despite
     high RL reward scores.
 ```

@@ -284,7 +284,7 @@ Visual example (W=4, 3 layers, position 12 in Layer 3):
 |---|---|---|
 | Mistral-7B (2023) | 4,096 | First production model to popularise SWA |
 | Gemma-2 / Gemma-3 | 4,096 | Mixed: SWA layers + full-attention every 5th |
-| Mistral-Large | — | Dropped SWA in favour of GQA for 123B model |
+| Mistral-Large | — | Dropped SWA in favor of GQA for 123B model |
 
 ---
 
@@ -898,7 +898,7 @@ Layer 2 (token compression, optional):
   Sliding window on some layers (Gemma-2 style hybrid)
   Mamba for streaming / very-long-context applications (Jamba, Zamba)
 
-Kernel optimisations:
+Kernel optimizations:
   FlashAttention — avoids materialising N×N in HBM (Chapter 5)
   PagedAttention — KV cache memory management (Chapter 6)
   Prefix caching  — reuse shared prefix across users (Chapter 11)
@@ -2261,7 +2261,7 @@ int main() {
     std::cout << "\n  Observations:\n"
               << "  • dim0 (A=0.9): slow decay — long-range memory\n"
               << "  • dim3 (A=0.6): fast decay — short-range memory\n"
-              << "  • Each dimension specialises in a different timescale\n\n";
+              << "  • Each dimension specializes in a different timescale\n\n";
 
     // ── Cache comparison ───────────────────────────────────────────────
     const std::size_t n_layers = 32;

@@ -74,7 +74,7 @@ activation_adjusted = activation / s     (scale down at inference)
 net_output = (activation / s) × (W × s) = activation × W   (unchanged)
 ```
 
-The scale factors `s` are found by minimising reconstruction error on the
+The scale factors `s` are found by minimizing reconstruction error on the
 calibration dataset.
 
 ### U.3.2 Running AWQ calibration with `llm-awq`
@@ -560,7 +560,7 @@ vllm serve ./Llama-3.1-70B-FP8 \
 
 ## U.8.5 Mixed-Precision Quantization: Which Layers Stay in FP16
 
-Quantizing every layer uniformly (e.g., all to INT4) maximises compression but
+Quantizing every layer uniformly (e.g., all to INT4) maximizes compression but
 concentrates error in sensitive layers. Mixed-precision quantization keeps the
 most sensitive layers in FP16 (or FP8) and quantizes the rest aggressively.
 
@@ -676,7 +676,7 @@ import numpy as np
 
 def analyse_calibration_data(texts: list[str], tokenizer) -> dict:
     """
-    Analyse a calibration dataset for common bias patterns.
+    Analyze a calibration dataset for common bias patterns.
     Returns a report with statistics and warnings.
     """
     warnings = []
@@ -947,7 +947,7 @@ PASS: GGUF format memory calculations consistent (Q2_K=23GB → F16=140GB)
 
 2. GPTQ uses second-order information (the Hessian of the quantization error).
    Explain intuitively why the Hessian provides better quantization parameters
-   than just minimising the first-order (reconstruction) error.
+   than just minimizing the first-order (reconstruction) error.
 
 3. FP8 E4M3 has a maximum representable value of 448.0. A weight matrix has
    max absolute value 2.3. What scale factor would you set for static FP8
@@ -1005,14 +1005,14 @@ effectively more quantization precision at no memory cost.
 **Which channels are salient:** AWQ ranks channels by `max(|activation|)` or
 `mean(|activation|²)` across the calibration set. Typically the top 1% of
 channels by activation magnitude are scaled. The scale factor `s` is chosen to
-minimise layer-level quantization error on the calibration data via a grid
+minimize layer-level quantization error on the calibration data via a grid
 search over `s ∈ {0.5, 1.0, 2.0, 4.0, 8.0}`.
 
 ---
 
 ### Solution 2 — Why Hessian information improves GPTQ
 
-**First-order minimisation (naive):**
+**First-order minimization (naive):**
 
 Minimising reconstruction error using only the gradient `∂L/∂w` finds a search
 direction that reduces error locally, but it treats all weights as equally
@@ -1160,13 +1160,13 @@ IQ4_XS.
 
 **Effect of Wikipedia calibration on code generation:**
 
-Wikipedia text activates language modelling circuits for prose: long-range
+Wikipedia text activates language modeling circuits for prose: long-range
 syntactic dependencies, named-entity recognition, factual recall. Code
 generation uses different circuits: identifier resolution, bracket matching,
 type consistency, indentation tracking.
 
 Concretely:
-- Attention heads specialised for **code token patterns** (indentation, brackets,
+- Attention heads specialized for **code token patterns** (indentation, brackets,
   keywords) will have low activation magnitude on Wikipedia → assigned as **low
   importance** → quantized aggressively.
 - Attention heads for **noun-phrase cohesion** (important for Wikipedia) will be

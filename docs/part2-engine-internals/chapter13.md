@@ -948,7 +948,7 @@ throughput, latency, and memory.
 - **Server-Sent Events (SSE)**: vLLM's `/v1/chat/completions?stream=true` returns a chunked HTTP response with `data:` lines; each line contains a JSON delta with the newly generated token(s).
 - **AsyncEngine architecture**: vLLM's streaming path uses an `AsyncLLMEngine` with an `asyncio` event loop; each request is an `AsyncGenerator` that yields `RequestOutput` objects.
 - **Token streaming latency**: the first token is gated by TTFT (prefill); subsequent tokens arrive at ITL intervals (typically 20–80 ms depending on load and hardware).
-- **Delta encoding**: streaming responses send only the new token text in each chunk, not the full response, minimising network transfer and client-side buffer management.
+- **Delta encoding**: streaming responses send only the new token text in each chunk, not the full response, minimizing network transfer and client-side buffer management.
 - **Detokenization**: vLLM batches token IDs and detokenises incrementally; some tokens cannot be decoded until the next token arrives (e.g., multi-byte UTF-8 sequences).
 - **llama.cpp streaming**: the `llama_token_to_str` function emits partial UTF-8 sequences; the `llama.cpp` server uses chunked Transfer-Encoding; the Python `llama-cpp-python` library wraps this with a `Generator`.
 - **nginx buffering**: `proxy_buffering off` is required in the nginx config for streaming responses to reach the client without buffering delay.

@@ -18,7 +18,7 @@ length. For a 2,000-token system prompt at 70B parameter scale, that
 recomputation takes roughly 0.8–1.2 seconds on a single A100 before the model
 processes even one token of the actual user query.
 
-Prefix caching solves this by recognising that the KV pairs for a given token
+Prefix caching solves this by recognizing that the KV pairs for a given token
 sequence are **deterministic given the weights and the sequence**. If two
 requests share a prefix, they can share KV blocks.
 
@@ -739,7 +739,7 @@ from vllm import LLM, SamplingParams
 def warmup_prefix_cache(llm: LLM, system_prompt: str, n_warmup: int = 3):
     """
     Send n_warmup requests through the engine to populate the prefix cache.
-    Use max_tokens=1 to minimise cost; we only care about prefill caching.
+    Use max_tokens=1 to minimize cost; we only care about prefill caching.
     """
     warmup_params = SamplingParams(temperature=0.0, max_tokens=1)
     queries = [f"{system_prompt}\nWarmup query {i}" for i in range(n_warmup)]
@@ -909,7 +909,7 @@ A 2,000-token system prompt cached in full requires:
 2,000 × 320 KB = 640 MB of GPU HBM
 ```
 
-On a single A100-80GB GPU running at 90% utilisation, you have ~72 GB for
+On a single A100-80GB GPU running at 90% utilization, you have ~72 GB for
 inference. The 640 MB cache cost is ~0.9% of total memory — negligible.
 
 ### Concurrent request slots vs. prefix cache
@@ -1046,7 +1046,7 @@ Measure your cache hit rate from day one and let the data drive the decision.
    valuable than the extra request slot?
 
 4. SGLang's RadixAttention stores `ref_count` on each node. What happens if
-   a request is cancelled mid-generation while its prefix nodes have
+   a request is canceled mid-generation while its prefix nodes have
    `ref_count == 1`? Describe the sequence of operations required to safely
    release those nodes back to the eviction pool.
 
@@ -1161,7 +1161,7 @@ For this example, even a 10% hit rate (60 hits/min × 0.4 s = 24 GPU-s) vs slot 
 
 **Step 1:** Server detects client disconnect (TCP RST or explicit cancel).
 
-**Step 2:** Scheduler marks the sequence as cancelled. Decode stops immediately for this sequence.
+**Step 2:** Scheduler marks the sequence as canceled. Decode stops immediately for this sequence.
 
 **Step 3:** Walk the sequence's node path from leaf to root:
 - **Node P3 (leaf):** Decrement ref_count: 1 → 0. P3 is now unreferenced → move to LRU eviction pool (mark as eligible for eviction). Physical GPU blocks are NOT freed yet (lazy eviction).

@@ -31,7 +31,7 @@ In a typical LLM serving stack, PyTorch appears at multiple layers:
 
 Understanding how PyTorch works at each layer gives you the mental model
 needed to diagnose performance bottlenecks, write custom kernels, and
-optimise memory usage.
+optimize memory usage.
 
 ---
 
@@ -198,7 +198,7 @@ with torch.cuda.stream(s1):
 with torch.cuda.stream(s2):
     b = torch.randn(1024, 1024, device="cuda")  # concurrent in stream 2
 
-# Synchronise before combining results
+# Synchronize before combining results
 torch.cuda.synchronize()
 c = a + b
 
@@ -320,7 +320,7 @@ torch.cuda.memory._record_memory_history(max_entries=100_000)
 # ... run workload ...
 snapshot = torch.cuda.memory._snapshot()
 torch.cuda.memory._dump_snapshot("memory_snapshot.pkl")
-# Analyse with: python -m torch.cuda._memory_viz trace_plot memory_snapshot.pkl -o plot.html
+# Analyze with: python -m torch.cuda._memory_viz trace_plot memory_snapshot.pkl -o plot.html
 
 # Find memory leaks: tensors holding GPU memory unexpectedly
 def report_gpu_tensors(threshold_mb=100):
@@ -375,7 +375,7 @@ def good_forward(x, W1, W2):
 ## C.5 `torch.compile`: JIT Compilation Layer
 
 `torch.compile` (introduced in PyTorch 2.0) uses **TorchDynamo** to trace
-Python bytecode and **TorchInductor** to generate optimised CUDA/Triton kernels.
+Python bytecode and **TorchInductor** to generate optimized CUDA/Triton kernels.
 
 ### C.5.1 Basic usage
 
@@ -397,7 +397,7 @@ output = compiled_model(input_ids)
 |---|---|---|---|
 | `"default"` | Moderate | Moderate | General-purpose |
 | `"reduce-overhead"` | Fast | Good | Low-latency inference, variable shapes |
-| `"max-autotune"` | Slow (minutes) | Best | Fixed shapes, throughput-maximised serving |
+| `"max-autotune"` | Slow (minutes) | Best | Fixed shapes, throughput-maximized serving |
 | `"max-autotune-no-cudagraphs"` | Slow | Near-best | When CUDA graphs conflict with dynamic ops |
 
 ```python
@@ -658,7 +658,7 @@ def scaled_dot_product(q: Tensor, k: Tensor, v: Tensor, scale: float) -> Tensor:
     probs  = torch.softmax(scores, dim=-1)
     return torch.matmul(probs, v)
 
-# Register a CUDA-optimised implementation
+# Register a CUDA-optimized implementation
 @scaled_dot_product.register_kernel("cuda")
 def scaled_dot_product_cuda(q, k, v, scale):
     # In production: call into FlashAttention or a custom CUDA kernel
@@ -775,7 +775,7 @@ prof.export_chrome_trace("llm_trace.json")
 import torch
 
 def cuda_timed(fn, *args, warmup=5, repeats=20, **kwargs):
-    """Time a CUDA function with proper warm-up and event synchronisation."""
+    """Time a CUDA function with proper warm-up and event synchronization."""
     # Warm up (avoids JIT and cache effects in the measurement)
     for _ in range(warmup):
         fn(*args, **kwargs)
@@ -997,7 +997,7 @@ token_id   = top_k_ids.gather(-1, next_token)
 
 ---
 
-## C.13 Worked Example C.1 — Profiling and Optimising a Transformer Block
+## C.13 Worked Example C.1 — Profiling and Optimizing a Transformer Block
 
 **Goal**: profile a single transformer decoder layer and identify bottlenecks.
 

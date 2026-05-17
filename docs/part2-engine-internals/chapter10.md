@@ -444,7 +444,7 @@ weight row using second-order (Hessian) information from calibration data.
 
 ```
 Problem: given a weight matrix W ∈ ℝ^(n×m), find quantized Ŵ
-         minimising   ‖ (W − Ŵ) · X ‖²_F
+         minimizing   ‖ (W − Ŵ) · X ‖²_F
          where X ∈ ℝ^(m×d) is a calibration activation matrix.
 
 Key insight: the Hessian H = 2 X X^T / d gives the importance of each weight.

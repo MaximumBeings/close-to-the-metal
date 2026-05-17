@@ -6,7 +6,7 @@
 
 ## A2.1 What Is a Tensor Contraction?
 
-A **tensor contraction** generalises matrix multiplication to tensors of arbitrary rank. In matrix multiplication you sum over one shared index; in a general contraction you sum over one or more shared indices, producing a result tensor whose rank equals the total number of *free* (non-summed) indices.
+A **tensor contraction** generalizes matrix multiplication to tensors of arbitrary rank. In matrix multiplication you sum over one shared index; in a general contraction you sum over one or more shared indices, producing a result tensor whose rank equals the total number of *free* (non-summed) indices.
 
 ### A2.1.1 Einstein Summation Notation
 
@@ -36,7 +36,7 @@ MoE expert:               X[b,s,e,d] @ W_e[e,d,dff]     → 5D contraction
 LoRA update:              X @ A_lora @ B_lora            → cascaded 3D
 ```
 
-Understanding each as a named contraction with known FLOPs, memory traffic, and arithmetic intensity is the prerequisite for every optimisation discussed in this book.
+Understanding each as a named contraction with known FLOPs, memory traffic, and arithmetic intensity is the prerequisite for every optimization discussed in this book.
 
 ---
 
@@ -337,7 +337,7 @@ if __name__ == '__main__':
 
 ### A2.4.1 2D Tiled GEMM from Scratch
 
-The canonical teaching kernel: tiled shared-memory GEMM. Every production GEMM (cuBLAS, CUTLASS) is a heavily optimised variant of this pattern.
+The canonical teaching kernel: tiled shared-memory GEMM. Every production GEMM (cuBLAS, CUTLASS) is a heavily optimized variant of this pattern.
 
 ```cpp
 // file: contractions_cuda.cu

@@ -760,7 +760,7 @@ The combined result: at 3 effective bits per dimension (2-bit PolarQuant + 1-bit
 
 Real LLM KV-cache key vectors are not uniformly distributed. A specific coordinate
 `k[d]` may be biased (mean ≠ 0), or have heavy tails, or cluster near specific
-values due to positional encodings. A Lloyd-Max codebook optimised for this
+values due to positional encodings. A Lloyd-Max codebook optimized for this
 specific distribution would only work for this layer, this model, this position.
 Different models need different codebooks → no universal scheme is possible.
 
@@ -815,7 +815,7 @@ This is a standard unit-normal random variable. The distribution is now
 key vector's distribution.
 
 **Step 4 — Lloyd-Max on N(0,1):** Design (offline, once) a Lloyd-Max codebook
-with B = 2^b levels for N(0,1). This is a classic numerical optimisation with
+with B = 2^b levels for N(0,1). This is a classic numerical optimization with
 known closed-form solutions for small b. The codebook is shared globally.
 
 **Step 5 — Quantize:** Map each ẑ[i] to the nearest codebook entry. Store b
@@ -832,7 +832,7 @@ the quantization problem into one with a fixed, universal distribution.
 **From Worked Example V.1 (reconstructed):**
 
 After rotation, `k̃[2]` falls near the edge of a quantization bin. The Lloyd-Max
-codebook is designed to minimise mean-squared error over the N(0,1) distribution.
+codebook is designed to minimize mean-squared error over the N(0,1) distribution.
 Bin edges are placed where the N(0,1) PDF transitions between cell regions —
 these are symmetric around 0. Values near the bin edges have the largest
 distance to any codebook centroid.
@@ -868,7 +868,7 @@ k and the reconstructed k̂:
 E_rec = ‖k - k̂‖²
 ```
 
-This is what PolarQuant minimises — it finds the quantization that best
+This is what PolarQuant minimizes — it finds the quantization that best
 approximates the vector geometrically.
 
 **Attention logit error** measures the error in the dot product between a query q
@@ -878,7 +878,7 @@ and the reconstructed key k̂:
 E_logit = |q·k - q·k̂|  =  |q·(k - k̂)|
 ```
 
-**Why minimising E_rec does not minimise E_logit:**
+**Why minimizing E_rec does not minimize E_logit:**
 
 By the Cauchy-Schwarz inequality:
 

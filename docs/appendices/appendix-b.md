@@ -805,7 +805,7 @@ vLLM's supported Python range (as of 2026) is 3.9-3.12. Python 3.13 introduced b
 
 **Q: After installing ROCm vLLM, `CUDA_VISIBLE_DEVICES=0 python -c "import vllm"` fails but `HIP_VISIBLE_DEVICES=0` succeeds. Why?**
 
-ROCm vLLM uses HIP (Heterogeneous-compute Interface for Portability) internally. `CUDA_VISIBLE_DEVICES` is an NVIDIA CUDA environment variable that ROCm does not honour by default. Use `HIP_VISIBLE_DEVICES` or `ROCR_VISIBLE_DEVICES` to select AMD GPUs.
+ROCm vLLM uses HIP (Heterogeneous-compute Interface for Portability) internally. `CUDA_VISIBLE_DEVICES` is an NVIDIA CUDA environment variable that ROCm does not honor by default. Use `HIP_VISIBLE_DEVICES` or `ROCR_VISIBLE_DEVICES` to select AMD GPUs.
 
 ---
 

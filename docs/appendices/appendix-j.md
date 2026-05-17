@@ -230,7 +230,7 @@ torch::Tensor kv_selected = kv_cache.index({block_table});
 torch::Tensor A = torch::randn({512, 4096}, torch::kBFloat16).cuda();
 torch::Tensor B = torch::randn({4096, 4096}, torch::kBFloat16).cuda();
 torch::Tensor C = torch::mm(A, B);          // (512, 4096) × (4096, 4096)
-torch::Tensor D = torch::matmul(A, B);      // generalised matmul (works for batched)
+torch::Tensor D = torch::matmul(A, B);      // generalized matmul (works for batched)
 
 // Element-wise
 torch::Tensor x = torch::randn({1024}).cuda();
@@ -571,10 +571,10 @@ auto stream = c10::cuda::getStreamFromPool(/*high_priority=*/true);
     auto result = model.forward({input_ids});
 }
 
-// Synchronise specific stream
+// Synchronize specific stream
 stream.synchronize();
 
-// Or synchronise all streams on device 0
+// Or synchronize all streams on device 0
 c10::cuda::device_synchronize();
 ```
 
@@ -617,7 +617,7 @@ torch::Tensor gpu_tokens = pinned.to(
     /*non_blocking=*/true
 );
 // Returns immediately; GPU copy happens asynchronously
-// Synchronise before using gpu_tokens in a non-stream-aware context
+// Synchronize before using gpu_tokens in a non-stream-aware context
 c10::cuda::device_synchronize();
 ```
 

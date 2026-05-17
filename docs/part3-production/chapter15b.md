@@ -126,7 +126,7 @@ Verify with naive softmax over all 4 scores [3,1,2,4]:
 |---|---|---|
 | **Primary use** | Prefill / training (many queries) | Single-query decode |
 | **Parallelism** | Across query blocks (rows of Q) | Across KV blocks (columns of K,V) |
-| **Why it helps** | Many queries: parallelise Q dimension | One query: parallelise KV dimension |
+| **Why it helps** | Many queries: parallelize Q dimension | One query: parallelize KV dimension |
 | **Implemented in** | PyTorch, most backends | FlashInfer, Flash-Decoding |
 
 At decode time there is exactly **one** query token. FlashAttention-2's query-tile parallelism has no work to split. Flash Decoding is the correct tool.
@@ -241,7 +241,7 @@ Both combined:  recommended for production 1M+ deployments
 
 ## Chapter Summary
 
-Standard tensor parallelism distributes attention across heads but leaves the sequence-length dimension sequential. At 100K+ token contexts, reading all KV pairs dominates decode latency. Flash Decoding parallelises this by splitting the KV sequence into P partitions, computing partial log-sum-exp normalizers independently, then merging with a numerically stable reduce — producing exactly the same output as naive softmax. Context parallelism extends the approach across GPUs using a ring-based KV exchange pattern, suitable for sequences above 256K on NVLink-connected hardware. Flash Decoding is intra-GPU (across SMs, via FlashInfer), context parallelism is inter-GPU. Both can be combined. The crossover point where each strategy pays off depends on sequence length, GPU count, and interconnect bandwidth.
+Standard tensor parallelism distributes attention across heads but leaves the sequence-length dimension sequential. At 100K+ token contexts, reading all KV pairs dominates decode latency. Flash Decoding parallelizes this by splitting the KV sequence into P partitions, computing partial log-sum-exp normalizers independently, then merging with a numerically stable reduce — producing exactly the same output as naive softmax. Context parallelism extends the approach across GPUs using a ring-based KV exchange pattern, suitable for sequences above 256K on NVLink-connected hardware. Flash Decoding is intra-GPU (across SMs, via FlashInfer), context parallelism is inter-GPU. Both can be combined. The crossover point where each strategy pays off depends on sequence length, GPU count, and interconnect bandwidth.
 
 ---
 

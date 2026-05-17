@@ -6,7 +6,7 @@
 
 ## 42.1 The Case for Small Models
 
-The GPU budget of most organisations does not support a 70B model in production.
+The GPU budget of most organizations does not support a 70B model in production.
 An A100 80GB can hold a 70B model at 4-bit quantization with very little room
 left for KV cache. For teams running on consumer hardware, edge devices, or
 cost-constrained cloud budgets, the question is not "which 70B model" but
@@ -167,7 +167,7 @@ Phi-4 underperforms at:
 - **World knowledge**: smaller parameter count means less factual coverage
 - **Long documents**: 16K native context limits document processing
 - **Multilingual**: primarily English-optimized training data
-- **Creative tasks**: depth over width architecture favours reasoning over fluency
+- **Creative tasks**: depth over width architecture favors reasoning over fluency
 
 ---
 
@@ -444,7 +444,7 @@ damage.
 
 ---
 
-## 42.7 Local Attention Window Boundary Behaviour
+## 42.7 Local Attention Window Boundary Behavior
 
 Gemma 3's local attention layers use a sliding window of 1,024 tokens. Tokens
 beyond that window boundary cannot attend to each other in local layers — only
@@ -488,7 +488,7 @@ def optimal_gemma3_prompt(
     local_window: int = 1024,
 ) -> str:
     """
-    Structure a Gemma 3 prompt to maximise local-attention effectiveness.
+    Structure a Gemma 3 prompt to maximize local-attention effectiveness.
     Most relevant content appears in the last `local_window` tokens.
     """
     # Sort chunks: least relevant first (will be outside local window)
@@ -516,7 +516,7 @@ that matters when fine-tuning Gemma 3.
 
 During backpropagation, the embedding matrix receives gradients from two sources:
 
-1. **Language modelling loss** (via lm_head): gradient pushes embeddings to
+1. **Language modeling loss** (via lm_head): gradient pushes embeddings to
    produce the correct next-token logit. This gradient is large for common
    tokens, small for rare tokens.
 
@@ -526,7 +526,7 @@ During backpropagation, the embedding matrix receives gradients from two sources
 These two objectives are not identical. The token `"the"` should have an
 embedding that both encodes its positional/contextual role (as an input) and
 its unconditional prior probability (as an output). In an untied model, the
-two matrices specialise independently. In a tied model, they must compromise.
+two matrices specialize independently. In a tied model, they must compromise.
 
 **Practical effect**: tied models occasionally exhibit slightly higher
 perplexity on rare tokens (< 100 occurrences in training data) because the
@@ -828,7 +828,7 @@ support, Llama 3.
 
 3. Tied embeddings in Gemma 3 mean the embedding matrix and lm_head share
    weights. Explain one potential training disadvantage of tied embeddings.
-   Why does this trade-off favour inference over training?
+   Why does this trade-off favor inference over training?
 
 4. A deployment serves Gemma 3 12B with max_model_len=65536 (64K tokens) on a
    single A100 80GB. The model weights at FP16 are approximately 24 GB. How

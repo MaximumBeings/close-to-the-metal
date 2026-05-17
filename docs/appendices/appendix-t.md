@@ -89,7 +89,7 @@ embedding = F.normalize(embedding, p=2, dim=-1)
 # Now: cosine_similarity(a, b) == dot(a, b) == (a * b).sum()
 ```
 After normalisation, maximum inner product search and cosine similarity are
-equivalent — enabling FAISS's IVF-PQ index (which optimises inner product) for
+equivalent — enabling FAISS's IVF-PQ index (which optimizes inner product) for
 cosine retrieval.
 
 ---
@@ -300,7 +300,7 @@ retrieval for subtle relevance distinctions, at the cost of O(n × m) inference
 | `mixedbread-ai/mxbai-rerank-large-v1` | 435M | 512 | 510 | 56.2 |
 | `jinaai/jina-reranker-v2-base-multilingual` | 278M | 1,024 | 680 | 55.3 |
 
-The 22M MiniLM model is the latency optimisation option: 8× faster than the
+The 22M MiniLM model is the latency optimization option: 8× faster than the
 full-size models at moderate quality loss.
 
 ### T.6.3 Serving rerankers with vLLM
@@ -449,12 +449,12 @@ For a typical RAG request at P95:
 | **Total** | **~1,350ms** | LLM dominates |
 
 The reranker at 130ms is often the second-largest latency contributor. The
-embedding at 8ms is negligible. Optimisation priority: LLM first, reranker
+embedding at 8ms is negligible. Optimization priority: LLM first, reranker
 second.
 
 ### T.8.2 Reranker batching for latency reduction
 
-The 50-document reranker call above is sequential. Parallelise it:
+The 50-document reranker call above is sequential. Parallelize it:
 
 ```python
 import asyncio
@@ -508,7 +508,7 @@ With batch=8: BGE-M3 processes 8 × 64 = 512 tokens in ~45ms.
 Throughput: 8 / 0.045s = 178 embeddings/s > 167 needed ✓
 P95 latency: 20ms (queue) + 45ms (inference) = 65ms — slightly over budget.
 
-Optimisation: reduce batching window to 10ms:
+Optimization: reduce batching window to 10ms:
 - Batch=4: ~28ms inference, 10ms queue = 38ms P95 ✓
 - Throughput: 4 / 0.028 = 143/s — still short.
 
@@ -633,7 +633,7 @@ def health():
 
 BGE-M3's multi-vector (ColBERT-style) retrieval produces one embedding per
 token rather than one per document. This dramatically increases retrieval
-quality for long documents, but requires specialised indexing infrastructure.
+quality for long documents, but requires specialized indexing infrastructure.
 
 ### Token-level storage cost
 
@@ -953,14 +953,14 @@ The L2 distance between unit vectors is related to inner product by:
            = 2 - 2(u · v)
 ```
 
-So minimising L2 distance is equivalent to maximising inner product — the
+So minimizing L2 distance is equivalent to maximizing inner product — the
 ranking is identical. However, `IndexFlatIP` has a computational advantage:
 
 - **L2 distance** requires computing `‖u - v‖²` = expanded form with three
   terms; FAISS must materialise `Σ(uᵢ - vᵢ)²`.
 - **Inner product** requires only `Σ uᵢvᵢ` — a single GEMM operation with no
   subtraction, directly maps to `BLAS sgemm`, and benefits from hardware-level
-  fused multiply-add (FMA) optimisation.
+  fused multiply-add (FMA) optimization.
 
 Result: `IndexFlatIP` is typically 10–20% faster than `IndexFlatL2` for
 unit-normalised embeddings, with identical result ordering.
@@ -1076,6 +1076,6 @@ natural "summary" token.
 
 **NV-Embed-v2 additional trick:** It appends a learned `[EOS]` instruction
 token after the input and uses that token's representation, ensuring the model
-can learn a dedicated pooling behaviour through fine-tuning without conflating
+can learn a dedicated pooling behavior through fine-tuning without conflating
 it with the final content token. This is equivalent to last-token pooling but
 with a controllable, task-specific pooling head.

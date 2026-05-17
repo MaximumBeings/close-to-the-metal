@@ -827,7 +827,7 @@ strategy, and schema design.
 The hierarchy of approaches is: pre-computed FSM (outlines, SGLang native) for
 fixed schemas and high throughput; lazy trie (lm-format-enforcer) for dynamic
 schemas; EBNF grammars (llama.cpp native) for complex syntactic structures.
-Function calling and tool use are constrained generation specialised for the
+Function calling and tool use are constrained generation specialized for the
 agentic use case.
 
 The latency overhead is real but manageable: pre-computed approaches add < 5%

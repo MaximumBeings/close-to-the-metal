@@ -312,7 +312,7 @@ def test_streaming():
     assert len(chunks) > 3
 
 def test_max_tokens_respected():
-    """Max tokens limit is honoured."""
+    """Max tokens limit is honored."""
     resp = client.completions.create(model="default",
         prompt="Write a very long essay about", max_tokens=10)
     # Rough token count: allow 10 tokens ≈ 40 chars + BOS overhead

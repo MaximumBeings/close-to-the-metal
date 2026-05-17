@@ -180,36 +180,29 @@ If an operation does a lot of math per byte it reads, it is compute-bound. If it
 ```
 WORKED EXAMPLE 1.2 — Ridge point of an NVIDIA H100 SXM GPU
 ─────────────────────────────────────────────────────────────────────
-Given (from NVIDIA's official H100 spec sheet):
+Given (from NVIDIA's official H100 SXM5 spec sheet):
   Peak memory bandwidth:        3.35 TB/s  =  3,350 GB/s
-  Peak compute (BF16 Tensor):   1,979 TFLOPS  =  1,979 × 10¹² FLOPs/s
+  Peak compute (BF16 Tensor, dense):  989 TFLOPS  =  989 × 10¹² FLOPs/s
+  (Note: 1,979 TFLOPS is the structured-sparsity figure; dense BF16 = 989 TFLOPS)
 
 Step 1: Convert units so they match.
   Bandwidth:  3,350 GB/s  =  3,350 × 10⁹ bytes/s
-  Compute:    1,979 TFLOPS =  1,979 × 10¹² FLOPs/s
+  Compute:    989 TFLOPS  =  989 × 10¹² FLOPs/s
 
 Step 2: Compute the ridge point.
   Ridge = peak_compute / peak_bandwidth
-        = (1,979 × 10¹²  FLOPs/s) / (3,350 × 10⁹ bytes/s)
-        = (1,979 / 3.350) × 10³  FLOPs/byte
-        = 590.7 × 10³ / 10³      [simplify: 10¹²/10⁹ = 10³]
-
-  Wait — let us redo the unit conversion carefully.
-
-  3,350 GB/s = 3,350 × 10⁹ bytes/s = 3.35 × 10¹² bytes/s
-
-  Ridge = (1,979 × 10¹² FLOPs/s) / (3.35 × 10¹² bytes/s)
-        = 1,979 / 3.35  FLOPs/byte
-        ≈ 591  FLOPs/byte
+        = (989 × 10¹² FLOPs/s) / (3.35 × 10¹² bytes/s)
+        = 989 / 3.35  FLOPs/byte
+        ≈ 295  FLOPs/byte
 
 Step 3: Interpret.
-  Any operation with arithmetic intensity > 591 FLOPs/byte
+  Any operation with arithmetic intensity > 295 FLOPs/byte
   → compute-bound (GPU math units are the bottleneck)
 
-  Any operation with arithmetic intensity < 591 FLOPs/byte
+  Any operation with arithmetic intensity < 295 FLOPs/byte
   → memory-bandwidth-bound (HBM loading dock is the bottleneck)
 
-Final answer: The ridge point for an H100 SXM is ~591 FLOPs/byte.
+Final answer: The ridge point for an H100 SXM (dense BF16) is ~295 FLOPs/byte.
 ─────────────────────────────────────────────────────────────────────
 ```
 
@@ -247,19 +240,19 @@ Step 3: Compute arithmetic intensity.
                        = 1.0 FLOPs/byte
 
 Step 4: Compare to the ridge point.
-  Ridge point (H100): ~591 FLOPs/byte
+  Ridge point (H100): ~295 FLOPs/byte
   Our operation:        ~1  FLOPs/byte
 
-  Our arithmetic intensity is 591× BELOW the ridge point.
+  Our arithmetic intensity is 295× BELOW the ridge point.
 
 Final answer:
   Decode at batch=1 is deeply memory-bandwidth-bound.
-  The H100's 1,979 TFLOPS of compute are almost entirely wasted.
+  The H100's 989 TFLOPS of compute are almost entirely wasted.
   The bottleneck is loading 14 GB of weights from HBM per token.
 ─────────────────────────────────────────────────────────────────────
 ```
 
-This is the most important number in this book. Write it down: **1 FLOP/byte**. That is what single-user decode looks like. The H100 needs ~591 to be compute-bound. We are 591× away.
+This is the most important number in this book. Write it down: **1 FLOP/byte**. That is what single-user decode looks like. The H100 needs ~295 to be compute-bound. We are 295× away.
 
 ### ASCII Diagram: The Roofline
 
@@ -270,9 +263,9 @@ This is the most important number in this book. Write it down: **1 FLOP/byte**. 
   Throughput
   (TFLOPS)
      │
-1979 ┤─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ╔══════════════════════
+ 989 ┤─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ╔══════════════════════
      │                              ╔╝  COMPUTE CEILING
-     │                           ╔══╝   (1,979 TFLOPS)
+     │                           ╔══╝     (989 TFLOPS)
      │                        ╔══╝
      │   MEMORY-BOUND       ╔══╝
      │   REGION           ╔══╝         COMPUTE-BOUND
@@ -283,7 +276,7 @@ This is the most important number in this book. Write it down: **1 FLOP/byte**. 
      │     ╔══╝          (3.35 TB/s)
      │  ╔══╝
   0  └──┴──────────────────┴──────────────────────────────▶
-     0                    591                             Arithmetic
+     0                    295                             Arithmetic
                        (ridge)                           Intensity
                                                         (FLOPs/byte)
 
@@ -320,8 +313,8 @@ Step 1: Compute achievable FLOPs/s.
 
 Step 2: Compare to peak.
   We achieve:  3.35 TFLOPS
-  Peak is:   1,979 TFLOPS
-  Utilization: 3.35 / 1979 ≈ 0.17%
+  Peak is:     989 TFLOPS
+  Utilization: 3.35 / 989 ≈ 0.34%
 
 Step 3: What does this mean for token speed?
   Each decode step does ≈ 14 GFLOPs (from Worked Example 1.3).
@@ -374,7 +367,7 @@ Step 3: Arithmetic intensity.
 Step 4: Compare to ridge point.
   At batch=1:   ~1  FLOPs/byte  (deeply memory-bound)
   At batch=32:  ~32 FLOPs/byte  (still memory-bound, but 32× better)
-  At batch=591: ~591 FLOPs/byte (at the ridge — fully utilizing GPU)
+  At batch=295: ~295 FLOPs/byte (at the ridge — fully utilizing GPU)
 
 Final answer:
   Arithmetic intensity scales linearly with batch size.
@@ -388,7 +381,7 @@ Final answer:
 
   FLOPs/byte
      │
- 591 ┤- - - - - - - - - - - - - - - - - - - -[ridge]- - - - - -
+ 295 ┤- - - - - - - - - - - - - - - - - - - -[ridge]- - - - - -
      │                                           ↑
      │                                     fully utilizing GPU
   32 ┤ · · · · · · · · · · · · · [batch=32] ·
@@ -398,7 +391,7 @@ Final answer:
    1 ┤ [batch=1]
      │
    0 └───────────────────────────────────────────────────────▶
-     0       4        32                       591       Batch size
+     0       4        32                       295       Batch size
                                             (≈ ridge)
 
   Key insight: the weights cost the same bytes whether you serve
@@ -986,7 +979,7 @@ Before we go any further, here are baseline numbers to anchor your intuition. We
   *llama.cpp does not natively batch concurrent users
 
   vLLM's throughput scales nearly linearly with batch size
-  up to the roofline ridge (~batch=591 for this model).
+  up to the roofline ridge (~batch=295 for this model).
   llama.cpp's throughput barely increases because it is not
   designed for concurrent multi-user workloads.
   ════════════════════════════════════════════════════════════════
@@ -1040,7 +1033,7 @@ The crossover is clear: for a single user, llama.cpp is competitive or faster. F
 
 - **Autoregressive generation** requires one forward pass per output token. These passes cannot run in parallel because each token depends on all previous tokens. This is the root cause of all inference complexity.
 
-- **Inference is memory-bandwidth-bound**, not compute-bound, for small batches. At batch size 1, a 7B model has an arithmetic intensity of ~1 FLOPs/byte on an H100 — 591× below the ridge point. The GPU's compute units sit nearly idle while the memory bus works.
+- **Inference is memory-bandwidth-bound**, not compute-bound, for small batches. At batch size 1, a 7B model has an arithmetic intensity of ~1 FLOPs/byte on an H100 — 295× below the ridge point. The GPU's compute units sit nearly idle while the memory bus works.
 
 - **Batching recovers GPU utilization.** Arithmetic intensity scales linearly with batch size because model weights are loaded once per forward pass regardless of how many users are in the batch. This is why serving many users simultaneously is efficient.
 
@@ -1058,7 +1051,7 @@ Try to answer these without looking back. If you cannot, re-read the indicated s
 
 1. A user asks for a 50-token response to a 20-token prompt. How many forward passes does the model run? What are they called? *(Section 1.1)*
 
-2. The H100 has a peak bandwidth of 3.35 TB/s and peak compute of 1,979 TFLOPS. What is its ridge point in FLOPs/byte? Show the arithmetic. *(Section 1.2)*
+2. The H100 has a peak bandwidth of 3.35 TB/s and peak compute of 989 TFLOPS (dense BF16). What is its ridge point in FLOPs/byte? Show the arithmetic. *(Section 1.2)*
 
 3. You are running a 13B FP16 model (13 billion parameters × 2 bytes = 26 GB of weights) at batch size 1. What is the approximate arithmetic intensity of one decode step? Is this above or below the H100 ridge point? *(Section 1.2 + 1.3)*
 
@@ -1125,23 +1118,23 @@ Each decode step *produces* one token and *consumes* one token (the previous out
 
 **Step 1 — Write down the values.**
 
-- Peak compute: 1,979 TFLOPS = 1,979 × 10¹² FLOPS/s
+- Peak compute: 989 TFLOPS = 989 × 10¹² FLOPS/s (dense BF16)
 - Peak bandwidth: 3.35 TB/s = 3.35 × 10¹² bytes/s
 
 **Step 2 — Compute the ridge point.**
 
-$$\text{Ridge point} = \frac{\text{Peak FLOPS/s}}{\text{Peak Bandwidth (bytes/s)}} = \frac{1{,}979 \times 10^{12}}{3.35 \times 10^{12}} \approx 591 \text{ FLOPs/byte}$$
+$$\text{Ridge point} = \frac{\text{Peak FLOPS/s}}{\text{Peak Bandwidth (bytes/s)}} = \frac{989 \times 10^{12}}{3.35 \times 10^{12}} \approx 295 \text{ FLOPs/byte}$$
 
 **Step 3 — Interpret the result.**
 
 The ridge point is the arithmetic intensity at which a workload *just barely* saturates both compute and memory simultaneously. It is the crossover point on the roofline model:
 
-- **Below 591 FLOPs/byte:** the workload is **memory-bound** (memory delivers data faster than compute can consume it).
-- **Above 591 FLOPs/byte:** the workload is **compute-bound** (compute is the bottleneck).
+- **Below 295 FLOPs/byte:** the workload is **memory-bound** (memory delivers data faster than compute can consume it).
+- **Above 295 FLOPs/byte:** the workload is **compute-bound** (compute is the bottleneck).
 
 **Step 4 — Where does decode sit?**
 
-A single-batch decode step has an arithmetic intensity of roughly 1 FLOPs/byte (see Solution 3 below). Since 1 ≪ 591, decode is *deeply* memory-bound. This is the central fact of LLM inference: the GPU's 1,979 TFLOPS of compute sits almost entirely idle during single-request decode.
+A single-batch decode step has an arithmetic intensity of roughly 1 FLOPs/byte (see Solution 3 below). Since 1 ≪ 295, decode is *deeply* memory-bound. This is the central fact of LLM inference: the GPU's 989 TFLOPS of compute sits almost entirely idle during single-request decode.
 
 ---
 
@@ -1173,13 +1166,13 @@ $$\text{Arithmetic intensity} = \frac{26 \text{ GFLOPs}}{26 \text{ GB}} = 1 \tex
 
 **Step 5 — Compare to the H100 ridge point.**
 
-H100 ridge point ≈ 591 FLOPs/byte. Our decode intensity = 1 FLOPs/byte.
+H100 ridge point ≈ 295 FLOPs/byte. Our decode intensity = 1 FLOPs/byte.
 
-$$1 \ll 591 \implies \text{Deeply memory-bound}$$
+$$1 \ll 295 \implies \text{Deeply memory-bound}$$
 
 The model is using less than 0.2% of the H100's available compute. The GPU is 99.8% idle on compute — waiting for memory to deliver the next set of weights.
 
-**Intuition:** A 26 GB weight matrix load takes about 26 GB ÷ 3.35 TB/s ≈ 7.8 ms. During those 7.8 ms, the H100 could perform 1,979 TFLOPS × 0.0078 s ≈ 15.4 TFLOPS of compute — but we only ask it to do 26 GFLOPs. We are wasting 15,374 GFLOPs of available compute every decode step at batch size 1.
+**Intuition:** A 26 GB weight matrix load takes about 26 GB ÷ 3.35 TB/s ≈ 7.8 ms. During those 7.8 ms, the H100 could perform 989 TFLOPS × 0.0078 s ≈ 7.7 TFLOPS of compute — but we only ask it to do 26 GFLOPs. We are wasting ~7,680 GFLOPs of available compute every decode step at batch size 1.
 
 ---
 
@@ -1223,9 +1216,9 @@ For a model with W weights in FP16 (W bytes × 2):
 |---|---|---|---|
 | 1 | 2W | 2W | 1 FLOPs/byte |
 | 32 | 2W × 32 | 2W | 32 FLOPs/byte |
-| 591 | 2W × 591 | 2W | 591 FLOPs/byte (ridge!) |
+| 295 | 2W × 295 | 2W | 295 FLOPs/byte (ridge!) |
 
-At batch size ~591, an FP16 13B model would *just* saturate the H100's compute. Below that, you are memory-bound. This is why large-scale serving operations care so much about maintaining high batch sizes.
+At batch size ~295, an FP16 13B model would *just* saturate the H100's compute. Below that, you are memory-bound. This is why large-scale serving operations care so much about maintaining high batch sizes.
 
 ---
 

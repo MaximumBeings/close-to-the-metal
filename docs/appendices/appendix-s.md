@@ -20,13 +20,13 @@ A standard web service has two things to test: code and configuration. An LLM in
 
 **Model weights** — a binary artifact, often multiple gigabytes in size, that is versioned and updated independently from the code. A model update that improves benchmark scores might silently regress quality on your domain-specific prompts, or produce different latency characteristics because of a change in its internal architecture.
 
-**Hardware behaviour** — the same model, same code, and same configuration might perform differently on an A100 versus an H100, or degrade over time due to thermal throttling on an edge device. Some bugs only appear under sustained concurrent load — the sort of traffic a single developer can never reproduce on a laptop.
+**Hardware behavior** — the same model, same code, and same configuration might perform differently on an A100 versus an H100, or degrade over time due to thermal throttling on an edge device. Some bugs only appear under sustained concurrent load — the sort of traffic a single developer can never reproduce on a laptop.
 
 A good LLM inference pipeline enforces four contracts before anything reaches production:
 
 The **correctness contract** ensures the model produces outputs that pass automated quality checks — regression tests, perplexity bounds, output format validation.
 
-The **performance contract** ensures that latency (time to first token, time per output token, end-to-end), throughput (tokens per second, requests per second), and GPU utilisation all stay within defined bounds relative to the previous version.
+The **performance contract** ensures that latency (time to first token, time per output token, end-to-end), throughput (tokens per second, requests per second), and GPU utilization all stay within defined bounds relative to the previous version.
 
 The **safety contract** ensures the serving endpoint does not leak system prompts, does not respond to prompt injection attacks, and does not produce content that violates configured policy filters.
 
@@ -38,7 +38,7 @@ Each section of this appendix builds one part of a pipeline that enforces all fo
 
 ## S.2 Repository Structure
 
-Before writing any workflow files, you need to decide how to organise the repository. The structure below is a proven layout for a team managing one or more inference services.
+Before writing any workflow files, you need to decide how to organize the repository. The structure below is a proven layout for a team managing one or more inference services.
 
 The key principle is **separation of concerns**: deployment configuration lives in `k8s/`, serving code lives in `serving/`, tests live in `tests/`, and automation scripts live in `scripts/`. When a reviewer opens a pull request, they can immediately understand what kind of change is being made just from which directories are modified.
 
@@ -89,7 +89,7 @@ Notice that workflows are broken into separate files rather than crammed into on
 
 ---
 
-## S.3 The Pull Request Gate — Your First Line of Defence
+## S.3 The Pull Request Gate — Your First Line of Defense
 
 The pull request gate is the workflow that runs on every proposed change before it can be merged into the main branch. Think of it as the automated equivalent of a code reviewer who never sleeps, never gets tired, and always catches the same class of errors with perfect consistency.
 
@@ -689,7 +689,7 @@ This workflow runs a **load test** — a script that simulates realistic traffic
 
 A load test drives artificial traffic at a service in a controlled, reproducible way. Unlike a smoke test (which sends one or two requests), a load test ramps up concurrent users, sustains them for several minutes, and measures the statistical distribution of latency: p50 (the median), p95, and p99. The p99 latency — the latency that 99% of requests fall under — is the most important number for production SLAs, because it captures the worst-case experience that real users encounter.
 
-The tool used here, **k6**, is an open-source load testing framework that expresses test scenarios as JavaScript and outputs standardised JSON metrics. It integrates cleanly with GitHub Actions and produces the same output format every time, which makes automated threshold comparison straightforward.
+The tool used here, **k6**, is an open-source load testing framework that expresses test scenarios as JavaScript and outputs standardized JSON metrics. It integrates cleanly with GitHub Actions and produces the same output format every time, which makes automated threshold comparison straightforward.
 
 ```yaml
 # .github/workflows/load-test.yml
@@ -788,7 +788,7 @@ const PROMPTS = [
   "Explain transformer attention in two sentences.",
   "What is the difference between prefill and decode in LLM inference?",
   "Write a Python function that reverses a linked list.",
-  "Summarise the key trade-offs between vLLM and llama.cpp for production serving.",
+  "Summarize the key trade-offs between vLLM and llama.cpp for production serving.",
   "What is PagedAttention and why does it matter for KV cache management?",
 ];
 
@@ -1437,7 +1437,7 @@ For LLM inference services, SDET work has a dimension that does not exist in con
 
 ### What Is Prompt Injection?
 
-Prompt injection is an attack where a user crafts an input that overrides or subverts the system prompt or the model's intended behaviour. The simplest form is "ignore all previous instructions" — a phrase that, in some models and some configurations, causes the model to disregard the operator's system prompt entirely. More sophisticated attacks embed instructions inside what appears to be a user request, or use role-playing framing to extract system prompt content.
+Prompt injection is an attack where a user crafts an input that overrides or subverts the system prompt or the model's intended behavior. The simplest form is "ignore all previous instructions" — a phrase that, in some models and some configurations, causes the model to disregard the operator's system prompt entirely. More sophisticated attacks embed instructions inside what appears to be a user request, or use role-playing framing to extract system prompt content.
 
 The tests below verify that the endpoint is resistant to these attacks under standard configuration. They are not exhaustive — a serious red-team exercise would probe many more attack vectors — but they catch the most common jailbreak techniques and establish a regression baseline.
 
@@ -1613,7 +1613,7 @@ class TestOutputValidation:
 
 ## S.10 llama.cpp Multi-Architecture Build CI
 
-llama.cpp is a C++ project that must be compiled separately for each target GPU architecture. Unlike Python packages that run on any machine, a compiled CUDA binary is specific to the GPU family it was built for. This workflow builds the binary for every GPU type your organisation uses, in parallel, and uploads the resulting binaries to an artifact store.
+llama.cpp is a C++ project that must be compiled separately for each target GPU architecture. Unlike Python packages that run on any machine, a compiled CUDA binary is specific to the GPU family it was built for. This workflow builds the binary for every GPU type your organization uses, in parallel, and uploads the resulting binaries to an artifact store.
 
 The matrix strategy below defines all the build targets as a list of configurations. GitHub Actions runs each one concurrently (subject to runner availability), which means building for five GPU types takes no longer than building for one — the wall-clock time scales with your runner count, not the number of matrix entries.
 
@@ -1751,7 +1751,7 @@ GitHub Variables (environment level — can differ between staging/production):
 
 ### S.11.2 Engine Configuration as Code
 
-Keep engine arguments in version-controlled YAML files rather than hardcoded in shell scripts. When a configuration change is made — increasing `--max-num-batched-tokens`, enabling speculative decoding, adjusting GPU memory utilisation — the diff appears in a pull request where it can be reviewed, discussed, and reverted if needed. A change buried in a shell script or applied manually on the server is invisible to version control.
+Keep engine arguments in version-controlled YAML files rather than hardcoded in shell scripts. When a configuration change is made — increasing `--max-num-batched-tokens`, enabling speculative decoding, adjusting GPU memory utilization — the diff appears in a pull request where it can be reviewed, discussed, and reverted if needed. A change buried in a shell script or applied manually on the server is invisible to version control.
 
 ```yaml
 # serving/vllm/config/engine_args.yaml
@@ -1900,7 +1900,7 @@ The goal is not ceremony. The goal is the ability to ship a change on a Tuesday 
 
 ---
 
-*For the Kubernetes and KubeRay deployment patterns that this pipeline targets, see Chapter 19. For the Prometheus metrics that feed the canary monitor, see Chapter 16. For the model evaluation methodology referenced in the eval gate, see Chapter 39. For the security concepts behind prompt injection defence, see Chapter 21.*
+*For the Kubernetes and KubeRay deployment patterns that this pipeline targets, see Chapter 19. For the Prometheus metrics that feed the canary monitor, see Chapter 16. For the model evaluation methodology referenced in the eval gate, see Chapter 39. For the security concepts behind prompt injection defense, see Chapter 21.*
 
 
 ---

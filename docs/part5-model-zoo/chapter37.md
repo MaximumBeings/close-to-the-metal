@@ -467,7 +467,7 @@ Time at 100% MFU: 22.3 / 15.83 = 1.41 s
 At realistic MFU of 50%: ~2.8 s per batch of 32
 Throughput: 32 / 2.8 ≈ 11 requests/second
 
-Use case: RLHF data labelling with 8 candidates per prompt →
+Use case: RLHF data labeling with 8 candidates per prompt →
   11 req/s × 60 s = 660 scored responses/minute
   660 / 8 candidates = 82 evaluated prompts/minute
 ──────────────────────────────────────────────────────────────────
@@ -479,7 +479,7 @@ Use case: RLHF data labelling with 8 candidates per prompt →
 
 ## 37.9 Chapter Summary
 
-TensorRT-LLM's compilation approach yields 2–4× higher throughput than vLLM at the cost of 30–60 minute compile times and hardware/configuration lock-in. FP8 doubles compute over BF16 on H100; 2:4 structured sparsity doubles it again. Nemotron models — including the 340B reward model — are optimised for this full stack. Use TRT-LLM when throughput is the primary metric and the model/hardware configuration is stable; accept vLLM's flexibility for everything else.
+TensorRT-LLM's compilation approach yields 2–4× higher throughput than vLLM at the cost of 30–60 minute compile times and hardware/configuration lock-in. FP8 doubles compute over BF16 on H100; 2:4 structured sparsity doubles it again. Nemotron models — including the 340B reward model — are optimized for this full stack. Use TRT-LLM when throughput is the primary metric and the model/hardware configuration is stable; accept vLLM's flexibility for everything else.
 
 ### Where We Go Next
 

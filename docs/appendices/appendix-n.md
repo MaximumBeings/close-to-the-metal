@@ -520,7 +520,7 @@ vLLM ships custom CUTLASS-based kernels in `csrc/quantisation/` for operations t
 - `fp8_gemm.cu` — FP8 E4M3 × FP8 E4M3 GEMM for H100
 - `cutlass_extensions/` — CUTLASS epilogue extensions for fused quantisation
 
-Reading these files after this appendix: you will recognise the `CollectiveMma`, `CollectiveEpilogue`, and `GemmUniversalAdapter` patterns immediately.
+Reading these files after this appendix: you will recognize the `CollectiveMma`, `CollectiveEpilogue`, and `GemmUniversalAdapter` patterns immediately.
 
 ---
 

@@ -198,10 +198,10 @@ For LLaMA 3 70B (d_model=8192, d_ff=28672):
 × 80 blocks = 194 GFLOPs per generated token
 ```
 
-An H100 SXM5 does ~2000 TFLOPS (BF16 Tensor Core). At 100% efficiency, it could generate:
+An H100 SXM5 does ~989 TFLOPS (BF16 Tensor Core, dense). At 100% efficiency, it could generate:
 
 ```
-2000 × 10¹² / (194 × 10⁹) ≈ 10,300 tokens/second
+989 × 10¹² / (194 × 10⁹) ≈ 5,100 tokens/second
 ```
 
 Real throughput is 1,000–2,500 tok/s — about 4–10× below theoretical peak — because memory bandwidth, not compute, is the bottleneck during decode (see Chapter 2).
@@ -246,7 +246,7 @@ For LLaMA 3 70B: vocab=128K, d_model=8192 → E is 128K × 8192 = **2GB in BF16*
 logits = x_final · Eᵀ    # [B, n, vocab_size]
 ```
 
-Many models (including LLaMA) **tie weights** — the LM head reuses the same matrix E transposed. This saves 2GB at no accuracy cost. vLLM detects and honours weight tying automatically.
+Many models (including LLaMA) **tie weights** — the LM head reuses the same matrix E transposed. This saves 2GB at no accuracy cost. vLLM detects and honors weight tying automatically.
 
 **RoPE positional encoding** is applied to Q and K *inside* the attention sub-layer (not to the embeddings), which is why positional information flows only through attention, not through the FFN. This matters for long-context extension strategies (Chapter 27).
 

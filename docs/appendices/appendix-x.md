@@ -443,6 +443,16 @@ https://web.stanford.edu/~jurafsky/slp3/
 
 ---
 
+## X.11b Companion Textbooks
+
+**Inference Engineering: The Definitive Workshop Guide**
+Dandekar, R., Dandekar, Ra., Panat, S. (2026).
+Vizuara.
+
+*A hands-on workshop guide to LLM inference engineering covering deployment, optimization, and production operations. Companion reference for practitioners building real-world inference systems.*
+
+---
+
 ## X.12 Online Resources
 
 **vLLM Documentation**

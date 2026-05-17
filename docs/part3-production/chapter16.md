@@ -12,7 +12,7 @@ A vLLM or llama.cpp deployment that is not instrumented is a black box. You know
 
 ## 16.1 The Five Essential Metrics
 
-Before any dashboards, five numbers tell the story of an LLM serving system. All five must be measured simultaneously — a system that optimises one in isolation usually degrades another.
+Before any dashboards, five numbers tell the story of an LLM serving system. All five must be measured simultaneously — a system that optimizes one in isolation usually degrades another.
 
 ### Metric 1: Time To First Token (TTFT)
 
@@ -737,7 +737,7 @@ groups:
 
 ## Chapter Notes
 
-**[FOUNDATIONAL]** The five metrics — TTFT, ITL, throughput, GPU utilization, KV hit rate — are not independent. They form a system: increasing throughput usually raises TTFT, raising KV hit rate reduces ITL variance, and reducing GPU utilization gives latency headroom. Optimising one without watching the others is a common source of production regressions.
+**[FOUNDATIONAL]** The five metrics — TTFT, ITL, throughput, GPU utilization, KV hit rate — are not independent. They form a system: increasing throughput usually raises TTFT, raising KV hit rate reduces ITL variance, and reducing GPU utilization gives latency headroom. Optimizing one without watching the others is a common source of production regressions.
 
 **[DEEP DIVE]** Prometheus histograms in vLLM use linear buckets by default. For latency histograms, exponential buckets provide better resolution at both the low end (catching sub-10ms events) and the high end (catching multi-second outliers). vLLM 0.4+ allows custom bucket boundaries via `--otlp-traces-endpoint` configuration.
 
@@ -754,7 +754,7 @@ groups:
 
 - **Four golden signals for LLM serving**: TTFT (time to first token), ITL (inter-token latency), throughput (tokens/s), and GPU utilization.
 - **vLLM Prometheus metrics**: exposed at `/metrics`; key metrics include `vllm:time_to_first_token_seconds`, `vllm:time_per_output_token_seconds`, `vllm:num_requests_running`, `vllm:gpu_cache_usage_perc`.
-- **P99 vs P50**: P99 TTFT matters for user experience; P50 throughput matters for cost efficiency — optimising one often worsens the other.
+- **P99 vs P50**: P99 TTFT matters for user experience; P50 throughput matters for cost efficiency — optimizing one often worsens the other.
 - **GPU utilization pitfall**: `nvidia-smi` reports SM utilization averaged over 1-second windows; a GPU can show 95% while being 50% utilization within each forward pass.
 - **Structured logging**: use JSON-formatted logs with `request_id`, `sequence_id`, `model_name`, and timing breakdowns for post-hoc analysis.
 - **Distributed tracing**: OpenTelemetry spans from HTTP gateway through vLLM engine through GPU kernels give end-to-end latency breakdown.

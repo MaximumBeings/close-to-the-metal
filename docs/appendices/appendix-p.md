@@ -23,7 +23,7 @@ changes — on AMD GPUs. This appendix provides the translation layer.
 
 ### P.2.1 CDNA3: The MI300X Architecture
 
-The MI300X is AMD's data-centre inference GPU, based on the CDNA3 architecture.
+The MI300X is AMD's data-center inference GPU, based on the CDNA3 architecture.
 Its key specifications:
 
 | Specification | MI300X | H100 SXM5 | Notes |
@@ -226,7 +226,7 @@ vllm serve meta-llama/Llama-3.1-405B-Instruct \
     --max-model-len 32768 \
     --gpu-memory-utilization 0.90
 
-# With ROCm-specific optimisations
+# With ROCm-specific optimizations
 VLLM_USE_TRITON_FLASH_ATTN=1 \   # use Triton flash attention for ROCm
 HIP_VISIBLE_DEVICES=0,1,2 \      # equivalent of CUDA_VISIBLE_DEVICES
 vllm serve meta-llama/Llama-3.1-70B-Instruct ...
@@ -251,11 +251,11 @@ As of ROCm 6.1 / vLLM 0.5, throughput comparison for Llama 3.1 70B:
 |---|---|---|---|
 | Decode throughput (batch=32) | 2,100 tok/s | 1,850 tok/s | -12% |
 | TTFT (2K input, batch=1) | 95ms | 110ms | -16% |
-| Memory bandwidth utilisation | 82% | 79% | Similar |
+| Memory bandwidth utilization | 82% | 79% | Similar |
 | Model fits on single device | ✗ (140GB > 80GB) | ✓ (140GB < 192GB) | MI300X advantage |
 
 The throughput gap has narrowed significantly through 2025 as AMD invested in
-ROCm kernel optimisation. For the 70B use case specifically, the MI300X single-
+ROCm kernel optimization. For the 70B use case specifically, the MI300X single-
 card solution is often preferable to dual-H100 due to reduced communication
 overhead.
 
@@ -264,7 +264,7 @@ overhead.
 ## P.6 llama.cpp on ROCm/HIP
 
 llama.cpp supports AMD GPUs via the `GGML_HIP` backend. This works on both
-data-centre (MI300X) and consumer (RX 7900 XTX) AMD GPUs.
+data-center (MI300X) and consumer (RX 7900 XTX) AMD GPUs.
 
 ### P.6.1 Building llama.cpp with HIP
 
@@ -334,7 +334,7 @@ HIP_VISIBLE_DEVICES=0,1,2,3 ./build/bin/llama-server \
 ```bash
 rocm-smi                    # shows all GPUs
 rocm-smi --showmeminfo vram # VRAM usage
-rocm-smi --showuse          # GPU utilisation
+rocm-smi --showuse          # GPU utilization
 rocm-smi --showtemp         # temperature
 rocm-smi --showpower        # power consumption
 
@@ -846,7 +846,7 @@ PASS: 5 HIP→CUDA API mappings are well-formed
 
 4. The MFMA instruction on MI300X uses 32×32×8 tiles for FP16. NVIDIA's WMMA
    uses 16×16×16 tiles. How does this tile size difference affect the minimum
-   batch size needed to fully utilise the matrix units? Which is more efficient
+   batch size needed to fully utilize the matrix units? Which is more efficient
    for batch size 1 (single-token decode)?
 
 5. A company runs their LLM inference on 4× H100 nodes and wants to migrate to

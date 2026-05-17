@@ -539,7 +539,7 @@ Quantised models complicate TP because quantization formats are not always TP-aw
 model: meta-llama/Meta-Llama-3-8B-Instruct
 tensor_parallel_size: 4          # 4-way TP: 4 GB weights/GPU, 32 GB KV/GPU
 max_num_seqs: 256
-max_num_batched_tokens: 32768    # large budget: prefill parallelised
+max_num_batched_tokens: 32768    # large budget: prefill parallelized
 max_model_len: 16384
 block_size: 16
 gpu_memory_utilization: 0.90

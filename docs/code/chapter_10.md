@@ -767,7 +767,7 @@ def section6_awq():
         return rmse(flat_a, flat_b)
 
     def weighted_mat_rmse(A, B, act_scales):
-        """RMSE weighted by activation scale — what AWQ optimises."""
+        """RMSE weighted by activation scale — what AWQ optimizes."""
         err = 0.0
         n   = 0
         for row_a, row_b in zip(A, B):
@@ -791,7 +791,7 @@ def section6_awq():
 
     print(f"\n  AWQ improves weighted RMSE by "
           f"{100*(1 - weighted_mat_rmse(W,awq_W,act_scales) / weighted_mat_rmse(W,rtn_W,act_scales)):.1f}%")
-    print(f"  (RTN is better on raw RMSE; AWQ optimises the activation-weighted error)")
+    print(f"  (RTN is better on raw RMSE; AWQ optimizes the activation-weighted error)")
 
     # Per-channel scale example
     print(f"\n  AWQ per-channel scales s[c] = act_scale[c]^0.5 (first 8 channels):")

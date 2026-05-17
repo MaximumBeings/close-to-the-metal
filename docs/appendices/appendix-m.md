@@ -1,6 +1,6 @@
 # Appendix M: Introduction to Triton — Python-Embedded GPU Kernel Programming
 
-> *"Triton sits exactly where you want to be: above the CUDA threading model, below the library abstraction layer. You write in Python. The hardware sees optimised PTX."*
+> *"Triton sits exactly where you want to be: above the CUDA threading model, below the library abstraction layer. You write in Python. The hardware sees optimized PTX."*
 
 ---
 
@@ -98,7 +98,7 @@ def my_kernel(output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
 
 ### M.2.3 The `tl.constexpr` Annotation
 
-Parameters marked `tl.constexpr` are **compile-time constants**. Triton specialises (recompiles) the kernel for each unique combination of `constexpr` values. This is how tile shapes become tunable without runtime overhead — the compiler unrolls loops and generates shape-specific PTX.
+Parameters marked `tl.constexpr` are **compile-time constants**. Triton specializes (recompiles) the kernel for each unique combination of `constexpr` values. This is how tile shapes become tunable without runtime overhead — the compiler unrolls loops and generates shape-specific PTX.
 
 ```python
 BLOCK_SIZE: tl.constexpr = 128   # kernel compiled specifically for 128-wide tiles
@@ -163,7 +163,7 @@ print("vector_add: correct")
 2. LLVM compiles to PTX
 3. The PTX is JIT-compiled to SASS (machine code for your specific GPU)
 4. CUDA launches `grid[0]` thread blocks, each running the compiled kernel
-5. Results: The programmer saw Python; the GPU ran optimised SASS
+5. Results: The programmer saw Python; the GPU ran optimized SASS
 
 ---
 
@@ -326,7 +326,7 @@ def matmul_kernel_autotuned(
     pass
 ```
 
-**What `num_stages` controls:** Triton's software pipelining. `num_stages=4` means four K-blocks are prefetched while the current block is being computed. On H100, `num_stages=3` or `4` typically maximises SM occupancy by hiding HBM latency behind compute.
+**What `num_stages` controls:** Triton's software pipelining. `num_stages=4` means four K-blocks are prefetched while the current block is being computed. On H100, `num_stages=3` or `4` typically maximizes SM occupancy by hiding HBM latency behind compute.
 
 **What `num_warps` controls:** The number of warps per thread block. More warps = more occupancy = better latency hiding. Fewer warps = more registers per warp = possible for larger tile sizes. Finding the sweet spot is why autotuning exists.
 
@@ -351,7 +351,7 @@ Is the operation memory-bandwidth bound and simple (element-wise)?
   YES → Triton (fused kernels eliminate HBM round-trips)
   NO  ↓
 
-Do you need control over warp-level synchronisation, shared memory
+Do you need control over warp-level synchronization, shared memory
 bank layout, or inline PTX?
   YES → CUDA C++ (Appendix L, or CUTLASS — Appendix N)
   NO  → Triton is probably sufficient
@@ -421,7 +421,7 @@ def _fwd_kernel(
     tl.store(O_block_ptr, acc.to(tl.float16))
 ```
 
-This is the exact algorithm from section 5.2 of the FlashAttention-2 paper — the online normaliser update that lets you process the full sequence in O(1) memory. The Triton version adds roughly 50 lines of boilerplate around this core. Reading the real source is now a matter of recognising the same primitives.
+This is the exact algorithm from section 5.2 of the FlashAttention-2 paper — the online normaliser update that lets you process the full sequence in O(1) memory. The Triton version adds roughly 50 lines of boilerplate around this core. Reading the real source is now a matter of recognizing the same primitives.
 
 ---
 

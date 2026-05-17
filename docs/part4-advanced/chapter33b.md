@@ -364,7 +364,7 @@ Stage 2 — Internal production (months 1–6)
   Why:  PagedAttention, continuous batching, LoRA, broad model support
   Limit: Not at the hardware throughput ceiling
 
-Stage 3 — Cost-optimised production (months 6+)
+Stage 3 — Cost-optimized production (months 6+)
   Fork A: Structured output workloads → add SGLang pool for extraction
   Fork B: Fixed NVIDIA hardware, throughput is primary → TRT-LLM
   Fork C: Heterogeneous hardware or browser target → MLC-LLM

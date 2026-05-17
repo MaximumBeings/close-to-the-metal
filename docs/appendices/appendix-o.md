@@ -59,7 +59,7 @@ Mojo's niche is **CPU performance** — not replacing CUDA for large-scale GPU i
 
 ## O.2 The `fn` / `def` Distinction
 
-Mojo has two function types. `def` is Python-compatible — dynamic, flexible, allows runtime type changes. `fn` is strict — statically typed, owning semantics, compiles to optimised machine code:
+Mojo has two function types. `def` is Python-compatible — dynamic, flexible, allows runtime type changes. `fn` is strict — statically typed, owning semantics, compiles to optimized machine code:
 
 ```python
 # def: Python-compatible, dynamic typing, no ownership enforcement
@@ -466,7 +466,7 @@ fn transformer_forward_pass(
 
 Beyond the language, Modular ships **MAX** (Modular Accelerated Execution) — a production inference engine built on Mojo. MAX is relevant to LLM inference because:
 
-- **Graph compiler:** MAX includes a model graph compiler that applies operator fusion, layout optimisation, and hardware-specific kernel selection automatically
+- **Graph compiler:** MAX includes a model graph compiler that applies operator fusion, layout optimization, and hardware-specific kernel selection automatically
 - **Multi-target:** The same MAX graph compiles for CPU (via Mojo), CUDA GPU, Apple Silicon (Metal), and AMD (ROCm)
 - **Python-compatible API:** Models imported from HuggingFace via the MAX SDK deploy without rewriting
 
@@ -548,7 +548,7 @@ Mojo is the first language that genuinely bridges the Python-C++ performance gap
 
 **CPU-side acceleration** — tokenisation, embedding lookup, data preprocessing, and small-model inference can now be written once in Python-like syntax and run at AVX-512 speeds. The `fn`, `SIMD`, and `parallelize` primitives make this trivial.
 
-**System integration** — the MAX engine provides a single compilation path from HuggingFace weights to optimised execution on any hardware target. As MAX matures, it will likely displace llama.cpp for CPU inference and challenge MLC-LLM for cross-device GPU deployment.
+**System integration** — the MAX engine provides a single compilation path from HuggingFace weights to optimized execution on any hardware target. As MAX matures, it will likely displace llama.cpp for CPU inference and challenge MLC-LLM for cross-device GPU deployment.
 
 Mojo's production maturity lags behind CUDA and Python as of 2026 — the standard library is still growing, the package ecosystem is small, and MAX GPU support is still maturing. But for CPU-bound inference work and for teams that want to write high-performance kernels without C++, it is already the most productive option.
 
@@ -566,7 +566,7 @@ The reference path for this book's GPU kernel appendices: Appendix L (CUDA funda
 
 4. Mojo's `SIMD[DType.float32, 16]` maps to a 512-bit AVX-512 register. An A100 GPU's SIMD width for FP32 is effectively 32 (one warp = 32 threads, each doing one FP32 op). Compare the theoretical FLOPs/second for: (a) a single AVX-512 core at 5 GHz, (b) one A100 SM (128 FP32 CUDA cores at 1.41 GHz), (c) a full A100 (108 SMs). *(Sections R.4, Appendix L.2)*
 
-5. The MAX `LLMPipeline` compiles a HuggingFace model to optimised code. For a deployment on Apple M3 Max (128 GB unified memory, Metal GPU), describe what hardware path MAX would use for: (a) the embedding lookup, (b) the attention GEMM, (c) the output logit computation. Why is unified memory particularly advantageous for MAX's multi-target compilation on Apple Silicon? *(Section R.9)*
+5. The MAX `LLMPipeline` compiles a HuggingFace model to optimized code. For a deployment on Apple M3 Max (128 GB unified memory, Metal GPU), describe what hardware path MAX would use for: (a) the embedding lookup, (b) the attention GEMM, (c) the output logit computation. Why is unified memory particularly advantageous for MAX's multi-target compilation on Apple Silicon? *(Section R.9)*
 
 
 ---
@@ -722,7 +722,7 @@ The GPU's advantage is parallelism (108 SMs x 128 cores = 13,824 FP32 cores) rat
 **(a) Embedding lookup:**
 The embedding table lookup is an index-into-table operation with irregular memory access (each token selects a different row). MAX routes this to the **CPU** (using NEON SIMD) or the **ANE (Apple Neural Engine)** if the embedding table fits in its fast SRAM cache.
 
-Reason: The ANE is optimised for dense matrix operations with regular access patterns. Index lookups with random row selections are better handled by the CPU's large L3 cache and prefetch hardware. The ANE would generate cache misses for large vocabulary embeddings.
+Reason: The ANE is optimized for dense matrix operations with regular access patterns. Index lookups with random row selections are better handled by the CPU's large L3 cache and prefetch hardware. The ANE would generate cache misses for large vocabulary embeddings.
 
 **(b) Attention GEMM:**
 The Q@K^T and attention_output@V matrix multiplies are large, dense GEMMs. MAX routes these to the **Metal GPU** via Metal Performance Shaders (MPS), which uses the M3's dedicated matrix multiply hardware (the ANE for small shapes, GPU for larger batches).

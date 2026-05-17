@@ -13,7 +13,7 @@ For decades C++ engineers bridged this gap with bespoke wrappers: raw `float*`
 paired with separately tracked `rows` and `cols` variables, hand-rolled
 `Matrix<T>` classes, or Eigen maps.
 
-C++23 standardises the answer: `std::mdspan`. An mdspan is a **non-owning,
+C++23 standardizes the answer: `std::mdspan`. An mdspan is a **non-owning,
 multidimensional view** of an existing memory region. It carries three pieces
 of metadata alongside the pointer:
 
@@ -821,7 +821,7 @@ not the pool.
 
 ## K.11 `std::linalg` — mdspan Meets BLAS (C++26)
 
-C++26 adds `<linalg>`, a standardised interface to BLAS-level operations
+C++26 adds `<linalg>`, a standardized interface to BLAS-level operations
 parameterised over mdspan. This closes the loop between the view abstraction
 and high-performance compute.
 
@@ -878,7 +878,7 @@ dimension values derived automatically from the mdspan strides.
 
 ## K.12 mdspan in SIMD Code — Combining with `std::experimental::simd`
 
-C++23 also standardises `std::experimental::simd` (merged into C++26 as
+C++23 also standardizes `std::experimental::simd` (merged into C++26 as
 `std::simd`). Combining mdspan addressing with SIMD loads gives fully
 standards-based vectorised kernels without intrinsics.
 
@@ -1155,7 +1155,7 @@ SIMD kernels.
    FP4 values on read. What type should `reference` be — a `float&` or a `float`?
    Why?
 
-4. Compare the compile-time behaviour of:
+4. Compare the compile-time behavior of:
    ```cpp
    std::mdspan<float, std::extents<size_t, 4096, 4096>> A(ptr);  // static
    std::mdspan<float, std::dextents<size_t, 2>>         B(ptr, 4096, 4096);  // dynamic
@@ -1171,7 +1171,7 @@ SIMD kernels.
 
 ---
 
-*— Appendix K covers `std::mdspan` as standardised in C++23 (core) and C++26
+*— Appendix K covers `std::mdspan` as standardized in C++23 (core) and C++26
 (`submdspan`, `std::linalg`). The Kokkos reference implementation
 (github.com/kokkos/mdspan) backports all features to C++17.*
 
@@ -1361,5 +1361,5 @@ auto k_head = std::submdspan(kv_cache, 5, 0, 3,
 // k_head has shape [seq_pos, 128] -- zero-copy view
 ```
 
-**Why static head_dim matters:** The innermost loop of attention computation iterates over the 128-dimensional head. With static head_dim=128, the compiler can unroll this loop completely or generate optimised SIMD code (AVX-512 handles 128 floats in 4 AVX-512 registers). With dynamic head_dim, the compiler cannot unroll without runtime checks.
+**Why static head_dim matters:** The innermost loop of attention computation iterates over the 128-dimensional head. With static head_dim=128, the compiler can unroll this loop completely or generate optimized SIMD code (AVX-512 handles 128 floats in 4 AVX-512 registers). With dynamic head_dim, the compiler cannot unroll without runtime checks.
 

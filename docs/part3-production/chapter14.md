@@ -950,7 +950,7 @@ practical mechanics of launching a multi-GPU deployment.
 - **`--max-num-batched-tokens`**: token budget per forward pass; trades TTFT vs throughput.
 - **`--gpu-memory-utilization`**: fraction of HBM reserved for blocks; leave 10% headroom for activation peaks.
 - **Interaction effects**: raising `--max-num-seqs` without raising `--max-num-batched-tokens` gives more sequences per batch but fewer tokens per sequence per step.
-- **Prefix caching + chunked prefill**: enabling both is the default path to minimising TTFT at high request rates without sacrificing throughput.
+- **Prefix caching + chunked prefill**: enabling both is the default path to minimizing TTFT at high request rates without sacrificing throughput.
 - **quantization knob**: `--quantization fp8` on H100 is typically a free 1.5–2× throughput gain with negligible quality loss.
 - **llama.cpp equivalents**: `-c` (context), `-n` (max new tokens), `-t` (threads), `-ngl` (GPU layers), `-b` (batch size), `--flash-attn`.
 

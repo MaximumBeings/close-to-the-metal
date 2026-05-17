@@ -516,7 +516,7 @@ In practice this overlap reduces effective TTFT for image-heavy workloads by 15â
 `[DEEP DIVE]`
 
 vLLM 0.6 introduced prefix caching for multimodal inputs. When the same image appears
-in multiple requests (e.g., a customer service bot analysing the same product screenshot
+in multiple requests (e.g., a customer service bot analyzing the same product screenshot
 for different questions), vLLM can reuse the KV cache from the visual tokens across
 requests.
 

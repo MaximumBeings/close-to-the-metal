@@ -8,7 +8,7 @@
 
 Chapters 1–13 assume a data-center context: CUDA GPUs, HBM memory, Linux servers, dedicated power supplies. But llama.cpp was explicitly designed to run anywhere a C++ compiler can reach — and that turns out to be almost everywhere. This appendix covers two of the most important non-data-center targets: **Android** (ARM and x86-64 mobile silicon) and **Apple Silicon** (the M-series unified-memory architecture).
 
-Both platforms present constraints that require a genuinely different mental model from server deployment. On a server, you worry about utilisation and throughput. On a phone, you worry about battery drain, thermal throttling, and OS-level memory limits that can silently kill your process. On an Apple Silicon laptop, you discover that the absence of a PCIe bus between CPU and GPU changes the economics of model quantization in ways that no data-center textbook prepares you for.
+Both platforms present constraints that require a genuinely different mental model from server deployment. On a server, you worry about utilization and throughput. On a phone, you worry about battery drain, thermal throttling, and OS-level memory limits that can silently kill your process. On an Apple Silicon laptop, you discover that the absence of a PCIe bus between CPU and GPU changes the economics of model quantization in ways that no data-center textbook prepares you for.
 
 By the end of this appendix you will understand three distinct paths to running llama.cpp on Android, how Apple Silicon's unified memory architecture changes the quantization calculus, how to configure Metal GPU acceleration, and how to run a persistent `llama-server` on macOS as a background service that survives reboots.
 
@@ -24,7 +24,7 @@ Android does not have a single way to run native C++ inference — it has three,
 
 **Path 2: Termux CLI.** Termux is a free Android app that gives you a full Linux-style terminal on your Android device without rooting it. Inside Termux you can install compilers, run `cmake`, and build llama.cpp from source directly on the device — then use `llama-cli` or `llama-server` exactly as you would on a Linux server. This path requires no Android development knowledge and is ideal for experimenting, running benchmarks, or building a personal device-side assistant. The main limitation is that Termux's compiler cannot target the GPU — you get CPU inference only.
 
-**Path 3: NDK cross-compilation.** The Android NDK (Native Development Kit) is a toolchain that runs on your development machine (Linux or macOS) and produces binaries for Android. You build `llama-server` on your laptop and deploy the resulting binary to the phone using `adb` (Android Debug Bridge). This gives you fine-grained control over compiler flags, ABI targeting, and optimisation levels — and it is the right approach for CI/CD pipelines that need to produce Android binaries automatically.
+**Path 3: NDK cross-compilation.** The Android NDK (Native Development Kit) is a toolchain that runs on your development machine (Linux or macOS) and produces binaries for Android. You build `llama-server` on your laptop and deploy the resulting binary to the phone using `adb` (Android Debug Bridge). This gives you fine-grained control over compiler flags, ABI targeting, and optimization levels — and it is the right approach for CI/CD pipelines that need to produce Android binaries automatically.
 
 ```
 Android inference paths:
@@ -50,7 +50,7 @@ Android inference paths:
 
 Android devices use two main CPU instruction set extensions for accelerating matrix operations — the core computation in every transformer layer.
 
-**SME2 (Scalable Matrix Extension 2)** is an Arm architecture extension introduced on high-end mobile SoCs (like recent Snapdragon chips). It adds dedicated matrix-multiply instructions that operate on large two-dimensional register tiles, dramatically accelerating the GEMM (General Matrix Multiply) operations that dominate LLM decode. llama.cpp detects SME2 at startup and selects the optimised kernel path automatically — you do not need to configure anything. The speedup over the scalar baseline can be 2–4× on chips that support it.
+**SME2 (Scalable Matrix Extension 2)** is an Arm architecture extension introduced on high-end mobile SoCs (like recent Snapdragon chips). It adds dedicated matrix-multiply instructions that operate on large two-dimensional register tiles, dramatically accelerating the GEMM (General Matrix Multiply) operations that dominate LLM decode. llama.cpp detects SME2 at startup and selects the optimized kernel path automatically — you do not need to configure anything. The speedup over the scalar baseline can be 2–4× on chips that support it.
 
 **AMX (Advanced Matrix Extensions)** is Intel's equivalent extension for x86-64 processors. Android devices running on x86-64 silicon (uncommon but used in some ChromeOS devices) benefit from AMX in the same way. Again, llama.cpp auto-detects it.
 
@@ -180,7 +180,7 @@ cmake -B build \
 cmake --build build --config Release -j$(nproc)
 ```
 
-`-DGGML_NATIVE=ON` tells the compiler to generate instructions optimised for the exact CPU running the build — on a Snapdragon 8 Gen 3, this enables SME2 instructions if the compiler supports them.
+`-DGGML_NATIVE=ON` tells the compiler to generate instructions optimized for the exact CPU running the build — on a Snapdragon 8 Gen 3, this enables SME2 instructions if the compiler supports them.
 
 ```bash
 # Run the chat interface
@@ -302,7 +302,7 @@ On Android, the choice of quantization is primarily constrained by available RAM
 
 - Running `llama-server` in a Termux session means it is subject to Android's low-memory killer. A phone call, a camera launch, or a memory-intensive game can cause Android to terminate the server process with no warning.
 - The only reliable way to keep a service alive on Android is to run it as a **foreground service** with a persistent notification, or to accept that it may be killed and implement reconnection logic in your client.
-- For development and personal use (Termux path), keep the screen on and consider disabling battery optimisation for Termux in Android Settings.
+- For development and personal use (Termux path), keep the screen on and consider disabling battery optimization for Termux in Android Settings.
 
 **Thermal throttling on mobile** is more aggressive than on desktop hardware. Modern Snapdragon chips are designed for burst performance — they sustain high clock speeds for 10–30 seconds then throttle down to prevent overheating. This means:
 
@@ -674,7 +674,7 @@ W = mx.random.normal((3, 4))
 y = x @ W                          # recorded but not computed
 z = nn.gelu(y)                      # fused into same graph
 
-mx.eval(z)                          # execute: single optimised Metal shader
+mx.eval(z)                          # execute: single optimized Metal shader
 ```
 
 ### Q.16 MLX Architecture: Memory and Compute
@@ -778,7 +778,7 @@ evaluation enables fusion that eliminates intermediate buffers.
 The gap narrows at larger batch sizes (mlx-lm does not yet match llama.cpp's
 continuous batching for server workloads). For single-user inference, prefer
 mlx-lm. For serving multiple concurrent users, llama.cpp with `--n-parallel`
-is currently better-optimised.
+is currently better-optimized.
 
 ### Q.20 MLX Low-Level: Writing Custom Kernels
 
@@ -836,7 +836,7 @@ library.
 
 ### Q.22 Model Availability
 
-The `mlx-community` organisation on HuggingFace maintains pre-converted and
+The `mlx-community` organization on HuggingFace maintains pre-converted and
 pre-quantized MLX versions of the most popular models:
 
 ```bash
@@ -923,7 +923,7 @@ def warmup_mlx_cache(model_path: str, seq_lengths=(1, 128, 512, 1024)):
 
 ---
 
-### Q.24 Unified Memory: Pressure and Page-Fault Behaviour
+### Q.24 Unified Memory: Pressure and Page-Fault Behavior
 
 Apple Silicon uses unified memory — the CPU and GPU share the same physical
 DRAM. This eliminates PCIe copy overhead but introduces a different failure
@@ -1004,9 +1004,9 @@ relationship prevents confusion when choosing between them.
 | Language | Python (with Objective-C/Swift bindings) | Swift/Objective-C (`.mlpackage`) |
 | Format | NumPy-compatible arrays | `.mlpackage` / `.mlmodel` |
 | Customisation | Full (write custom Metal kernels) | Limited (fixed compute graph) |
-| Operator coverage | LLM-complete | Production-optimised subset |
+| Operator coverage | LLM-complete | Production-optimized subset |
 | App Store distribution | Not directly | Native — signed `.mlpackage` |
-| Inference speed (same model) | ~equal | 5–15% faster (ANE utilisation) |
+| Inference speed (same model) | ~equal | 5–15% faster (ANE utilization) |
 | ANE (Neural Engine) | Not used | Primary compute target |
 | Quantization support | mlx-lm convert (4-bit, 8-bit) | Core ML Tools (W4A16, W8A8) |
 

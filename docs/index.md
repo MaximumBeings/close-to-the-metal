@@ -30,7 +30,7 @@ hide:
     <div class="book-metrics">
       <div class="book-metric"><span class="bm-n">52</span><span class="bm-l">chapters</span></div>
       <div class="book-metric"><span class="bm-n">26</span><span class="bm-l">appendices</span></div>
-      <div class="book-metric"><span class="bm-n">46</span><span class="bm-l">code demos</span></div>
+      <div class="book-metric"><span class="bm-n">48</span><span class="bm-l">code demos</span></div>
       <div class="book-metric"><span class="bm-n">11×</span><span class="bm-l">cost savings</span></div>
     </div>
     <div class="book-cta-row">
@@ -81,7 +81,7 @@ hide:
       <div class="toc-part-header toc-pii">
         <span class="toc-part-label">Part II</span>
         <span class="toc-part-title">Engine Internals</span>
-        <span class="toc-part-range">Ch 6–13.5</span>
+        <span class="toc-part-range">Ch 6–13</span>
       </div>
       <div class="toc-entries">
         <a href="part2-engine-internals/chapter06.html" class="toc-entry"><span class="toc-num">6</span><span class="toc-etitle">PagedAttention and the Block Manager</span></a>
@@ -104,7 +104,7 @@ hide:
       <div class="toc-part-header toc-piii">
         <span class="toc-part-label">Part III</span>
         <span class="toc-part-title">Production Configuration</span>
-        <span class="toc-part-range">Ch 14–21.5</span>
+        <span class="toc-part-range">Ch 14–21</span>
       </div>
       <div class="toc-entries">
         <a href="part3-production/chapter14.html" class="toc-entry"><span class="toc-num">14</span><span class="toc-etitle">The Eight vLLM Knobs + llama.cpp Equivalents</span></a>
@@ -115,7 +115,7 @@ hide:
         <a href="part3-production/chapter18.html" class="toc-entry"><span class="toc-num">18</span><span class="toc-etitle">Disaggregated Prefill and Decode</span></a>
         <a href="part3-production/chapter19.html" class="toc-entry"><span class="toc-num">19</span><span class="toc-etitle">Kubernetes and KubeRay Auto-Scaling</span></a>
         <a href="part3-production/chapter20.html" class="toc-entry"><span class="toc-num">20</span><span class="toc-etitle">Cost Engineering — $/Million Tokens</span></a>
-        <a href="part3-production/chapter21.html" class="toc-entry"><span class="toc-num">21</span><span class="toc-etitle">Security — API Hardening and Injection Defence</span></a>
+        <a href="part3-production/chapter21.html" class="toc-entry"><span class="toc-num">21</span><span class="toc-etitle">Security — API Hardening and Injection Defense</span></a>
       </div>
     </div>
 
@@ -203,7 +203,7 @@ hide:
 <!-- ── FOOTER NOTE ───────────────────────────────────────────── -->
 <div class="book-footer">
   <em>"The first time you see a KV cache eviction cause a 40-second request, you will wish you had read Chapter 6 before it happened. This book is here so you read it first."</em>
-  <br><strong>— Oluwaseyi Awoga, written with AI assistance, May 2026</strong>
+  <br><strong>— Oluwaseyi Awoga, written with AI assistance, May 2026 (Under development)</strong>
 </div>
 
 </div>

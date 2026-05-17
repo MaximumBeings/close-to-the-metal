@@ -179,6 +179,7 @@ nav:
     - "Code 38 — Production Synthesis": code/chapter_38.md
     - "Code 39 — Evaluation Harness": code/chapter_39.md
     - "Code 40 — vLLM V1 Architecture": code/chapter_40.md
+    - "Code L — CUDA C++ Introduction": code/appendix_l.md
     - "Code V — TurboQuant": code/appendix_v.md
 
   - "Appendices":

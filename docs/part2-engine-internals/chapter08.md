@@ -82,8 +82,8 @@ GPU layer upload:   ~4   s
 Total:              ~4.4 s
 ```
 
-The 6× difference is fundamental: vLLM optimises throughput at the cost of
-startup; llama.cpp optimises startup (and flexibility) at the cost of
+The 6× difference is fundamental: vLLM optimizes throughput at the cost of
+startup; llama.cpp optimizes startup (and flexibility) at the cost of
 per-request throughput.
 
 ---

@@ -59,7 +59,7 @@ Often ignored but decisive for production decisions. A 2× faster engine that dr
 ### What not to measure (or report alone)
 
 - **"Responses per second"** without specifying output length — useless. A 10-token response is 100× cheaper than a 1000-token response.
-- **Single-sample latency** at batch=1 without stating that batch=1 — favours llama.cpp, misrepresents server-class vLLM.
+- **Single-sample latency** at batch=1 without stating that batch=1 — favors llama.cpp, misrepresents server-class vLLM.
 - **Theoretical peak FLOPS** — models never achieve this; report measured throughput instead.
 - **Time to load the model** as part of throughput — warm-up is a one-time cost; benchmarks should exclude it.
 

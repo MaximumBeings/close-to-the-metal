@@ -395,7 +395,7 @@ nvcc --version
 
 # Monitor GPU during the build (open in a second terminal)
 # tegrastats is Jetson's equivalent of nvidia-smi
-# 'tegrastats' shows GPU utilisation, temperature, power draw
+# 'tegrastats' shows GPU utilization, temperature, power draw
 watch -n 2 tegrastats
 
 # Clone and build
@@ -591,7 +591,7 @@ Reading the output:
 
 - `RAM 3842/7773MB` — using 3.8 GB of 7.8 GB total (the rest is reserved by the OS for GPU and other hardware)
 - `lfb 4x2MB` — largest free block is 4 contiguous 2 MB pages — low fragmentation is good
-- `GR3D_FREQ 85%` — GPU is at 85% utilisation — inference is GPU-bound (ideal)
+- `GR3D_FREQ 85%` — GPU is at 85% utilization — inference is GPU-bound (ideal)
 - `GPU@56C` — GPU temperature at 56°C — healthy
 - `VDD_IN 12.3W` — total board power draw is 12.3 W
 
@@ -601,7 +601,7 @@ Reading the output:
 pip3 install jetson-stats
 sudo jtop
 # Navigate with arrow keys
-# GPU tab: CUDA utilisation, memory allocation, power per component
+# GPU tab: CUDA utilization, memory allocation, power per component
 # ALL tab: every sensor simultaneously — useful for thermal debugging
 ```
 
@@ -738,19 +738,19 @@ Expected throughput on AGX Orin at 60W: 30–50 tokens/sec for a 7B INT4-AWQ mod
 # pp512 = 280 t/s   (prefill throughput)
 # tg128 = 18 t/s    (decode throughput — the number users experience)
 
-# Run tegrastats during the benchmark to see GPU utilisation
+# Run tegrastats during the benchmark to see GPU utilization
 tegrastats --interval 250 > /tmp/bench_tegrastats.log &
 TEGRA_PID=$!
 ./build/bin/llama-bench ...
 kill $TEGRA_PID
 
-# Compute mean GPU utilisation during benchmark
+# Compute mean GPU utilization during benchmark
 grep "GR3D_FREQ" /tmp/bench_tegrastats.log | \
     grep -oP 'GR3D_FREQ \K\d+' | \
-    awk '{sum+=$1; n++} END {printf "Mean GPU utilisation: %.1f%%\n", sum/n}'
+    awk '{sum+=$1; n++} END {printf "Mean GPU utilization: %.1f%%\n", sum/n}'
 ```
 
-If mean GPU utilisation is below 70% during the benchmark, something is limiting GPU throughput — check that `--n-gpu-layers 999` is set and that the CUDA build was compiled for the correct architecture (`sm_87` for Orin).
+If mean GPU utilization is below 70% during the benchmark, something is limiting GPU throughput — check that `--n-gpu-layers 999` is set and that the CUDA build was compiled for the correct architecture (`sm_87` for Orin).
 
 ---
 
@@ -850,7 +850,7 @@ cat /etc/nv_tegra_release
 sudo nvpmodel -m 0
 sudo jetson_clocks
 
-# Monitor GPU utilisation and temperature
+# Monitor GPU utilization and temperature
 tegrastats --interval 500
 
 # Full GPU inference
@@ -859,7 +859,7 @@ llama-server --model MODEL.gguf --n-gpu-layers 999 --flash-attn --port 8080
 # Benchmark prefill and decode throughput
 llama-bench --model MODEL.gguf --n-gpu-layers 999 -p 512 -n 128 -r 3
 
-# Check GPU utilisation is high during inference
+# Check GPU utilization is high during inference
 # Look for GR3D_FREQ > 70% in tegrastats output
 ```
 
@@ -967,7 +967,7 @@ high-quality USB-C cable rated for 5A.
 ```bash
 sudo nvpmodel -q           # What power mode is active?
 sudo jetson_clocks --show  # Are clocks at maximum?
-tegrastats                 # Check GR3D_FREQ (GPU utilisation %)
+tegrastats                 # Check GR3D_FREQ (GPU utilization %)
 ```
 
 If `nvpmodel` shows mode 1 (15W) instead of mode 0 (MAXN), GPU and memory bus

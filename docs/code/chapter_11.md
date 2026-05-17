@@ -991,7 +991,7 @@ MicroBatchResult simulate_ubatch_prefill(
     int   ubatch_size,
     int   d_model        = 4096,
     int   num_layers     = 32,
-    float prefill_tflops = 312.0f)   // H100 BF16 peak TFLOP/s
+    float prefill_tflops = 312.0f)   // A100 BF16 peak TFLOP/s (use 989.0f for H100)
 {
     int num_chunks = (total_tokens + ubatch_size - 1) / ubatch_size;
 
