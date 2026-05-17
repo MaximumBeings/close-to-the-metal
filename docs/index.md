@@ -18,7 +18,7 @@ hide:
         <div class="book-engines">LLM Inference from First Principles</div>
         <div class="book-cover-footer">
           <div class="book-authors">Oluwaseyi Awoga</div>
-          <div class="book-edition">52 Chapters · 26 Appendices · May 2026</div>
+          <div class="book-edition">52 Chapters · 28 Appendices · May 2026</div>
         </div>
       </div>
     </div>
@@ -26,7 +26,7 @@ hide:
 
   <div class="book-blurb">
     <p class="book-quote">"The gap between 'I called the API' and 'I understand what just happened' is exactly the size of this book."</p>
-    <p class="book-desc">A systems engineering textbook for engineers who serve LLMs in production. Core concepts are taught through two primary engines — <strong>vLLM</strong> and <strong>llama.cpp</strong> — with later chapters extending to <strong>SGLang</strong>, <strong>TensorRT-LLM</strong>, <strong>MLC-LLM</strong>, and <strong>Ollama</strong>. Every chapter includes worked arithmetic, companion code, and production-grade configurations.</p>
+    <p class="book-desc">A practitioner's deep guide to LLM inference — from GPU memory hierarchies, attention arithmetic, and transformer internals through production scheduling, multi-GPU serving, quantization, and cost engineering. Core concepts are grounded in two open-source engines — <strong>vLLM</strong> and <strong>llama.cpp</strong> — with dedicated chapters on <strong>SGLang</strong>, <strong>TensorRT-LLM</strong>, <strong>MLC-LLM</strong>, <strong>Ollama</strong>, and <strong>Cerebras WSE-3</strong>. Most chapters include worked arithmetic, companion code, and production-ready configurations. Appendices cover kernel programming (CUDA, Triton, CUTLASS, Mojo, JAX), mathematical foundations (tensor contractions, backpropagation, Jacobians), and hardware platforms (AMD ROCm, Apple Silicon, NVIDIA Jetson).</p>
     <div class="book-metrics">
       <div class="book-metric"><span class="bm-n">52</span><span class="bm-l">chapters</span></div>
       <div class="book-metric"><span class="bm-n">28</span><span class="bm-l">appendices</span></div>
