@@ -468,6 +468,7 @@ the last (partially filled) block.  If that last block is shared (`ref_count > 1
 the block manager performs a CoW:
 
 ```
+
 1. Allocate a new physical block  phys_new.
 2. Copy contents of shared block → phys_new.
 3. Update beam's block table: last logical block → phys_new.
@@ -557,6 +558,7 @@ can be **shared read-only**.
 ### 6.6.2 Block hashing
 
 A physical block is eligible for prefix caching if:
+
 1. It is *full* (all `block_size` slots are written).
 2. It is *immutable* (no pending CoW — it has `ref_count ≥ 1` and is not the
    last block of any active sequence).

@@ -695,6 +695,7 @@ Each of the 256 sequences needs its own KV cache blocks. If each sequence genera
 total_KV = 256 x 200 x 327 KB = 256 x 65.4 MB = 16.75 GB
 ```
 This is a 256x increase over serving a single sequence. The scheduler must either:
+
 1. Set max_num_seqs >= 256 and ensure the KV pool can hold all 256 sequences simultaneously, or
 2. Process the 32 prompts in smaller sub-batches (G=2 or G=4) to fit within the KV budget.
 
@@ -730,6 +731,7 @@ min_step_time >= reward_model_P99_latency = 250 ms
 ```
 
 But the step also includes:
+
 - Forward pass through policy model (vLLM inference): ~100-500 ms depending on sequence length
 - Backward pass (gradient computation): ~2-5x forward pass time
 - Optimizer step: ~10-50 ms

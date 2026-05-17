@@ -57,6 +57,7 @@ Nemotron models are trained on NVIDIA hardware with NVIDIA NeMo framework, then 
 ```
 
 Compilation benefits:
+
 1. **Kernel auto-tuning**: TRT tests thousands of GEMM algorithms and picks the fastest for your exact matrix shape and GPU
 2. **Layer fusion**: Multiple operations fused into one kernel (e.g., LayerNorm + matmul + activation)
 3. **In-flight batching optimized C++ scheduler**: no Python overhead per request
@@ -149,6 +150,7 @@ python run.py \
 ```
 
 For inference, TRT-LLM implements FP8 as:
+
 1. Weights stored in FP8 E4M3 (1 byte/param)
 2. Activations quantized to FP8 before each linear layer
 3. Accumulation in FP32 (within Tensor Core)
@@ -235,6 +237,7 @@ llama.cpp        Q4_K_M       ~350       Single GPU (insufficient for 70B)
                               (requires model split, loses efficiency)
 
 Observations:
+
 - TRT-LLM FP8+sparse: ~3.1× faster than vLLM BF16
 - TRT-LLM FP8 dense: ~2.4× faster than vLLM BF16
 - vLLM FP8: ~2× faster than vLLM BF16 (as expected)

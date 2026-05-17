@@ -475,6 +475,7 @@ The request stays in the waiting queue. Next iteration: still 3,000 tokens — s
 **Step 2 — With chunked prefill enabled.**
 
 The scheduler splits the prefill:
+
 - Step 1: 2,048 tokens of the prompt (leaving 952 tokens remaining)
 - Step 2: remaining 952 tokens → prefill complete, decode begins
 
@@ -499,6 +500,7 @@ $$\text{recompute time} = \frac{200 \text{ tokens}}{3{,}000 \text{ tok/s}} = 0.0
 **Step 2 — What the user experiences.**
 
 The user's request was mid-decode at token 150 (for example). After preemption and recomputation:
+
 - Prompt is re-processed (66.7 ms added)
 - Decode resumes from where it left off
 

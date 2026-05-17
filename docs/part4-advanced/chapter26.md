@@ -1231,6 +1231,7 @@ The reward model processes the *concatenated* prompt + completion as a single se
 **DPO: both policy and reference model on same GPU. Policy updated every 100 steps. Memory pressure:**
 
 DPO requires computing log-probabilities from both:
+
 - The policy model (updated weights)
 - The reference model (frozen SFT weights -- never updated)
 
@@ -1291,6 +1292,7 @@ When GPT-4 is the judge and GPT-4 outputs are one of the candidates, the judge s
 
 **What alpha=0.55 means:**
 Krippendorff's alpha measures inter-annotator agreement above chance. Scale:
+
 - alpha < 0.20: slight agreement (near-random)
 - 0.20-0.40: fair agreement
 - 0.40-0.60: moderate agreement  <-- 0.55 is here

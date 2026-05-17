@@ -2104,6 +2104,7 @@ K_steps = ceil(K / BLOCK_K) = ceil(4096 / 32) = 128
 **HBM load transactions per program:**
 
 Each K-step loads:
+
 - One tile of A: BLOCK_M * BLOCK_K * 2 bytes (FP16) = 64 * 32 * 2 = 4,096 B
 - One tile of B: BLOCK_K * BLOCK_N * 2 bytes         = 32 * 64 * 2 = 4,096 B
 

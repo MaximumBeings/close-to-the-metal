@@ -1057,6 +1057,7 @@ KV pool = 76 − 16 = 60 GB = 60 × 1024 MiB = 61,440 MiB
 
 **Step 3 — Risk of 0.05 headroom.**
 The 4 GB headroom must absorb:
+
 - Peak activation tensors during prefill (can spike 2–6 GB for large batches)
 - CUDA context memory (~1 GB)
 - Fragmentation in the allocator

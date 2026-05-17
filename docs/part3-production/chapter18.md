@@ -642,6 +642,7 @@ Disaggregated prefill solves this by dedicating each GPU type to the workload it
 
 **Step 1 — Prefill capacity check.**
 Each prefill pod processes prompts at some throughput T_prefill (tokens/s). For a 70B BF16 model at compute-bound prefill on an A100:
+
 - ~1,979 TFLOPS × efficiency / FLOPs per token ≈ 10,000–15,000 tokens/s per pod (estimate).
 - At 100 req/s × 1,024 tokens/req = 102,400 tokens/s total prefill demand.
 - 4 pods × 12,800 tok/s ≈ 51,200 tok/s capacity — check if this matches actual measurement.

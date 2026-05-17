@@ -162,6 +162,7 @@ for Llama 2).
 **Inference consequences:**
 
 The larger vocabulary increases:
+
 - The output projection matrix size: `d_model × vocab_size`
   - 8B: 4,096 × 128,256 = 525M parameters in the lm_head (~1 GB in FP16)
   - 70B: 8,192 × 128,256 = 1.05B parameters (~2 GB in FP16)
@@ -251,6 +252,7 @@ or incoherent responses, so understanding it is essential.
 ```
 
 The special tokens are:
+
 - `<|begin_of_text|>` — BOS (beginning of sequence)
 - `<|start_header_id|>` / `<|end_header_id|>` — wraps role names
 - `<|eot_id|>` — end of turn
@@ -431,21 +433,25 @@ Per-request KV cache at 1,500 tokens: `320 KB × 1,500 = 480 MB`
 Model weights in FP16: `~140 GB`
 
 On 2× H100 (160 GB total):
+
 - Model weights: 140 GB
 - Available for KV cache: 160 × 0.90 - 140 = 4 GB
 - Max concurrent requests at 1,500 tokens: `4 GB / 480 MB = 8` ← very tight
 
 Switch to AWQ (4-bit weights): model shrinks to ~35 GB
+
 - Available for KV cache: 144 GB - 35 GB = 109 GB
 - Max concurrent requests: `109,000 MB / 480 MB = 227`
 
 Switch to 4× A100 80GB tensor-parallel with AWQ:
+
 - Available: 320 × 0.90 - 35 = 253 GB
 - Max concurrent: `253,000 / 480 = 527` — meets the 500-user target
 
 **Step 2: Throughput check**
 
 At 500 concurrent users, each generating 200 tokens:
+
 - Total decode tokens/s needed: 500 × (200 tokens / 5s) = 20,000 tok/s
 - 4× A100 AWQ decode throughput (~8,000 tok/s per A100 at batch 128): 32,000 tok/s ✓
 
@@ -910,6 +916,7 @@ Number of layers differs: 8B has 32 layers, 70B has 80 layers, 405B has 126 laye
 **Key insight:** KV cache is O(num_layers), not O(model_size). The 405B model has 126/32 = 3.94x more layers than 8B, so 3.94x more KV cache per token -- not 405/8 = 50.6x more. GQA (8 KV heads) keeps the KV cache manageable even for the 405B model.
 
 At 128K context:
+
 - 8B: 128K x 128 KB = 16 GB
 - 70B: 128K x 320 KB = 40 GB
 - 405B: 128K x 504 KB = 63 GB (still fits on 1 H100 80 GB with FP8 weights)
@@ -943,6 +950,7 @@ lm_head_memory_32K = 262M x 2 = 524 MB
 
 **How prefix caching works here:**
 The system prompt (2,000 tokens) is prefixed to every turn. With prefix caching:
+
 - Turn 1: System prompt prefilled (cache miss). KV blocks computed and cached with hash H_sys.
 - Turn 2: System prompt matches cached H_sys blocks. KV blocks reused (cache hit). Only the new user turn tokens are prefilled.
 - Turn N: Same cache hit for system prompt. 

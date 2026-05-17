@@ -550,6 +550,7 @@ This is why KV cache management is a first-class engineering problem.
 Having traced the prefill and both decode steps in detail, the following observations capture the invariants that hold across **every** attention variant in this chapter:
 
 ```text
+
 1. Prefill fills the first N_prefill K/V rows at once (batch computation).
 2. Decode appends exactly one new K row and one new V row per predicted token.
 3. The newest query is always shape 1 × d_head — a single vector.
@@ -1684,6 +1685,7 @@ W_UV is the identity matrix here — so v equals C_KV exactly. In practice W_UV 
 **Step 1 — Head assignment.**
 
 Group size = Hq / Hkv = 4 / 2 = 2 heads per group:
+
 - **Group 0 (KV set 0):** Query heads 0 and 1
 - **Group 1 (KV set 1):** Query heads 2 and 3
 

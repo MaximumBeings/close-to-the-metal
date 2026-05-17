@@ -817,6 +817,7 @@ For inference-only pipelines, the relevant schedule is the **all-forward-then-dr
 - **Pipeline parallelism (PP)**: assigns consecutive transformer layers to consecutive devices; requires one activation transfer per micro-batch per pipeline stage boundary.
 
 > **LinkedIn Scenario Update:** LinkedIn's $1.2M/month cluster running at 28% utilization is likely serving a 70B-class model that cannot fit on a single GPU. Without tensor parallelism, the only option is model sharding via CPU offload — which is 10–20× slower and entirely unsuitable for 50K concurrent users. With TP=4 across NVLink-connected A100-80s, the 70B model fits in 35 GB per GPU (at BF16), leaving ~45 GB per GPU for KV cache. A single 4-GPU node can then serve ~30 concurrent sessions at 8K context — enough to handle the LinkedIn workload's latency SLA with far fewer nodes than a naive 2-GPU-per-model configuration, directly reducing the per-month cost.
+
 - **TP vs PP trade-off**: TP requires high-bandwidth interconnect (NVLink) and low latency; PP can work over slower links but introduces pipeline bubble overhead.
 - **Pipeline bubble formula**: bubble_fraction = (P-1) / (P-1 + M) for P stages and M microbatches; at P=4, M=1 the bubble is 75%; at M=16 it falls to 16%.
 - **vLLM TP implementation**: `--tensor-parallel-size N` shards all attention and FFN weights; model parallelism uses NCCL AllReduce on the NVLink ring.

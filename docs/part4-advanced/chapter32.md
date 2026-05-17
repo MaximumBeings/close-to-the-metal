@@ -1506,6 +1506,7 @@ The most important principles:
 
 **Step 1 -- Check arithmetic intensity (are we compute-bound or bandwidth-bound?).**
 At 95% GPU util, the GPU's SMs are busy. If throughput is 3x lower than expected, either:
+
 - The HBM bandwidth is saturated by something other than model weights (e.g., KV cache reads)
 - The util metric is misleading (high util from idle-waiting on memory transfers)
 

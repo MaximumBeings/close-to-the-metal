@@ -919,6 +919,7 @@ The most reliable signal is the </think> delimiter the model generates naturally
 **Not streaming to user:**
 Apply a filter in the SSE streaming path:
 ```
+
 - Buffer all tokens after <think>
 - Do not yield buffered tokens to the SSE output stream  
 - After </think> is seen, resume yielding answer tokens

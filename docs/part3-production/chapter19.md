@@ -935,6 +935,7 @@ pods = ceil(400 / 60) = ceil(6.67) = 7 decoder pods
 When Kubernetes signals a pod to terminate (SIGTERM), vLLM must finish all in-flight requests before shutting down. An in-flight request may be in mid-generation — it has already received its prompt (prefill done), and its KV cache is allocated.
 
 If the pod is killed before generation completes:
+
 - The user receives a truncated or empty response.
 - The KV cache (up to `max_sequence_length` blocks) is lost without producing a useful output.
 

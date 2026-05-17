@@ -573,6 +573,7 @@ For a document QA workload (same PDF page, 20 different questions):
 In llama.cpp, LLaVA is handled through the `clip.cpp` module:
 
 ```
+
 1. Load GGUF model (LLM weights + projection weights)
 2. Load CLIP model (vision encoder weights in separate .gguf or embedded)
 3. For each image:
@@ -1797,12 +1798,14 @@ Also consider reducing frame rate: 0.5 fps -> 30 frames -> 7,680 visual tokens, 
 
 **CPU latency estimate:**
 CLIP ViT-L/14 has ~307M parameters. On a modern CPU (e.g., Intel Xeon at ~100 GFLOPS for FP16):
+
 - ViT forward pass per image: ~2 x 307M x 14 (patches) FLOPs ~= 8.6 GFLOPS per image
 - CPU time per image: 8.6 GFLOPS / 100 GFLOPS = 86 ms per image
 - Batch of 8 (sequential on CPU): 8 x 86 ms = 688 ms
 
 **GPU latency estimate:**
 Same ViT on a GPU (e.g., A100 at 312 TFLOPS FP16):
+
 - 8.6 GFLOPS / 312,000 GFLOPS = 0.028 ms per image
 - Batch of 8: ~0.2 ms (GPU batches all 8 images simultaneously)
 

@@ -1239,6 +1239,7 @@ $$\text{Startup time with mmap} \approx \text{milliseconds} \quad \text{vs} \qua
 **Step 3 — The advantage.**
 
 The main advantage is **dramatically faster first-token time from a cold start**. A laptop running llama.cpp can serve its first token within 300 ms of launch. This is critical for:
+
 - Interactive desktop applications
 - Low-latency mobile/edge use cases
 - Testing and development where you restart the server frequently
@@ -1246,6 +1247,7 @@ The main advantage is **dramatically faster first-token time from a cold start**
 **Step 4 — The trade-off.**
 
 mmap causes **page faults during inference**. When a weight page is accessed for the first time, the OS must:
+
 1. Detect the page fault
 2. Issue a disk I/O to load the page into DRAM
 3. Map it into the process's address space

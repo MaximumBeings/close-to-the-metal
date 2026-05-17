@@ -1084,6 +1084,7 @@ For larger N the benefit grows: the N² terms scale quadratically while FlashAtt
 **Online softmax update rule** (processing one element at a time):
 
 When new element x_new arrives:
+
 - `m_new = max(m_old, x_new)`
 - `l_new = l_old × exp(m_old − m_new) + exp(x_new − m_new)`
 

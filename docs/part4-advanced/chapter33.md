@@ -1729,12 +1729,14 @@ llama.cpp with Metal backend is simpler to deploy and widely used for on-device 
 
 **TRT-LLM:**
 Compilation produces a static engine optimized for the exact (max_batch_size, max_seq_len) bounding box. For a distribution with high variance:
+
 - Short sequences (common): engine runs at the padded max_seq_len, wasting compute on padding.
 - Sequences exceeding max_seq_len: **rejected** -- the engine cannot process them without recompilation.
 - Runtime re-compilation is expensive (minutes to hours for large models). Teams typically ship multiple engine variants (short, medium, long) with a routing layer to select the appropriate engine.
 
 **vLLM CUDA graphs:**
 Graphs are captured for a set of discrete batch sizes (1, 2, 4, 8, 16, ...) at startup. Sequences outside the captured shapes fall back to eager mode. For high-variance distributions:
+
 - vLLM handles arbitrary sequence lengths via PagedAttention (no padding to max_seq_len).
 - Decode steps at any sequence length use the closest captured CUDA graph, with eager fallback for outliers.
 - No recompilation needed -- adapts dynamically.

@@ -937,6 +937,7 @@ unified memory uses swap via the SSD ("memory compression" and "memory
 swapping"). The GPU accesses model weights via this virtual address space.
 
 When the model exceeds physical RAM:
+
 1. macOS compresses infrequently-accessed pages (no performance impact)
 2. If still insufficient, it swaps pages to SSD (major performance impact)
 3. GPU accesses to swapped pages trigger **page faults** that stall the Metal
@@ -1327,6 +1328,7 @@ Q2_K is approximately **39% smaller** than Q4_K_M for a 7B model.
 Q2_K quantizes weights to just 2 bits with k-quant mixed precision. Perplexity
 (PPL) typically increases by 3–8 points versus the FP16 baseline, compared to
 only 0.5–1.5 for Q4_K_M. In practice this manifests as:
+
 - Reduced factual recall
 - More grammatical errors in long outputs
 - Tendency to repeat phrases or lose coherent structure

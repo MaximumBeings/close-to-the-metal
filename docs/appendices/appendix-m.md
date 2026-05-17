@@ -616,6 +616,7 @@ Each of the 1,024 program instances runs independently (and concurrently on the 
 
 **Tensor Core requirements on A100:**
 NVIDIA Tensor Cores require matrix dimensions that are multiples of specific tile sizes. For FP16/BF16 on A100:
+
 - The hardware MMA (Matrix Multiply Accumulate) instruction operates on 16x16x16 tiles.
 - BLOCK_K must be a multiple of 16 (at minimum) for Triton to legally emit Tensor Core instructions.
 
@@ -684,6 +685,7 @@ At 100 forward passes/second, break-even is reached in 27 seconds of runtime. Th
 
 **For one forward pass token (one GEMV per weight matrix):**
 In a 7B model, approximate weight matrix count:
+
 - Attention: Q, K, V, O projections x 32 layers = 128 matrices (but K/V smaller with GQA)
 - FFN: up, gate, down x 32 layers = 96 matrices
 - Approximate: ~200 weight matrices of shape ~4096x4096

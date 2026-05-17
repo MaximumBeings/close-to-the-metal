@@ -81,6 +81,7 @@ The forward pass becomes:
 ```
 
 This means at inference time you can either:
+
 1. **Merge**: compute `W_merged = W_base + B·A·(alpha/r)` once and use `W_merged` — zero overhead per forward pass, but you need one copy of W per adapter
 2. **Inject**: keep `W_base` as-is and add the LoRA term in a fused kernel — more arithmetic per forward pass, but one copy of W serves all adapters
 
@@ -998,6 +999,7 @@ For production: set --max-loras to the expected concurrently-needed adapter coun
 
 **Verify deterministic routing:**
 Use hash-based routing: route = "candidate" if hash(user_id) % 100 < 10 else "stable". This ensures:
+
 1. The same user always sees the same adapter (no A/B contamination across sessions).
 2. The 10% split is deterministic, not probabilistic.
 

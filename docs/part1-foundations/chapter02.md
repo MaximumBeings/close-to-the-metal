@@ -300,6 +300,7 @@ When the model generates token number 50, it needs to "remember" what was in tok
 Think of the KV cache as a notebook where the model writes a summary of everything it has seen, layer by layer. Each new token it reads adds one more row to the notebook. When the model generates the next token, it reads the entire notebook.
 
 The KV cache has two critical properties:
+
 1. It grows linearly with sequence length (more tokens = bigger notebook)
 2. It must be kept in fast memory (HBM or unified memory) for every active user simultaneously
 
@@ -1381,10 +1382,12 @@ where `bytes_per_param` is 2 for BF16/FP16, 1 for INT8, 0.5 for INT4/NF4.
 **Step 1 — Identify the components.**
 
 For each layer of the transformer, the KV cache stores two tensors:
+
 - **K (key):** shape `[n_kv_heads, head_dim]` per token
 - **V (value):** shape `[n_kv_heads, head_dim]` per token
 
 Given:
+
 - Layers: 40
 - KV heads: 8 (GQA — the number of distinct key/value heads, which may be fewer than query heads)
 - `head_dim`: 128
@@ -1449,6 +1452,7 @@ The 15% buffer (0.85 utilization) is crucial. Without it, a sudden batch of long
 **Step 1 — What mmap does.**
 
 `mmap()` is a POSIX syscall that instructs the OS to:
+
 1. Create a mapping from a range of virtual memory addresses → a file on disk
 2. Update the process's page table
 3. Return immediately — *no bytes are read from disk*
@@ -1458,16 +1462,19 @@ The key is that the OS is making a **promise**: "when you access address X, I wi
 **Step 2 — Why this is fast at startup.**
 
 For a 70B model (140 GB file), eager loading must:
+
 - Read 140 GB from NVMe → 140 GB ÷ 7 GB/s ≈ 20 s
 - Transfer to HBM → 140 GB ÷ (PCIe 4.0 × 64: ~64 GB/s) ≈ 2 s
 - Total: ~22 seconds minimum
 
 With mmap:
+
 - Syscall + page table update: **< 1 millisecond**
 
 **Step 3 — The trade-off: page faults.**
 
 When the first inference request arrives and the forward pass accesses a weight page not yet in RAM, the CPU raises a **hardware page fault**:
+
 1. Execution halts for that core
 2. OS issues a read from NVMe for the missing page (4 KB)
 3. OS updates the page table and resumes execution

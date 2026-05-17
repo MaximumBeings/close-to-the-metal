@@ -517,6 +517,7 @@ ws     ::= [ \t\n]*
 ```
 
 At each decode step, llama.cpp's grammar sampler:
+
 1. Advances the grammar parser over the token just accepted.
 2. Queries the grammar for the set of valid next characters/tokens.
 3. Builds a token mask and applies it to the logit vector.
@@ -1094,6 +1095,7 @@ Overhead ratio: **4× greedy** (one copy per beam). This is an upper bound — i
 **Step 1 — Identify valid tokens.**
 
 The JSON grammar requires an integer value. Valid next tokens are any token whose text begins with a digit (0–9) or a minus sign (−). This includes:
+
 - Single-digit tokens: `"0"` through `"9"`
 - Multi-digit tokens: `"10"`, `"42"`, `"123"`, `"1000"`, etc.
 - Negative sign: `"-"` (followed by digits)

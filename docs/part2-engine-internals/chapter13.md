@@ -317,6 +317,7 @@ async def stream_response(prompt: str):
 ```
 
 `RequestOutput` contains:
+
 - `outputs`: list of `CompletionOutput` objects (one per beam if `n > 1`)
 - `outputs[0].text`: cumulative decoded text so far
 - `outputs[0].token_ids`: list of all token IDs generated so far
@@ -1115,6 +1116,7 @@ The response uses `Transfer-Encoding: chunked`. Each chunk is prefixed with its 
 ```
 
 The client must:
+
 1. Read hex chunk length (`5e` = 94 bytes)
 2. Read exactly 94 bytes of chunk body
 3. Read the trailing `\r\n`

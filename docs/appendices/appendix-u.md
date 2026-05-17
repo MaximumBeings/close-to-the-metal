@@ -497,6 +497,7 @@ Use these thresholds to decide if a quantization is acceptable for production:
 | Task-specific metrics | < 2.0% | > 5.0% |
 
 If a quantization exceeds the reject threshold, try:
+
 1. Increase group size granularity (128 → 64 → 32)
 2. Switch method (AWQ → GPTQ or vice versa)
 3. Use a higher bit width (INT4 → INT6 → INT8)
@@ -1166,6 +1167,7 @@ generation uses different circuits: identifier resolution, bracket matching,
 type consistency, indentation tracking.
 
 Concretely:
+
 - Attention heads specialized for **code token patterns** (indentation, brackets,
   keywords) will have low activation magnitude on Wikipedia → assigned as **low
   importance** → quantized aggressively.

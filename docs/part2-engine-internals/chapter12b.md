@@ -905,12 +905,14 @@ The constraint correctly prevents the model from generating schema-violating JSO
 **The problem:**
 
 Grammar requires the string `true`. The vocabulary has:
+
 - Token ID 4321: `"true"` (single token for the entire word)
 - Token IDs 500,510,520,530: `"t"`, `"r"`, `"u"`, `"e"` (individual characters)
 
 **What goes wrong with character-only FSM:**
 
 If the FSM is built on character-level transitions:
+
 - State: `START` → sees `"t"` → transitions to `SAW_T`
 - State: `SAW_T` → sees `"r"` → transitions to `SAW_TR`
 - etc.
@@ -979,6 +981,7 @@ Each node in the trie is a potential FSM state.
 **Step 2 — FSM state space.**
 
 States:
+
 - `AFTER_NAME_KEY` (just emitted `"name": "`)
 - One state per trie node (prefix of valid names)
 - `COMPLETE_NAME_j` for each of the 50 complete names (accepting states)
@@ -1000,6 +1003,7 @@ For each (state, token_id) pair: precompute whether that token is a valid contin
 **What SGLang does:**
 
 The draft model proposes K tokens speculatively (e.g., K=4). These K tokens are validated in parallel by both:
+
 1. **The verifier model** (correctness check — are these tokens the verifier would have chosen?)
 2. **The FSM** (constraint check — are these tokens grammatically valid per the schema?)
 
@@ -1021,6 +1025,7 @@ for i, token in enumerate(draft_tokens):
 **Compound rejection:**
 
 A draft token is rejected if either:
+
 - The verifier would not have produced it (standard speculative decoding rejection)
 - The FSM marks it as invalid (constraint violation)
 

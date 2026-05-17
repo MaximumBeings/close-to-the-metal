@@ -1062,6 +1062,7 @@ The **KV cache** stores only the K and V projections computed inside the attenti
 **Step 1 — FFN parameter count (SwiGLU uses three matrices).**
 
 SwiGLU FFN has three weight matrices (no biases in LLaMA):
+
 - W₁ (gate): `d_model × intermediate_size` = 4,096 × 14,336 = 58,720,256
 - W₂ (down-projection): `intermediate_size × d_model` = 14,336 × 4,096 = 58,720,256
 - W₃ (up-projection): `d_model × intermediate_size` = 4,096 × 14,336 = 58,720,256
@@ -1071,6 +1072,7 @@ $$\text{FFN params} = 3 \times 4{,}096 \times 14{,}336 = 3 \times 58{,}720{,}256
 **Step 2 — Attention parameter count.**
 
 For LLaMA-3 8B: 32 Q-heads, 8 KV-heads (GQA), head_dim=128:
+
 - Q projection: d_model × (n_q_heads × head_dim) = 4,096 × (32 × 128) = 4,096 × 4,096 = 16,777,216
 - K projection: d_model × (n_kv_heads × head_dim) = 4,096 × (8 × 128) = 4,096 × 1,024 = 4,194,304
 - V projection: same as K = 4,194,304
@@ -1153,6 +1155,7 @@ A single weight matrix W₁ projects up, ReLU removes negatives, W₂ projects b
 $$\text{SwiGLU}(x) = \Big(x W_1 \otimes \text{SiLU}(x W_3)\Big) \cdot W_2$$
 
 Where ⊗ is element-wise multiplication. There are now three matrices:
+
 - **W₁ (up-projection):** projects x from d_model → intermediate_size, producing the "content" vector.
 - **W₃ (gate-projection):** independently projects x → intermediate_size, producing the "gate" vector.
 - **W₂ (down-projection):** projects the gated result back to d_model.

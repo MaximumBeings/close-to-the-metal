@@ -760,6 +760,7 @@ free_seq_ids    : stack<int>               (available llama sequence IDs)
 At each iteration:
 
 ```
+
 1. Admit as many WAITING requests as fit within (n_ctx - used_ctx).
 2. For each ACTIVE sequence, append one new token to batch.
 3. Call llama_decode(batch).
@@ -1285,6 +1286,7 @@ print("\nDone.")
 - **Continuous batching**: at every step, the scheduler selects the maximal set of sequences that fit within the token budget, mixes prefill and decode, and emits a single batched forward pass.
 
 > **LinkedIn Scenario Update:** The LinkedIn deployment running at 28% GPU utilization is paying $1.2M/month because static batching leaves the GPU idle between requests. Switching to continuous batching — the default scheduler mode described in this chapter — would fill those idle cycles with queued requests from the pool of 50K concurrent users. Empirically, deployments at similar request rates see utilization climb from the 25–30% range to 65–75%; at the LinkedIn scale that translates to roughly a $600K/month reduction in compute cost for the same throughput, or a doubling of served request capacity at the same spend.
+
 - **Chunked prefill**: long prefills are split across multiple steps so they do not starve decoding sequences, bounding first-token latency.
 - **Preemption policy**: when GPU blocks are exhausted, vLLM either swaps the lowest-priority running sequence to CPU or recomputes from scratch (no swap) depending on `--preemption-mode`.
 - **Priority and FCFS**: default scheduling is First-Come-First-Served; custom priority functions can be plugged in for SLA-differentiated workloads.
@@ -1352,6 +1354,7 @@ $$\text{blocks} = \lceil 150/16 \rceil = 10 \text{ blocks} \times 256 \text{ KB}
 **Step 2 — Where it moves.**
 
 GPU HBM → CPU DRAM via PCIe. The block manager:
+
 1. Identifies all 10 physical blocks belonging to this sequence.
 2. Issues CUDA `cudaMemcpyDeviceToHost` for each block.
 3. Allocates equivalent CPU memory buffers.
@@ -1432,6 +1435,7 @@ If the scheduler greedily admits new prefills at the expense of running decode s
 **Step 1 — What can_allocate checks.**
 
 Before promoting a waiting sequence to running, the block manager verifies:
+
 - Enough free physical blocks exist to hold the sequence's first prefill chunk
 - The system is not in a "block-starved" state where admitting another sequence would trigger immediate preemption
 
@@ -1440,6 +1444,7 @@ Before promoting a waiting sequence to running, the block manager verifies:
 **Scenario:** Block pool has 2 free blocks. A new 512-token sequence is promoted without checking. Prefill begins. After 2 blocks (32 tokens), the scheduler runs `can_append_slot` → fails immediately. The sequence must be preempted.
 
 This creates a **preemption loop**:
+
 1. Sequence admitted without block check
 2. Partial prefill consumes available blocks
 3. Preemption triggered after a few tokens

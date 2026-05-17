@@ -89,6 +89,7 @@ longest matching prefix — exactly the tokens whose KV pairs can be reused.
 ```
 
 Each node in the tree stores:
+
 - The token IDs for this node's edge
 - A reference to the cached KV blocks for those tokens
 - A reference count (how many active requests are using this node)
@@ -393,6 +394,7 @@ Cache hit rates depend heavily on workload structure:
 **Worked Example 11.6.2 — System Prompt Economics**
 
 A customer support deployment with:
+
 - System prompt: 1,800 tokens
 - Average user query: 120 tokens
 - Average response: 250 tokens

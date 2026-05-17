@@ -1034,10 +1034,12 @@ VideoCore via Vulkan, and the remaining layers (for a 32-layer 7B model, layers
 
 The VideoCore VII is a modest GPU that shares the LPDDR4X memory bus with the
 CPU. At `-ngl 999`, all 32 layers run on the VideoCore:
+
 - The shared memory bus is fully saturated by GPU DRAM reads.
 - The CPU sits idle between layer completions.
 
 At `-ngl 20`, the workload is split:
+
 - The VideoCore handles the early layers.
 - The CPU handles later layers in parallel using its own L2/L3 cache hierarchy.
 - Both subsystems are active simultaneously, hiding memory latency.

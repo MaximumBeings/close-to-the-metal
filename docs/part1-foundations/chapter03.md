@@ -96,6 +96,7 @@ BPE is the dominant tokenizer algorithm for large language models (GPT-2, GPT-3,
 BPE starts with a character-level vocabulary and **iteratively merges the most frequent adjacent pair** of symbols. Each merge adds one new token to the vocabulary. After `K` merges, you have a vocabulary of size `|characters| + K`.
 
 This is elegant because:
+
 1. Frequent words become single tokens (efficient).
 2. Rare words are split into familiar subword fragments (no `<UNK>`).
 3. The vocabulary size is a tunable hyperparameter `K`.
@@ -815,6 +816,7 @@ Yu et al. (2022) ("Orca: A Distributed Serving System for Transformer-Based Gene
 > *The LLM scheduler doesn't need to treat a "request" as an atomic unit. It can treat each **decode step** as a schedulable unit.*
 
 At every decode iteration (every step of autoregressive generation), the scheduler can:
+
 1. Check if any sequences in the batch have hit EOS.
 2. **Immediately admit new requests** to fill those slots.
 3. Run the next decode step with the updated batch composition.
@@ -1505,6 +1507,7 @@ $$\text{Estimated tokens} = \frac{342 \text{ characters}}{4 \text{ chars/token}}
 **Step 3 — Understand the variance.**
 
 The actual token count depends on vocabulary coverage:
+
 - **Dense vocabulary coverage** (common English words): ~4 chars/token → 85 tokens
 - **Technical jargon or rare words**: ~3 chars/token → 114 tokens
 - **Code or symbols**: ~2 chars/token → 171 tokens
@@ -1514,6 +1517,7 @@ For a quick mental estimate, use 4 chars/token for English prose and 3 chars/tok
 **Step 4 — Why this matters in production.**
 
 Token count directly determines:
+
 - **KV cache memory** consumed (bytes per token × token count)
 - **Billing** (LLM API pricing is per token, not per character)
 - **Batch slot usage** (a 342-char prompt uses ~86 token slots, not 342)
@@ -1553,6 +1557,7 @@ With 2,045 tokens remaining, admit waiting requests from the queue:
 **Step 3 — Final batch composition.**
 
 The batch contains:
+
 - 3 decode sequences (3 tokens)
 - 3 new prefill sequences (1,536 tokens)
 - **Total: 6 sequences, 1,539 tokens**
@@ -1625,6 +1630,7 @@ A well-implemented static batch engine would also batch 16 sequences in one forw
 **Step 3 — The key difference (for clarity).**
 
 The 1-pass answer applies *per step* for both engines. The distinction is what happens **between steps**:
+
 - **Static batching:** holds the batch fixed until all sequences finish
 - **Continuous batching:** re-evaluates after every step, immediately evicting finished sequences and admitting new ones
 
@@ -1661,6 +1667,7 @@ The sequence is not truncated mid-token — it is terminated cleanly. The client
 **Step 4 — Production implications.**
 
 If users frequently hit `max_model_len`:
+
 - They receive incomplete responses
 - Long sequences occupy KV cache for many steps before being forcibly terminated
 - Use `max_tokens` in the API request to terminate early when output is complete

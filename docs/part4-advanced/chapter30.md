@@ -1415,6 +1415,7 @@ and serve different purposes:
 
 The two mechanisms are complementary.
 In a typical deployment:
+
 1. Semantic cache intercepts ~30% of requests before they reach vLLM.
 2. For requests that reach vLLM, prefix caching reuses KV blocks for the shared
    system prompt across all requests — saving prefill for the 70% that miss the
@@ -1504,6 +1505,7 @@ def cache_key_prefix(model: str) -> str:
 ```
 
 On deployment, either:
+
 1. Flush all old-version entries immediately (clean break, cold start)
 2. Let TTL drain old entries over days (gradual transition, mixed results briefly)
 
@@ -1623,8 +1625,10 @@ Yes: 0.988 > 0.97 -> **cache hit is served**. Query B receives the cached respon
 "What is the capital of France?" and "Name the capital city of France?" are semantically very similar (similarity ~0.988) and have the same correct answer (Paris). No problem here.
 
 However, consider:
+
 - "What is the population of France?" vs "What is the population of Germany?" 
 These might have similarity ~0.91 (both ask about European country populations) -- below 0.97, so no hit. But:
+
 - "What is France's GDP?" vs "What is France's GDP in euros?" might exceed 0.97 despite one expecting a number and the other expecting a currency-denominated number.
 
 **Core problem:** Semantic similarity captures topical relatedness, not logical equivalence. Two factually different questions about the same topic can have very high semantic similarity. Serving stale or wrong-entity answers for factually-sensitive queries can cause significant misinformation.
@@ -1641,6 +1645,7 @@ Every request goes to inference: 400 ms/request.
 
 **With semantic cache:**
 Every request goes through embedding model first: +12 ms overhead.
+
 - 45% hit rate: 12 ms total (cache hit, no inference)
 - 55% miss rate: 12 + 400 = 412 ms total
 

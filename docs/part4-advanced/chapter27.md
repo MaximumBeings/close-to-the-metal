@@ -747,6 +747,7 @@ to position k > j: the all-gather can be replaced by a more efficient ring proto
 Ring attention (Liu et al., 2023) exploits causality to eliminate the all-gather entirely.
 GPUs are arranged in a ring.
 In each step, each GPU:
+
 1. Computes attention for its current Q chunk against the local K/V chunk (online softmax, FlashAttention-style)
 2. Passes its K/V chunk clockwise to the next GPU
 3. Receives the next K/V chunk from the GPU counterclockwise
@@ -801,6 +802,7 @@ This dramatically reduces time-to-first-token (TTFT) for concurrent decode users
 while a long prefill is in flight.
 
 `--max-num-batched-tokens` sets both:
+
 - The maximum tokens per decode batch (controls batch throughput)
 - The chunk size for chunked prefill
 
@@ -1971,6 +1973,7 @@ SSD (2 TB) holds: the rest (overflow, archived blocks).
 
 **Eviction decisions (GPU -> CPU):**
 The GPU holds the most recently accessed KV blocks (those needed for the current decode step's attention window). When a decode step needs a block at position P:
+
 - If P is in GPU: cache hit, zero latency.
 - If P is in CPU: copy 128 KB from CPU DRAM to GPU HBM (~0.06 ms at 2 TB/s DRAM bandwidth).
 - If P is on SSD: prefetch from SSD (~500 ms) -- must be done speculatively BEFORE the decode step that needs it.

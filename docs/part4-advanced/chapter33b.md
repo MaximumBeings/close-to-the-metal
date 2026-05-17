@@ -506,6 +506,7 @@ Choosing an inference engine is a five-axis decision: hardware flexibility, stru
 **Break-even calculation:**
 
 Compilation cost (one-time):
+
 - TRT-LLM compilation for a 70B model on 8x H100: typically 4-8 hours of engineering + GPU time.
 - Assume 6 hours compilation on 8x H100: 6 hr x 8 GPUs x $28/hr = $1,344 engineering GPU cost.
 - Plus 16-40 hours of engineer time for integration, testing, and validation: ~$5,000-10,000 engineering cost at $200/hr.
@@ -514,6 +515,7 @@ Total one-time cost: ~$6,344-11,344. Use $8,000 as midpoint.
 
 **Ongoing throughput saving:**
 TRT-LLM delivers 2.4x throughput vs vLLM. To serve the same request volume:
+
 - With vLLM: need N pods at current capacity.
 - With TRT-LLM: need N/2.4 pods.
 - Savings per pod: $28 x 8 GPUs = $224/hr per 8-GPU node.

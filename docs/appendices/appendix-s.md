@@ -452,6 +452,7 @@ def promote_model(model_family: str, version: str, target_env: str) -> None:
 Downloading a 4 GB GGUF file on every CI run is slow and expensive. GitHub Actions' built-in cache action stores the file by its version tag, so a cache hit skips the download entirely. The cache key includes the version string, which means a new model version automatically busts the cache.
 
 ```yaml
+
 - name: Restore model cache
   id: model-cache
   uses: actions/cache@v4
@@ -2056,6 +2057,7 @@ With these rules, even repository admins cannot push directly to `main`.
 A dry-run validation step placed before the deployment step in the workflow:
 
 ```yaml
+
 - name: Validate Kubernetes manifests
   run: |
     kubectl apply --dry-run=client -f k8s/

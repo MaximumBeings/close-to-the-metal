@@ -639,6 +639,7 @@ CPU is still fine. CPU only becomes the bottleneck when the total KV I/O per ste
 **Moon-Cache (full context in memory):**
 
 Preferable when:
+
 1. **Multiple questions on the same document.** Moon-Cache loads the 1M-token KV cache once. Each subsequent question is a cheap decode-only operation (no re-prefill). Amortized across many questions, the loading cost becomes negligible.
 2. **Needle-in-a-haystack retrieval is complex.** Sparse attention with landmarks allows attending to any part of the document -- no retrieval error. RAG can miss the relevant passage if the retriever fails.
 3. **The document is a coherent narrative.** Long documents with cross-references, character arcs, or inter-chapter dependencies cannot be chunked for RAG without losing context.
@@ -646,6 +647,7 @@ Preferable when:
 **RAG:**
 
 Preferable when:
+
 1. **Single question per document ingestion.** If each document is queried once, paying 1M-token KV cost is wasteful. RAG retrieves only the 2-4K most relevant tokens, costing 100-200x less.
 2. **Large document collections.** 1M tokens = one long document. A corpus of 10,000 documents would require 1 PB of KV storage for Moon-Cache. RAG uses a compact vector index (~4 GB for 10,000 documents).
 3. **Latency constraints.** Moon-Cache with 128 GB of KV needs 640 ms to load from CPU DRAM at 200 GB/s. RAG retrieval completes in <100 ms.

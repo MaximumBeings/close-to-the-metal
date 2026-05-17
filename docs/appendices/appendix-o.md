@@ -664,6 +664,7 @@ Each SIMD operation processes 16 floats simultaneously.
 
 **Naive Python loop instruction count:**
 A Python loop over 4096 floats per token requires:
+
 - 4096 float reads (as Python object lookups)
 - 4096 float writes
 - 4096 loop iterations (each with: increment, compare, branch)

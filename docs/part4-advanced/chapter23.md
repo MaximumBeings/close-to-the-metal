@@ -466,6 +466,7 @@ EAGLE is currently one of the highest-quality self-speculation methods: it gets 
 ### 23.6.2  EAGLE-2 — Adaptive Context-Aware Tree
 
 EAGLE-2 (Li et al. 2024) extends EAGLE with:
+
 1. **Dynamic tree structure**: at each step, the tree expands based on confidence scores from the EAGLE head — high-confidence paths get deeper, uncertain paths get truncated early
 2. **Context sensitivity**: the draft head uses a sliding window of recent accepted features to improve prediction
 
@@ -1863,6 +1864,7 @@ Chapter 24 moves from general inference optimization into a specialized and incr
 - **Rejection sampling correctness**: the acceptance-rejection algorithm is lossless — the output distribution is provably identical to sampling from the target model directly.
 
 > **LinkedIn Scenario Update:** LinkedIn's workload generates structured outputs — job match explanations, profile summaries, search result annotations — that are highly repetitive and template-driven. This is exactly the high-acceptance-rate (α > 0.85) regime where speculative decoding provides maximum benefit. At 50K requests/hour with an average output of 200 tokens per request and a 2× speculative decoding speedup (α=0.85, K=4 with a small draft model), the cluster's effective decode throughput doubles without adding hardware. In cost terms: the same $1.2M/month GPU cluster now handles 100K req/hr, or the LinkedIn workload can be served for ~$600K/month — assuming the batch sizes stay below the ~8-sequence threshold where speculation efficiency begins to decline.
+
 - **Speedup formula**: expected speedup = (1 − α^{K+1}) / ((1 − α)(Kc + 1)), where α is the per-token acceptance rate and c is the draft/target compute ratio.
 - **n-gram draft**: for repetition-heavy workloads (code, structured text), the draft model is replaced by an n-gram lookup table; zero draft cost means any acceptance rate is profitable.
 - **Optimal K**: typically 4–8 draft tokens; beyond this, the lower acceptance rate on longer sequences cancels the parallelism gain.

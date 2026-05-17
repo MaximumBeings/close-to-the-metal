@@ -739,6 +739,7 @@ LLAMA.CPP SLIDING WINDOW KV EVICTION
 ### 11b.8.3 Performance implications
 
 The `seq_rm` + `seq_add` sequence involves:
+
 1. Zeroing out removed positions in the KV cache tensors.
 2. Copying remaining KV data forward in memory (or updating position
    embeddings via `seq_add`).
@@ -846,6 +847,7 @@ The scheduler attempts to allocate a new KV block for the next decode token but 
 **Safe Strategy 1 — Sliding window eviction (StreamingLLM / attention sink).**
 
 Keep the first 4 tokens (attention sinks) permanently. Evict the oldest non-sink tokens (e.g., tokens 5 through 4,097) to make room for new tokens. The model always has access to:
+
 - The attention sinks (first 4 tokens)
 - The most recent W tokens (configurable window size)
 
@@ -904,6 +906,7 @@ Use total accumulated score for **reference-heavy workloads** (code review, docu
 The last W tokens of the prompt are what the model "has in mind" just before generating output. The tokens they attend to from the earlier context are exactly the tokens needed for the next generation step. Using these W tokens as the observation window captures the model's current information needs.
 
 Compared to a random window (tokens 1,000–2,000 from a 50,000-token prompt), the last W tokens are:
+
 1. **Semantically relevant:** they contain the question, instruction, or continuation cue
 2. **Causally connected:** they causally depend on whatever context they attended to
 3. **Forward-looking:** their attention weights predict what future decode steps will need

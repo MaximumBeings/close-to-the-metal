@@ -625,6 +625,7 @@ vllm serve <model> \
   --enable-prefix-caching \
   --enable-chunked-prefill
 ```
+
 - Use case: models up to 13B, local development, single-user demo
 - Expected throughput: 500–2,000 tokens/s depending on model size
 
@@ -640,6 +641,7 @@ vllm serve <model> \
   --enable-chunked-prefill \
   --attention-backend flashinfer
 ```
+
 - Use case: 70B models on 8× H100
 - Expected throughput: 5,000–15,000 tokens/s
 
@@ -659,6 +661,7 @@ vllm serve <model> --role decode \
   --quantization fp8 \
   --max-num-seqs 512
 ```
+
 - Use case: 405B models, 10,000+ RPS
 - See Chapter 18 for full disaggregated setup
 

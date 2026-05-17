@@ -491,6 +491,7 @@ Captured graphs retain their tensor memory during replay. Capturing largest-firs
 CUDA graphs record all GPU operations, including memory addresses and tensor shapes. A graph is valid for replay only if the *exact same sequence of operations with the same shapes* is executed each time.
 
 A content-dependent attention mask means:
+
 - At step T₁: mask is [1,0,1,0,1] (based on token content)
 - At step T₂: mask is [0,1,1,0,0] (different tokens, different mask)
 
@@ -515,6 +516,7 @@ With chunk_size=C (fixed), every prefill step processes exactly C tokens. Fixed 
 **Step 2 — Additional graph pool required.**
 
 vLLM maintains two separate graph pools:
+
 1. **Decode graph pool:** batch sizes {1, 2, 4, 8, ..., max_num_seqs} — one graph per size
 2. **Prefill chunk graph:** one graph for batch size C (the fixed chunk size)
 

@@ -212,6 +212,7 @@ sequences.
 **Computational consequence:**
 
 For a sequence of length S:
+
 - Full attention layer: O(S²) per layer
 - Local attention layer (window W=1024): O(S × W) per layer = O(1024 × S)
 
@@ -954,6 +955,7 @@ A deployment currently using 8x A100 to run Llama 3.1 70B at scale could switch 
 
 **Where the advantage holds and where it doesn't:**
 Phi-4's performance advantage (if confirmed) likely holds on reasoning benchmarks and structured tasks (the focus of its synthetic training data). It may underperform Llama 3.1 70B on:
+
 - Open-domain knowledge breadth (70B sees more diverse training data)
 - Languages other than English (Phi-4 training is English-focused)
 - Very long contexts where Llama's rope scaling has been extensively tested

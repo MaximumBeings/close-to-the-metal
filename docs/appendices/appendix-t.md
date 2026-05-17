@@ -479,6 +479,7 @@ Do not run embedding and reranker models on the same GPU as your LLM. The
 memory contention and scheduling overhead degrade all three.
 
 Recommended allocation:
+
 - 1× H100/A100: LLM (70B or 8B)
 - 1× L4 (24GB) or T4 (16GB): embedding + reranker
 - The L4/T4 handles both embedding (BERT-scale) and reranker (BERT-scale)
@@ -500,6 +501,7 @@ BGE-M3 on A100 at batch=1: ~25ms per embedding = 40 embeddings/s.
 Throughput needed: 167/s. Gap: 167/40 = 4.2× shortfall.
 
 Fix: use dynamic batching. With a 20ms batching window:
+
 - Requests arriving in 20ms window: 167 × 0.020 = ~3.3 requests
 - Batch those together: 1 forward pass instead of 3.3
 - Effective throughput: 1000/ms × 1/20ms × batch × embeddings_per_batch
@@ -509,14 +511,17 @@ Throughput: 8 / 0.045s = 178 embeddings/s > 167 needed ✓
 P95 latency: 20ms (queue) + 45ms (inference) = 65ms — slightly over budget.
 
 Optimization: reduce batching window to 10ms:
+
 - Batch=4: ~28ms inference, 10ms queue = 38ms P95 ✓
 - Throughput: 4 / 0.028 = 143/s — still short.
 
 Use async requests with batch=8 and 2× parallel forward passes:
+
 - 2 batches of 8 in parallel: 16/0.045s = 355/s > 167 ✓
 - P95: 20ms queue + 45ms = 65ms — 30% over budget.
 
 Final: FP16 → INT8 quantization reduces BGE-M3 inference to ~28ms:
+
 - P95: 20ms + 28ms = 48ms ✓ Throughput: 8/0.028 = 286/s ✓
 
 ```bash
@@ -911,6 +916,7 @@ e_masked = Σᵢ (mask[i] × hᵢ) / denom
 ```
 
 Step by step:
+
 1. Multiply each token embedding by its mask bit — PAD embeddings become the
    zero vector.
 2. Sum the masked embeddings.
@@ -992,6 +998,7 @@ minilm_max_N = 4200 × 0.050 = 210 candidates
 ```
 
 Within the 50 ms budget:
+
 - `bge-reranker-large` can rerank at most **26 candidates**.
 - `ms-marco-MiniLM-L-6-v2` can rerank at most **210 candidates**.
 

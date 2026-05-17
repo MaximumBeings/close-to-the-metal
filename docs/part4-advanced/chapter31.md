@@ -1376,6 +1376,7 @@ The cascade costs **45% of always using 70B** -- a 55% cost reduction. If 70B co
 **Quality impact:**
 
 Overall quality score = weighted average of:
+
 - Correctly routed to 7B (60% - 8% misclassified = 52% correctly simple): full quality, score = 1.0
 - Correctly routed to 70B (40% - 8% misclassified = 32% correctly complex): full quality, score = 1.0
 - Misclassified to 7B (8% of total -- these were complex, sent to 7B): quality = 1.0 - 0.20 = 0.80

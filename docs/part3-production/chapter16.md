@@ -851,6 +851,7 @@ histogram_quantile(
 
 **Alert rule in YAML:**
 ```yaml
+
 - alert: HighP99TTFT
   expr: |
     histogram_quantile(0.99,
@@ -881,6 +882,7 @@ The `for: 2m` clause prevents alerting on momentary spikes (one large request). 
 The decode phase takes 4,800 ms for 120 tokens = 40 ms/token ITL.
 
 For context: on an A100 with a typical 7–13B model, 40 ms ITL at batch=1 is 2–4× slower than expected (expected ~10–20 ms). This suggests either:
+
 - A **large batch** inflating decode time per token (the request waited 450 ms in queue because the batch was full → decode step is now processing many concurrent sequences → ITL for this request is high due to context-switching overhead), or
 - A **memory bandwidth bottleneck** from a very large model with insufficient HBM.
 

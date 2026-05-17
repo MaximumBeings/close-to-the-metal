@@ -90,6 +90,7 @@ Verification with finite difference (h=0.0001):
 ### A3.2.2 The Chain Rule as a Data Flow Graph
 
 Every scalar chain rule computation is a directed graph where:
+
 - Nodes are intermediate values
 - Edges carry local derivatives
 - Backward pass: multiply all edge weights along a path from L back to the input

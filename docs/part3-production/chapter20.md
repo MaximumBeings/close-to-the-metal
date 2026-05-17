@@ -665,6 +665,7 @@ Per minute: 0.15/60 = 0.0025 interruptions/minute.
 
 **Step 2 — Requests affected per interruption.**
 When an interruption occurs, in-flight requests on the pod must retry. Average time to retry on a new pod:
+
 - Kubernetes reschedule + pod cold start ≈ 120 s (model load)
 - This exceeds the 2 s retry deadline.
 So affected requests fail the 2 s deadline.

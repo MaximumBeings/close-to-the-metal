@@ -435,6 +435,7 @@ c = __builtin_amdgcn_mfma_f32_16x16x16f16(a, b, c, 0, 0, 0);
 ```
 
 For production use, avoid raw MFMA builtins. Use:
+
 - **rocBLAS** for standard GEMM (equivalent to cuBLAS)
 - **hipBLASLt** for LT (Cublaslt) equivalent — tensor-op GEMM with epilogue fusion
 - **CK (Composable Kernel)** — AMD's CUTLASS equivalent for custom fused kernels
@@ -964,12 +965,14 @@ This automatically translates: `cudaMalloc` -> `hipMalloc`, `__global__` stays, 
 
 **Step 2 -- Replace CUDA intrinsics with HIP equivalents:**
 Automated hipify misses or incorrectly translates warp-level primitives:
+
 - `__shfl_down_sync(mask, val, delta)` -> `__shfl_down(val, delta)` (HIP drops the mask parameter)
 - `__ballot_sync(mask, pred)` -> `__ballot(pred)`
 - `cp.async` (async global-to-shared copies) -> no direct HIP equivalent; use `__builtin_nontemporal_load` or manual pipelining.
 
 **Step 3 -- Retune tile sizes for MFMA (most manual step):**
 The CUDA kernel was tuned for NVIDIA's 16x16x16 WMMA tiles on H100. AMD's MFMA uses 32x32x8 tiles. Kernel parameters (`BLOCK_M`, `BLOCK_N`, `BLOCK_K`, number of warps) must be retuned from scratch for optimal MI300X performance. This requires:
+
 - Understanding AMD's wavefront execution model (64 threads vs NVIDIA's 32)
 - Adjusting shared memory layout for MFMA's different register mapping
 - Re-running profiling with `rocprof` or Omniperf to find bottlenecks

@@ -832,6 +832,7 @@ Step 6: Completion and block recycling
 **Why adding more GPU workers (tensor parallelism) doesn't solve the scheduler bottleneck in V0:**
 
 In V0 vLLM, the scheduler runs in the **main Python process** on the CPU. It is responsible for:
+
 1. Receiving new requests from the API server.
 2. Allocating KV blocks from the block manager.
 3. Building `SequenceGroupMetadata` Python objects for each request in the batch.
@@ -851,6 +852,7 @@ vLLM's block size is fixed (e.g., 16 tokens). A block is hashed once all 16 toke
 
 **Condition that prevents prefix sharing despite nearly-identical prompts:**
 If two prompts differ at token position 14 of the first block (block size=16):
+
 - Prompt A: tokens [t1, t2, ..., t14, X, t16] -> block hash H_A
 - Prompt B: tokens [t1, t2, ..., t14, Y, t16] -> block hash H_B (H_A != H_B)
 

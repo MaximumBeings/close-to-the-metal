@@ -965,6 +965,7 @@ ggml represents computation as a directed acyclic graph (DAG) of tensor operatio
 **Step 2 — Rebuild cost.**
 
 Rebuilding the ggml graph for a 32-layer LLaMA model involves:
+
 - Allocating ~200–400 graph nodes (each is a small struct)
 - Linking nodes in topological order
 - Allocating workspace memory for new tensor shapes

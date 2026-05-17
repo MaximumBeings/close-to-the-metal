@@ -138,6 +138,7 @@ Meta checkpoints:          consolidated.00.pth
 ```
 
 SafeTensors is preferred because it:
+
 1. Does not execute arbitrary Python (unlike `.bin` which is `pickle`).
 2. Supports memory-mapped loading for zero-copy weight access.
 3. Has a header that describes tensor shapes before loading data.
@@ -1269,6 +1270,7 @@ vLLM captures one CUDA graph for each of N = 256 distinct batch sizes: {1, 2, 4,
 **Step 2 — Why each capture costs O(1) relative to batch size.**
 
 Capturing a CUDA graph at batch size B involves:
+
 1. Run one warm-up forward pass at batch size B → O(B) compute
 2. The *capture itself* (recording GPU operations) takes time proportional to the *number of distinct kernel calls*, not the data size processed
 
@@ -1342,6 +1344,7 @@ llama.cpp allocates a single KV buffer (sized at startup via `n_ctx`) — much s
 **Step 1 — What the warm-up pass does.**
 
 Before opening for traffic, vLLM runs a synthetic forward pass with:
+
 - The maximum batch size configured (`max_num_seqs`)
 - The maximum sequence length (`max_model_len`)
 - All token positions filled with dummy values

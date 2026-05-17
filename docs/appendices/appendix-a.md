@@ -1067,6 +1067,7 @@ reduction = 32 / 4 = 8x
 ```
 
 For the model in Q1 (n_layers=32, d_head=128, BF16), this reduces KV cache from:
+
 - MHA: 2 x 32 x 32 x 128 x 2 = 524,288 bytes = 512 KB/token
 - GQA (n_kv=4): 131,072 bytes = 128 KB/token (4x fewer KV heads shown above)
 

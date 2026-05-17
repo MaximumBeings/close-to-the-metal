@@ -181,6 +181,7 @@ The right SLOs come from your use case, not from defaults:
 ```yaml
 # prometheus-slo-rules.yaml
 groups:
+
 - name: inference_slo
   rules:
   # TTFT p99 budget burn
@@ -995,6 +996,7 @@ The new model is expected to be net-positive (+2.2%) on the production traffic m
 
 **Step 3 -- Measurement:**
 Track separately:
+
 - Coding requests (60% of traffic): HumanEval-style task completion rate, code execution success rate, user thumbs up/down on code responses.
 - General knowledge requests (40% of traffic): factual accuracy (can spot-check vs ground truth), user satisfaction signals.
 

@@ -234,6 +234,7 @@ token), but the rest of the batch is protected.
 decode and prefill fairly.  In practice, **decode tokens always have priority**.
 
 The scheduler allocates the token budget as follows:
+
 1. Count the decode tokens needed: `B_decode = running_seqs × 1`.
 2. Remaining budget: `B_prefill = max_num_batched_tokens - B_decode`.
 3. Take the next `B_prefill` tokens from the front of the current prefill queue.
@@ -890,6 +891,7 @@ it interacts with the copy-on-write KV cache blocks from Chapter 6.
 - **Prompt caching (prefix caching)**: if the leading tokens of a new request match a previously cached sequence, vLLM skips the prefill FLOPs for those tokens entirely.
 
 > **LinkedIn Scenario Update:** LinkedIn's product uses standardized system prompts — job recommendation context, profile summaries, search filters — that are nearly identical across users. At a conservative 70% system-prompt reuse rate across 50K concurrent users, prefix caching eliminates 70% of prefill FLOPs for the majority of requests. A typical 500-token system prompt prefill that takes 180ms at 28% GPU utilization drops to ~54ms after caching (the remaining 30% unique tokens still run). This reduction in TTFT is directly visible to users as faster "first word" latency, and the freed prefill compute capacity absorbs more requests, pushing effective throughput up by roughly 2.3× without any hardware change.
+
 - **Radix tree for cache lookup**: vLLM stores cached block sequences in a radix tree keyed by token IDs; longest-prefix matching is O(prefix length) lookup time.
 - **KV transfer in disaggregated prefill**: the prefill result (KV tensors) must be moved from the prefill pod to the decode pod over InfiniBand or NVLink fabric.
 - **Chunked prefill**: splits a long prompt across multiple scheduler steps, interleaving prefill chunks with decode steps to keep TTFT and ITL both bounded.
@@ -963,6 +965,7 @@ $$\text{unique blocks} = 512 / 16 = 32 \text{ blocks} \implies \textbf{512 token
 **Step 3 — What "from scratch" means.**
 
 For each of the 512 new tokens:
+
 - Compute Q, K, V projections using the full attention to all 2,048 + preceding unique tokens
 - This is the *incremental* cost of adding 512 tokens on top of the cached 2,048
 
@@ -1006,6 +1009,7 @@ The `system_prompt_node` is an *internal* node shared by users A and B. `user_A_
 **Step 2 — Why evicting internal nodes is wrong.**
 
 If `system_prompt_node` were evicted:
+
 - Both user A and user B would lose their prefix validity
 - Their KV caches would need to be recomputed from scratch
 - This is O(shared_prefix_length) computation wasted for *both* users — far more expensive than evicting one leaf
@@ -1013,6 +1017,7 @@ If `system_prompt_node` were evicted:
 **Step 3 — Why evicting leaves is safe.**
 
 A leaf node has no children — no other sequence depends on its KV data. Evicting a leaf:
+
 - Frees its GPU blocks
 - Only affects the single sequence that used that specific prefix
 - Does not invalidate any other sequence's cache
@@ -1033,6 +1038,7 @@ $$= 32 \times 2 \times 32 \times 128 \times 4{,}096$$
 $$= 32 \times 2 \times 16{,}777{,}216 \div 2 \times 2$$
 
 Let me compute step by step:
+
 - Per layer per token: 2 × 32 × 128 × 2 = 16,384 bytes
 - All layers for 1 token: 32 × 16,384 = 524,288 bytes = 512 KB
 - For 2,048 tokens: 2,048 × 524,288 = **1,073,741,824 bytes = 1 GB**

@@ -1188,6 +1188,7 @@ libtorch is appropriate when you need fine-grained control over memory layout, k
 
 **Scenario 2 — Real-time latency constraint under 1ms:**
 Python has a GIL (Global Interpreter Lock) and interpreter overhead that makes it impossible to guarantee sub-millisecond response times. A C++ application using libtorch can:
+
 - Pre-allocate all tensors at startup (zero allocation latency on hot path)
 - Bypass Python garbage collection pauses
 - Use lock-free queues for request ingestion

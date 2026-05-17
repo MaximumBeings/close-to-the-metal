@@ -220,6 +220,7 @@ using MainloopConfig = cutlass::gemm::collective::CollectiveMma<
 ```
 
 The tag `MainloopSm90TmaGmmaWarpSpecializedCooperative` selects:
+
 - `Sm90` — H100 (SM 9.0)
 - `TmaGmma` — use TMA for loading A, wgmma for MMA
 - `WarpSpecialized` — producer warp (runs TMA) ≠ consumer warp (runs MMA)
@@ -695,6 +696,7 @@ offset = 3 * 1 + 5 * 4 = 3 + 20 = 23
 
 **Verify with column-major indexing:**
 Column-major stores elements column by column. For a 4x8 matrix stored column-major:
+
 - Column 0: elements 0-3 at offsets 0,1,2,3
 - Column 1: elements at offsets 4,5,6,7
 - Column j, row i: offset = j * 4 + i = col * num_rows + row
@@ -749,6 +751,7 @@ BF16_size = 8,192 x 28,672 x 2 bytes = 469,762,048 bytes = 448 MB
 
 **Practical compressed storage:**
 NVIDIA's 2:4 sparse format stores 2 values + 4-bit index metadata per 4-element group:
+
 - 2 FP8 values = 2 bytes
 - 4-bit index for each of 2 non-zeros = 1 byte total
 - Per 4 elements: 3 bytes compressed vs 8 bytes (4 x FP8 uncompressed) = 3/4 byte per element

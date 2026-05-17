@@ -23,6 +23,7 @@ After Georgi Gerganov moved to quantized formats, the project evolved through se
 incompatible generations (GGML, GGMF, GGJT) before settling on GGUF in August 2023.
 
 GGUF (GGML Universal Format) was designed with three goals:
+
 1. **Self-describing** — all metadata (architecture, tokenizer, hyperparameters) live in
    the file; no external config JSON needed.
 2. **Memory-mappable** — tensor data is page-aligned so `mmap()` can serve it directly
@@ -597,6 +598,7 @@ to produce valid output within a specified grammar.
 ### 28.3.1  How It Works
 
 At each decode step, after computing logits, the grammar engine:
+
 1. Maintains the current **parse state** — a set of parser stacks encoding which grammar
    productions are still reachable.
 2. Computes a **logit bias mask**: for every token in the vocabulary, determines whether
@@ -842,6 +844,7 @@ increases binary size 10× and compile time proportionally.
 ### 28.5.3  Backend Selection at Runtime
 
 When built with multiple backends, llama.cpp selects based on availability:
+
 1. CUDA (if `GGML_CUDA_DEVICE` env var is set or any NVIDIA GPU is detected)
 2. Metal (on macOS with Apple GPU)
 3. CPU (always available as fallback)
@@ -858,6 +861,7 @@ GGML_METAL_DEVICE=0 llama-server ...      # macOS: select Metal device
 When llama.cpp loads a GGUF file, the default path is `mmap`:
 
 ```
+
 1. open() the GGUF file
 2. Parse header (KV store + tensor info) into CPU memory
 3. mmap() the tensor data region
@@ -2269,12 +2273,14 @@ Total:                  ~9.0 GB
 
 After generating `"age":`, the JSON grammar expects one of:
 ```
+
 - A number literal: digits [0-9], optionally preceded by - (negative)
 - null
 - whitespace followed by any of the above
 ```
 
 So the valid next tokens are those whose text begins with:
+
 - `0`, `1`, `2`, ... `9` (digits)
 - `-` (negative number)
 - `null` (literal)
@@ -2296,6 +2302,7 @@ For a typical 32K vocabulary, roughly 100-500 tokens start with digits or null -
 
 **Discrete GPU (40 GB VRAM):**
 GPU VRAM is a **fixed, isolated** memory pool. If the model requires 40 GB and the GPU has exactly 40 GB, there is zero space for:
+
 - The KV cache (even 1 token of context needs space)
 - CUDA context (~1 GB)
 - Activation tensors during forward pass (~2-4 GB)
@@ -2304,6 +2311,7 @@ Total required = 40 + 1 + 3 + 0.5 = 44.5 GB > 40 GB available --> OOM at startup
 
 **Apple Silicon (unified memory):**
 The M3 Max uses a **unified memory architecture** where CPU and GPU share the same 128 GB physical memory pool. There is no separate VRAM limit. The GPU can address any part of the 128 GB:
+
 - Model weights: 40 GB
 - KV cache: 4 GB (for 32K context)
 - System/OS: 8 GB
@@ -2325,6 +2333,7 @@ GPU 1 load = 0.25 x 32 GB = 8 GB
 
 **Is it optimal?**
 GPU 0 has 24 GB and is assigned exactly 24 GB of model weights -- **zero headroom** for:
+
 - KV cache (critical for inference)
 - Activation tensors during forward pass (~2-4 GB peak)
 - CUDA/Metal context
@@ -2349,11 +2358,13 @@ Interestingly, the 3:1 split is proportionally correct for the GPU memory sizes.
 **Using same model for generation and embedding:**
 
 Pros:
+
 - Single model in memory (no additional 500 MB-4 GB for a dedicated embedder)
 - Consistent tokenization (same vocabulary for both retrieval and generation)
 - Simple deployment (one binary, one process)
 
 Cons:
+
 - Decoder-only LLMs are not optimized for embedding. Their last-layer representations encode "what token comes next" -- a causal prediction objective -- not "how semantically similar are these passages" -- a contrastive objective. Embedding quality for retrieval is significantly worse than dedicated bi-encoder models (BGE, E5, Nomic-embed).
 - Mean pooling of causal LLM states gives asymmetric embeddings: the last token has attended to all prior tokens, while the first token has attended only to itself. This asymmetry makes cosine similarity unreliable.
 - Embedding via a 70B LLM is 100-1000x slower than a dedicated 137M-560M parameter embedding model.

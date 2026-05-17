@@ -574,6 +574,7 @@ LLaMA-3's tokenizer has 128,256 tokens and reasonable multilingual coverage, but
 The goal is to minimize average cost while maintaining quality.
 
 Cost estimates (relative to 72B = 1.0):
+
 - 7B: ~0.10
 - 14B: ~0.19
 - 32B: ~0.44
@@ -582,6 +583,7 @@ Cost estimates (relative to 72B = 1.0):
 **Best two-model cascade: Qwen2.5-7B (first) + Qwen2.5-72B (escalation):**
 
 Routing:
+
 - Simple (60%): 7B only -> cost = 0.10 per request
 - Medium (30%): 7B initial (low confidence) -> escalate to 72B -> cost = 0.10 + 1.00 = 1.10
 - Complex (10%): always escalate to 72B -> cost = 0.10 + 1.00 = 1.10

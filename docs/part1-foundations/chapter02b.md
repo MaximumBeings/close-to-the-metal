@@ -207,6 +207,7 @@ Check register usage with: `nvcc --ptxas-options=-v mykernel.cu`
 ### What Lives in Registers for LLM Kernels
 
 In a tiled GEMM kernel (the backbone of every weight matrix multiply in a transformer):
+
 - The accumulator for the output tile: `float acc[TILE_M][TILE_N]` — this is the most register-pressure-intensive part
 - Loop counters, pointer arithmetic, scale factors
 - Loaded fragments of A and B tiles (before they go to SMEM or come from SMEM)

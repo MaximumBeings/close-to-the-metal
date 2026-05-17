@@ -159,6 +159,7 @@ int global_thread_id = blockIdx.x * blockDim.x + threadIdx.x;
 ### L.3.2 Choosing Block and Grid Dimensions
 
 `[FOUNDATIONAL]` Two rules:
+
 1. **Block size must be a multiple of 32** (warp size). Non-multiples waste execution slots. Common choices: 128, 256, 512.
 2. **Grid size = ceil(N / blockSize)**. This ensures every element gets a thread.
 
@@ -326,6 +327,7 @@ __global__ void my_kernel(float* d_in, float* d_out, int n) {
 ```
 
 `[FOUNDATIONAL]` **The shared memory pattern:**
+
 1. Load a tile from global memory → shared memory (one global read per element)
 2. `__syncthreads()` to ensure all threads have loaded
 3. Process the tile from shared memory (many fast reads)
@@ -453,6 +455,7 @@ If multiple threads in a warp access the **same bank** (but different addresses 
 ```
 
 Occupancy is limited by:
+
 1. **Registers per thread**: more registers → fewer threads per SM
 2. **Shared memory per block**: more smem → fewer blocks per SM
 3. **Block size**: must divide evenly into warp-sized groups

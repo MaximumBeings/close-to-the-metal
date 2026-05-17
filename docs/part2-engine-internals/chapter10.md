@@ -361,6 +361,7 @@ Bits per weight: (144 × 8) / 256 = 4.5 bpw
 ```
 
 The two-level structure gives better accuracy than Q4_0 because:
+
 1. The 6-bit per-block scales are quantised more accurately (relative to a
    super-scale) than a raw FP16 scale applied to each block independently.
 2. The per-block minimum allows asymmetric representation without storing
@@ -980,6 +981,7 @@ Key takeaways:
 - **Post-training quantization (PTQ)**: weights are quantised after training with no gradient updates; AWQ, GPTQ, and FP8 are the dominant PTQ methods for serving.
 
 > **LinkedIn Scenario Update:** At the LinkedIn scale, serving a 70B BF16 model requires 2 A100-80 GPUs per replica purely for weight storage. Switching to FP8 — the H100-native format described in this chapter — halves the weight memory footprint to ~70 GB, fitting the 70B model on a single H100-80 with ~10 GB to spare for KV cache. For the 50K-user workload running on a multi-replica cluster, FP8 effectively doubles the number of users each GPU can serve: the same $1.2M/month cluster now supports ~100K concurrent users, or the same 50K users at half the cost (~$600K/month).
+
 - **AWQ (Activation-aware Weight quantization)**: protects the 1% of channels with highest activation magnitude from precision loss by rescaling before quantization.
 - **GPTQ**: layer-by-layer second-order optimization minimizes reconstruction error; slower to run but achieves lower perplexity than naive round-to-nearest.
 - **FP8 (E4M3)**: the native precision of H100/H200 Tensor Cores; supported natively by vLLM for both weights and activations, achieving ~2× throughput over BF16.
@@ -1053,6 +1055,7 @@ $$\alpha = \left(\frac{40}{1}\right)^{0.5} = \sqrt{40} \approx \textbf{6.32}$$
 **Step 3 — How this helps.**
 
 Before quantization, AWQ multiplies the salient weight channel by α = 6.32. This means:
+
 - Original weight value: say w = 0.05 (small value in a salient channel)
 - Scaled weight: w' = 0.05 × 6.32 = 0.316
 
@@ -1081,6 +1084,7 @@ Maximum E4M3 value: 1.875 × 128 = **240** (some implementations cap at **448** 
 FP16 values with |x| > 240 (or 448 depending on implementation) **cannot be represented** in FP8 E4M3 and would need to be clipped or saturated.
 
 For LLM activations that occasionally spike to 500–1000 (outlier activations), naive FP8 casting causes catastrophic quantization error. Production solutions:
+
 - **Per-tensor scaling:** divide by a calibration scale factor before casting
 - **Static per-channel scaling:** use per-channel scales measured during calibration
 - **Dynamic scaling:** compute per-batch scaling at inference time (used in H100 FP8 kernels)
@@ -1100,6 +1104,7 @@ If the matrix has one outlier at 100 and 99% of values near 0.01, the scale is d
 **Step 2 — How blocking helps.**
 
 With blocks of 32, each block gets its own scale:
+
 - Block containing the outlier: scale = 100/7 ≈ 14.3 → 4-bit codes resolve ±7 steps
 - Blocks with small values (max = 0.02): scale = 0.02/7 ≈ 0.0029 → same 4 bits now resolve ±0.02 range
 
@@ -1108,6 +1113,7 @@ Small values are quantized with 1000× better resolution in their local block. T
 **Step 3 — Quantitative improvement.**
 
 For a weight matrix where 1% of values are outliers at 100× normal magnitude:
+
 - Global scale: mean quantization error for normal weights ≈ 14.3 / 2 ≈ 7.15 (per step)
 - Block scale (block size 32): mean error for normal weights ≈ 0.0029 / 2 ≈ 0.0015
 
