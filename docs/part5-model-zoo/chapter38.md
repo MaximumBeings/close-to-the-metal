@@ -89,6 +89,11 @@ Thirty-seven chapters later, we have every tool needed to reduce this to $108,00
 
 ## 38.3 Cost Arithmetic — Tracing Every Saving
 
+!!! note "What this example measures"
+    The baseline below is **OpenAI GPT-4 API spend** — a managed API billed per token with no hardware to operate. Layer 1 (traffic routing to self-hosted models) is therefore the largest single lever, and it represents a **build-vs-buy decision**, not an inference optimization. Teams that move from a managed API to a self-hosted GPU cluster will see the bulk of the savings in Layer 1 regardless of any optimization technique.
+
+    If your team is **already self-hosted**, skip Layer 1 and start from Worked Example 38.2 below, which traces the same optimization stack from a self-hosted GPU baseline and shows the 2–5× reduction that inference engineering techniques alone deliver.
+
 ```
 WORKED EXAMPLE 38.1 — Full Cost Breakdown (Monthly)
 ─────────────────────────────────────────────────────────────────────
@@ -147,6 +152,89 @@ with 60% of theoretical gains realized:
   $1,200,000 → $108,000/month (11.1× reduction)
 ─────────────────────────────────────────────────────────────────────
 ```
+
+---
+
+### 38.3a Worked Example 38.2 — Already Self-Hosted Baseline
+
+This example applies only the **pure inference optimization layers** (2–7 from §38.3) to a team that is already running their own GPU cluster. No API-to-self-hosted transition is assumed.
+
+```
+WORKED EXAMPLE 38.2 — Self-Hosted Optimization Stack (Monthly)
+─────────────────────────────────────────────────────────────────────
+Baseline: Self-hosted GPU cluster, NOT a managed API.
+  Hardware:  40× NVIDIA A100 80GB SXM4
+  Rate:      $3.20/GPU-hr (on-demand cloud, e.g. Lambda, CoreWeave)
+  Hours/mo:  730 hrs
+  Gross:     40 × $3.20 × 730 = $93,440/month
+  Utilization: 28% average (same traffic profile as §38.3)
+  Effective GPU-hrs of useful compute: 28% of purchased
+  Operations overhead (15%): +$14,016
+  BASELINE TOTAL: $107,456/month   (~$107K, pays for a lot of idle GPU)
+
+Layer 2: Semantic Cache (Chapter 30)
+  FAQ traffic: 60% of requests; 73% cache hit rate on FAQs
+  Requests served from cache: 0.60 × 0.73 = 43.8%
+  Cache infrastructure cost: ~$200/month (Redis cluster), negligible
+  GPU hours saved: 43.8% of FAQ compute
+  → After cache: $93,440 × (1 - 0.438 × 0.60) = $93,440 × 0.737 = $68,865
+
+Layer 3: Quantization INT4/FP8 (Chapter 10)
+  FP8 inference: ~2× throughput on H100/A100 → need half the GPU-hours
+  for the same token output. 8B and 72B pools both quantized.
+  Conservative realization (not all layers quantizable cleanly): 30% saving
+  → After quantization: $68,865 × 0.70 = $48,206
+
+Layer 4: Prefix Caching / RadixAttention (Chapter 11)
+  RAG system prompts repeat across 40% of RAG queries (30% of traffic)
+  Cached token share: 0.30 × 0.40 × 0.60 = 7.2% of all tokens free
+  Plus shared system prompts across FAQ: additional ~5% saving
+  Total: ~12% of compute avoided
+  → After prefix cache: $48,206 × 0.88 = $42,421
+
+Layer 5: Speculative Decoding (Chapter 23)
+  Applied to agentic pool (10% of traffic, long output sequences)
+  7B draft + 70B target: 2.5× decode speedup on agentic workload
+  Decode is ~80% of agentic compute cost
+  Saving: 0.10 × 0.80 × (1 - 1/2.5) = 4.8% of total
+  → After spec decoding: $42,421 × 0.952 = $40,385
+
+Layer 6: Disaggregated Prefill / Decode (Chapter 18)
+  RAG queries (30% of traffic) have long prompts; separation improves
+  GPU utilization on both prefill and decode pools
+  Observed improvement: ~18% better GPU utilization on this traffic slice
+  → After disaggregation: $40,385 × 0.82 = $33,116
+
+Layer 7: Auto-scaling + KubeRay (Chapter 19)
+  Off-peak 12 hrs/day at 30% load → scale to 30% of peak GPU count
+  Peak hours (12 hrs): 40 GPUs. Off-peak (12 hrs): 12 GPUs.
+  Daily GPU-hrs: 40×12 + 12×12 = 480 + 144 = 624 (vs 40×24 = 960 baseline)
+  Reduction factor: 624/960 = 0.65
+  → After auto-scaling: $33,116 × 0.65 = $21,525
+
+Operations overhead (15%): $21,525 × 0.15 = $3,229
+THEORETICAL TOTAL: $21,525 + $3,229 = $24,754
+
+Conservative estimate (60% of theoretical gains realized):
+  Theoretical saving: $107,456 - $24,754 = $82,702
+  Realized saving:    $82,702 × 0.60   = $49,621
+  Conservative final: $107,456 - $49,621 = $57,835
+
+  SELF-HOSTED OPTIMIZATION RESULT: ~$25K–$58K/month
+  Reduction from self-hosted baseline: 1.9× – 4.3×
+─────────────────────────────────────────────────────────────────────
+```
+
+**Reading the two examples together:**
+
+| Path | Baseline | Optimized | Reduction |
+|---|---|---|---|
+| GPT-4 API → self-hosted + optimized | $1,200,000 | ~$108,000 | 11× |
+| Already self-hosted → optimized | $107,456 | ~$25K–$58K | 2–4× |
+| Layer 1 alone (API switch, no optimization) | $1,200,000 | ~$112,800 | 10.6× |
+| Layers 2–7 alone (inference engineering) | $107,456 | ~$25K–$58K | 2–4× |
+
+The 11× headline is real, but roughly 10.6× of it comes from one decision: moving off the managed API. The remaining 0.4–4× comes from the inference engineering techniques this book teaches. Both matter; they are just different kinds of work.
 
 ---
 

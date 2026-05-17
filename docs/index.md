@@ -44,7 +44,7 @@ hide:
 <!-- ── CASE STUDY BANNER ─────────────────────────────────────── -->
 <div class="case-banner">
   <div class="case-text">
-    <strong>The Running Case Study</strong> — A service at 50,000 concurrent users, costing <span class="case-before">$1.2M/month</span> at 28% GPU utilization. By Chapter 38, systematic application of the techniques in this book reduces the bill to <span class="case-after">$108K/month</span>. No new hardware. No new model.
+    <strong>The Running Case Study</strong> — A team spending <span class="case-before">$1.2M/month</span> on the OpenAI GPT-4 API migrates to self-hosted open-source models and applies the techniques in this book systematically: model routing, semantic caching, quantization, prefix caching, speculative decoding, and auto-scaling. By Chapter 38, the combined effect reduces their GPU cluster bill to <span class="case-after">$108K/month</span> — an 11× reduction. The largest single lever is the API-to-self-hosted transition (Chapter 31). For teams already self-hosted, Chapters 10, 19, 23, and 30 alone deliver a 2–5× reduction from the current spend.
   </div>
   <div class="case-numbers">
     <div class="cn-before">$1.2M<small>/mo</small></div>
@@ -153,7 +153,7 @@ hide:
         <a href="part5-model-zoo/chapter35.html" class="toc-entry"><span class="toc-num">35</span><span class="toc-etitle">Qwen — Multilingual and Long-Context</span></a>
         <a href="part5-model-zoo/chapter36.html" class="toc-entry"><span class="toc-num">36</span><span class="toc-etitle">Kimi — Long-Context and Moon-Cache</span></a>
         <a href="part5-model-zoo/chapter37.html" class="toc-entry"><span class="toc-num">37</span><span class="toc-etitle">Nemotron and TensorRT-LLM</span></a>
-        <a href="part5-model-zoo/chapter38.html" class="toc-entry"><span class="toc-num">38</span><span class="toc-etitle">The Production Synthesis — $1.2M → $108K</span></a>
+        <a href="part5-model-zoo/chapter38.html" class="toc-entry"><span class="toc-num">38</span><span class="toc-etitle">The Production Synthesis — API to Self-Hosted: $1.2M → $108K (11×)</span></a>
         <a href="part5-model-zoo/chapter39.html" class="toc-entry"><span class="toc-num">39</span><span class="toc-etitle">Evaluation and Regression Testing</span></a>
         <a href="part5-model-zoo/chapter40.html" class="toc-entry"><span class="toc-num">40</span><span class="toc-etitle">The vLLM V1 Architecture — Three-Process Design</span></a>
         <a href="part5-model-zoo/chapter41.html" class="toc-entry"><span class="toc-num">41</span><span class="toc-etitle">Meta Llama 3 — Architecture, Ecosystem, and Inference</span></a>
