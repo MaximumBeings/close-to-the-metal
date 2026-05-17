@@ -211,3 +211,4 @@ nav:
     - "X — References": appendices/appendix-x.md
     - "Y — Cerebras WSE-3: Wafer-Scale Inference": appendices/appendix-y.md
     - "Z — JAX: XLA-Native Python for LLM Inference": appendices/appendix-z.md
+    - "AA — Mixture of Experts (MoE): Conditional Computation from First Principles": appendices/appendix-aa.md
