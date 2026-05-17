@@ -72,6 +72,7 @@ nav:
   - "Part I — Foundations":
     - "Ch 1: Two Engines, One Problem": part1-foundations/chapter01.md
     - "Ch 2: The GPU and CPU Memory Landscapes": part1-foundations/chapter02.md
+    - "Ch 2.5: GPU Memory Architecture — Registers, Shared Memory, Caches, and Global Memory": part1-foundations/chapter02b.md
     - "Ch 3: Tokens, Sequences, and the Batch": part1-foundations/chapter03.md
     - "Ch 3.5: The Transformer Block": part1-foundations/chapter03b.md
     - "Ch 4: Attention Mechanics": part1-foundations/chapter04.md

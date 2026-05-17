@@ -18,7 +18,7 @@ hide:
         <div class="book-engines">LLM Inference from First Principles</div>
         <div class="book-cover-footer">
           <div class="book-authors">Oluwaseyi Awoga, written with AI assistance</div>
-          <div class="book-edition">51 Chapters · 26 Appendices · May 2026</div>
+          <div class="book-edition">52 Chapters · 26 Appendices · May 2026</div>
         </div>
       </div>
     </div>
@@ -28,7 +28,7 @@ hide:
     <p class="book-quote">"The gap between 'I called the API' and 'I understand what just happened' is exactly the size of this book."</p>
     <p class="book-desc">A systems engineering textbook for engineers who serve LLMs in production. Core concepts are taught through two primary engines — <strong>vLLM</strong> and <strong>llama.cpp</strong> — with later chapters extending to <strong>SGLang</strong>, <strong>TensorRT-LLM</strong>, <strong>MLC-LLM</strong>, and <strong>Ollama</strong>. Every chapter includes worked arithmetic, companion code, and production-grade configurations.</p>
     <div class="book-metrics">
-      <div class="book-metric"><span class="bm-n">51</span><span class="bm-l">chapters</span></div>
+      <div class="book-metric"><span class="bm-n">52</span><span class="bm-l">chapters</span></div>
       <div class="book-metric"><span class="bm-n">26</span><span class="bm-l">appendices</span></div>
       <div class="book-metric"><span class="bm-n">46</span><span class="bm-l">code demos</span></div>
       <div class="book-metric"><span class="bm-n">11×</span><span class="bm-l">cost savings</span></div>
@@ -63,11 +63,12 @@ hide:
       <div class="toc-part-header toc-pi">
         <span class="toc-part-label">Part I</span>
         <span class="toc-part-title">Foundations</span>
-        <span class="toc-part-range">Ch 1–5.5</span>
+        <span class="toc-part-range">Ch 1–5</span>
       </div>
       <div class="toc-entries">
         <a href="part1-foundations/chapter01.html" class="toc-entry"><span class="toc-num">1</span><span class="toc-etitle">Two Engines, One Problem</span></a>
         <a href="part1-foundations/chapter02.html" class="toc-entry"><span class="toc-num">2</span><span class="toc-etitle">The GPU and CPU Memory Landscapes</span></a>
+        <a href="part1-foundations/chapter02b.html" class="toc-entry"><span class="toc-num">2.5</span><span class="toc-etitle">GPU Memory Architecture — Registers, Shared Memory, Caches, and Global Memory</span></a>
         <a href="part1-foundations/chapter03.html" class="toc-entry"><span class="toc-num">3</span><span class="toc-etitle">Tokens, Sequences, and the Batch</span></a>
         <a href="part1-foundations/chapter03b.html" class="toc-entry"><span class="toc-num">3.5</span><span class="toc-etitle">The Transformer Block</span></a>
         <a href="part1-foundations/chapter04.html" class="toc-entry"><span class="toc-num">4</span><span class="toc-etitle">Attention Mechanics</span></a>

@@ -54,6 +54,7 @@ This is not a hypothetical. Every technique described is in production somewhere
 
 - **Chapter 1** introduces both engines — vLLM and llama.cpp — and the LinkedIn scenario that runs through the entire book.
 - **Chapter 2** maps the GPU and CPU memory landscape — every performance bottleneck in LLM inference traces back to this map.
+- **Chapter 2.5** goes inside the GPU: registers, shared memory, L1/L2 caches, constant memory, and global memory — the on-chip hierarchy that determines kernel performance. Covers bank conflicts, coalescing, occupancy, and how FlashAttention, PagedAttention, and tiled GEMM exploit each space.
 - **Chapter 3** explains tokens, sequences, and batching in the depth that most introductions skip.
 - **Chapters 4 and 5** build from raw attention mechanics up through Flash Attention, with every matrix operation written out by hand.
 
@@ -174,6 +175,9 @@ If you are searching for a specific answer rather than reading linearly, use thi
 | **What is a KV cache and why does running out of it feel catastrophic?** | Ch 6 (PagedAttention) |
 | **Why is my GPU at 28% utilization under real traffic?** | Ch 2 (Memory Landscapes) + Ch 3 (Batching) |
 | **What is continuous batching and why does it change everything?** | Ch 3 (Tokens and the Batch) |
+| **What are GPU registers, shared memory, L1/L2, constant memory, and global memory?** | Ch 2.5 (GPU Memory Architecture) |
+| **Why does coalesced vs uncoalesced global memory access produce a 30× gap?** | Ch 2.5 (GPU Memory Architecture) |
+| **What are bank conflicts and how does the padding trick fix them?** | Ch 2.5 (GPU Memory Architecture) |
 | **What exactly is Flash Attention and why is it faster?** | Ch 5 (Flash Attention) |
 | **What is inside one transformer block — FFN, norms, residual stream?** | Ch 3.5 (Transformer Block) |
 | **How does vLLM schedule requests and prevent head-of-line blocking?** | Ch 7 (Scheduler) |
