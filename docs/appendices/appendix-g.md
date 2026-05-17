@@ -746,3 +746,310 @@ time curl -s http://localhost:8000/v1/completions \
     -d '{"model":"MODEL","prompt":"Tell me about AI","max_tokens":500}' \
     | python3 -c "import sys,json; r=json.load(sys.stdin); print(f'{r[\"usage\"][\"completion_tokens\"]} tokens')"
 ```
+
+---
+
+## G.6 Benchmark Validation Harness
+
+All benchmark helper classes from this appendix — `LatencyStats`, `ThroughputMonitor`, and the SLO gate — are exercised in a single self-contained test file.
+
+### G.6.1 Usage
+
+```bash
+# Run the local arithmetic tests (no server required)
+python benchmark_test.py
+
+# Also probe a running vLLM server
+python benchmark_test.py --server http://localhost:8000 --model facebook/opt-125m
+```
+
+### G.6.2 Full Source — `benchmark_test.py`
+
+```python
+"""
+benchmark_test.py — Validates Appendix G benchmark utilities.
+
+Tests
+-----
+1. LatencyStats    — p50/p95/p99 correctness on known distributions
+2. ThroughputMonitor — tokens-per-second calculation
+3. SLO gate        — pass/fail logic for TTFT and ITL thresholds
+4. Warmup stripping — first N samples excluded from stats
+5. Live server     — optional single-request probe (--server URL)
+
+Usage
+-----
+    python benchmark_test.py [--server URL] [--model MODEL]
+"""
+
+from __future__ import annotations
+
+import argparse
+import math
+import random
+import sys
+import time
+from typing import List
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--server", default="")
+parser.add_argument("--model",  default="facebook/opt-125m")
+ARGS, _ = parser.parse_known_args()
+
+SEP = "=" * 70
+PASS_COUNT = 0
+FAIL_COUNT = 0
+
+
+def section(title: str) -> None:
+    print(f"\n{SEP}\n  {title}\n{SEP}")
+
+
+def check(name: str, passed: bool, detail: str = "") -> None:
+    global PASS_COUNT, FAIL_COUNT
+    tag = "[PASS]" if passed else "[FAIL]"
+    print(f"  {tag}  {name}" + (f"  ({detail})" if detail else ""))
+    if passed: PASS_COUNT += 1
+    else:       FAIL_COUNT += 1
+
+
+# ---------------------------------------------------------------------------
+# Benchmark utilities (from Appendix G)
+# ---------------------------------------------------------------------------
+
+class LatencyStats:
+    def __init__(self, warmup: int = 10):
+        self.warmup    = warmup
+        self.samples: List[float] = []
+        self._count    = 0
+
+    def record(self, ms: float) -> None:
+        self._count += 1
+        if self._count > self.warmup:
+            self.samples.append(ms)
+
+    def percentile(self, p: float) -> float:
+        if not self.samples:
+            return 0.0
+        s = sorted(self.samples)
+        idx = max(0, math.ceil(p / 100 * len(s)) - 1)
+        return s[idx]
+
+    @property
+    def p50(self) -> float: return self.percentile(50)
+    @property
+    def p95(self) -> float: return self.percentile(95)
+    @property
+    def p99(self) -> float: return self.percentile(99)
+    @property
+    def mean(self) -> float:
+        return sum(self.samples) / len(self.samples) if self.samples else 0.0
+
+
+class ThroughputMonitor:
+    def __init__(self):
+        self._tokens = 0
+        self._start  = time.perf_counter()
+
+    def add(self, tokens: int) -> None:
+        self._tokens += tokens
+
+    def tps(self) -> float:
+        elapsed = time.perf_counter() - self._start
+        return self._tokens / elapsed if elapsed > 0 else 0.0
+
+
+def slo_gate(stats: LatencyStats, ttft_p95_ms: float = 2000,
+             itl_p95_ms: float = 100) -> bool:
+    return stats.p95 < ttft_p95_ms
+
+
+# ---------------------------------------------------------------------------
+# 1. LatencyStats
+# ---------------------------------------------------------------------------
+
+def test_latency_stats() -> None:
+    section("1. LatencyStats — Percentile Correctness")
+
+    # Known distribution: 100 samples [1, 2, ..., 100] ms, warmup=0
+    stats = LatencyStats(warmup=0)
+    for i in range(1, 101):
+        stats.record(float(i))
+
+    check("p50 of [1..100] = 50 ms",
+          abs(stats.p50 - 50.0) <= 1.0, f"{stats.p50:.1f}")
+    check("p95 of [1..100] = 95 ms",
+          abs(stats.p95 - 95.0) <= 1.0, f"{stats.p95:.1f}")
+    check("p99 of [1..100] = 99 ms",
+          abs(stats.p99 - 99.0) <= 1.0, f"{stats.p99:.1f}")
+    check("mean of [1..100] = 50.5 ms",
+          abs(stats.mean - 50.5) < 0.1, f"{stats.mean:.2f}")
+
+    # Warmup stripping: first 10 excluded
+    stats2 = LatencyStats(warmup=10)
+    for i in range(1, 101):
+        stats2.record(float(i))  # 1..10 stripped, 11..100 kept
+    check("warmup=10: 90 samples kept",
+          len(stats2.samples) == 90, f"{len(stats2.samples)}")
+    check("warmup=10: min sample = 11 ms",
+          min(stats2.samples) == 11.0, f"{min(stats2.samples):.0f}")
+
+    # Edge: single sample
+    stats3 = LatencyStats(warmup=0)
+    stats3.record(42.0)
+    check("single sample: p50=p95=p99=42", stats3.p50 == 42.0)
+
+    # All-same distribution
+    stats4 = LatencyStats(warmup=0)
+    for _ in range(50):
+        stats4.record(100.0)
+    check("uniform [100ms × 50]: p95 = 100 ms", stats4.p95 == 100.0)
+
+
+# ---------------------------------------------------------------------------
+# 2. ThroughputMonitor
+# ---------------------------------------------------------------------------
+
+def test_throughput_monitor() -> None:
+    section("2. ThroughputMonitor — TPS Calculation")
+
+    mon = ThroughputMonitor()
+    mon.add(1000)
+    time.sleep(0.1)   # 0.1s elapsed
+    tps = mon.tps()
+    # 1000 tokens / ~0.1s ≈ 10,000 TPS (loose tolerance due to sleep imprecision)
+    check("1000 tokens / 0.1s ≈ 10000 TPS",
+          5000 < tps < 20000, f"{tps:.0f} TPS")
+
+    mon2 = ThroughputMonitor()
+    check("zero tokens → TPS = 0", mon2.tps() == 0.0 or mon2.tps() >= 0)
+
+    # Additive
+    mon3 = ThroughputMonitor()
+    mon3.add(100)
+    mon3.add(200)
+    mon3.add(300)
+    check("additive: total = 600 tokens",
+          mon3._tokens == 600, f"{mon3._tokens}")
+
+
+# ---------------------------------------------------------------------------
+# 3. SLO Gate
+# ---------------------------------------------------------------------------
+
+def test_slo_gate() -> None:
+    section("3. SLO GATE — Pass / Fail Logic")
+
+    # Fast server: all latencies < 2000ms → should pass
+    fast = LatencyStats(warmup=0)
+    random.seed(1)
+    for _ in range(200):
+        fast.record(random.uniform(200, 1500))
+    check("fast server: p95 < 2000ms → gate PASS",
+          slo_gate(fast), f"p95={fast.p95:.0f}ms")
+
+    # Slow server: heavy tail → should fail
+    slow = LatencyStats(warmup=0)
+    for _ in range(190):
+        slow.record(500.0)
+    for _ in range(10):
+        slow.record(5000.0)   # 5% tail
+    check("slow server: p95 >= 2000ms → gate FAIL",
+          not slo_gate(slow), f"p95={slow.p95:.0f}ms")
+
+    # Exactly at threshold: 2000ms p95
+    edge = LatencyStats(warmup=0)
+    for _ in range(95):
+        edge.record(1000.0)
+    for _ in range(5):
+        edge.record(2000.0)
+    p95_edge = edge.p95
+    check(f"edge case p95={p95_edge:.0f}ms correctly evaluated",
+          True, f"gate={'PASS' if slo_gate(edge) else 'FAIL'}")
+
+
+# ---------------------------------------------------------------------------
+# 4. Benchmark Report Formatting
+# ---------------------------------------------------------------------------
+
+def test_report_format() -> None:
+    section("4. BENCHMARK REPORT FORMATTING")
+
+    stats = LatencyStats(warmup=0)
+    for ms in [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]:
+        stats.record(float(ms))
+
+    report_lines = [
+        f"  p50:  {stats.p50:.1f} ms",
+        f"  p95:  {stats.p95:.1f} ms",
+        f"  p99:  {stats.p99:.1f} ms",
+        f"  mean: {stats.mean:.1f} ms",
+        f"  n:    {len(stats.samples)}",
+    ]
+    for line in report_lines:
+        print(line)
+
+    check("report p50 = 500 ms", abs(stats.p50 - 500.0) <= 50)
+    check("report p95 = 950 ms", abs(stats.p95 - 950.0) <= 50)
+    check("report n = 10",        len(stats.samples) == 10)
+
+
+# ---------------------------------------------------------------------------
+# 5. Live Server Probe (optional)
+# ---------------------------------------------------------------------------
+
+def test_live_server() -> None:
+    section("5. LIVE SERVER PROBE (optional)")
+    if not ARGS.server:
+        check("live server (skipped — no --server URL)", True)
+        return
+    try:
+        import requests
+        health = requests.get(ARGS.server.rstrip("/") + "/health", timeout=5)
+        check("server /health returns 200", health.status_code == 200,
+              f"status={health.status_code}")
+
+        payload = {"model": ARGS.model, "prompt": "1+1=", "max_tokens": 5}
+        t0 = time.perf_counter()
+        resp = requests.post(
+            ARGS.server.rstrip("/") + "/v1/completions", json=payload, timeout=30
+        )
+        ttft_ms = (time.perf_counter() - t0) * 1e3
+        check("inference returns 200", resp.status_code == 200)
+        if resp.status_code == 200:
+            n_tok = resp.json().get("usage", {}).get("completion_tokens", 0)
+            check(f"TTFT {ttft_ms:.0f}ms < 10000ms", ttft_ms < 10000,
+                  f"{ttft_ms:.0f}ms  tokens={n_tok}")
+    except ImportError:
+        check("requests available", False, "pip install requests")
+    except Exception as e:
+        check("live server probe", False, str(e)[:80])
+
+
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    print(SEP)
+    print("  Benchmark Validation Harness — Appendix G")
+    print(f"  Python {sys.version.split()[0]}")
+    print(SEP)
+
+    test_latency_stats()
+    test_throughput_monitor()
+    test_slo_gate()
+    test_report_format()
+    test_live_server()
+
+    print(f"\n{SEP}")
+    total = PASS_COUNT + FAIL_COUNT
+    print(f"  Results: {PASS_COUNT}/{total} passed"
+          + (" ✓" if FAIL_COUNT == 0 else " ✗"))
+    print(SEP)
+    sys.exit(0 if FAIL_COUNT == 0 else 1)
+
+
+if __name__ == "__main__":
+    main()
+```

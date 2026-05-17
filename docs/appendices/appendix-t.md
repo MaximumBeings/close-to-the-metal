@@ -859,7 +859,7 @@ PASS: ColBERT 1M docs FP32 = 2.10 TB
 
 ---
 
-## T.11 Self-Check Questions
+## T.14 Self-Check Questions
 
 1. An embedding model uses mean pooling over 512 tokens. At inference time,
    one of those tokens is a `[PAD]` token. What goes wrong if you include it
