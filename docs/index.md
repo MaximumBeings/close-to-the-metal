@@ -29,7 +29,7 @@ hide:
     <p class="book-desc">A systems engineering textbook for engineers who serve LLMs in production. Core concepts are taught through two primary engines — <strong>vLLM</strong> and <strong>llama.cpp</strong> — with later chapters extending to <strong>SGLang</strong>, <strong>TensorRT-LLM</strong>, <strong>MLC-LLM</strong>, and <strong>Ollama</strong>. Every chapter includes worked arithmetic, companion code, and production-grade configurations.</p>
     <div class="book-metrics">
       <div class="book-metric"><span class="bm-n">52</span><span class="bm-l">chapters</span></div>
-      <div class="book-metric"><span class="bm-n">26</span><span class="bm-l">appendices</span></div>
+      <div class="book-metric"><span class="bm-n">28</span><span class="bm-l">appendices</span></div>
       <div class="book-metric"><span class="bm-n">48</span><span class="bm-l">code demos</span></div>
       <div class="book-metric"><span class="bm-n">11×</span><span class="bm-l">cost savings</span></div>
     </div>
@@ -194,6 +194,8 @@ hide:
         <a href="appendices/appendix-v.html" class="toc-entry"><span class="toc-num">V</span><span class="toc-etitle">TurboQuant — Online Vector Quantization for KV Cache (Addendum)</span></a>
         <a href="appendices/appendix-w.html" class="toc-entry"><span class="toc-num">W</span><span class="toc-etitle">Glossary — 70+ Terms Defined</span></a>
         <a href="appendices/appendix-x.html" class="toc-entry"><span class="toc-num">X</span><span class="toc-etitle">References — 40+ Key Papers</span></a>
+        <a href="appendices/appendix-y.html" class="toc-entry"><span class="toc-num">Y</span><span class="toc-etitle">Cerebras WSE-3 — Wafer-Scale Inference</span></a>
+        <a href="appendices/appendix-z.html" class="toc-entry"><span class="toc-num">Z</span><span class="toc-etitle">JAX — XLA-Native Python for LLM Inference</span></a>
       </div>
     </div>
 

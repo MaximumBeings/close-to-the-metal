@@ -106,7 +106,7 @@ This is not a hypothetical. Every technique described is in production somewhere
 
 ---
 
-**Appendices A–X** (26 appendices, grouped by theme) provide reference material designed for repeated use.
+**Appendices A–Z** (28 appendices, grouped by theme) provide reference material designed for repeated use.
 
 *Foundations* — **A** (Mathematical Foundations), **A.2** (Tensor Contractions — 2D/3D/5D/ND with CUDA, Triton, CUTLASS, Mojo; arithmetic intensity; Einstein notation), **A.3** (The Chain Rule — scalar through transformer backpropagation; Jacobians; softmax/LayerNorm/attention backward; QAT STE; LoRA gradient flow; 15 manual worked examples), **B** (Installation Guide), **C** (PyTorch for LLM Inference: dtypes, devices, `torch.compile`, quantization APIs, `torch.distributed`, custom ops, profiling, `torch.export`)
 
@@ -121,6 +121,8 @@ This is not a hypothetical. Every technique described is in production somewhere
 *Production and Serving* — **S** (CI/CD Pipelines), **T** (Embedding and Reranker Serving — BGE-M3, ColBERT, vLLM embed/score), **U** (Quantization Calibration — AWQ, GPTQ, FP8, GGUF), **V** (TurboQuant)
 
 *Reference* — **W** (Glossary, 85+ terms), **X** (References, 40+ papers)
+
+*Accelerator Platforms* — **Y** (Cerebras WSE-3 — wafer-scale die, 44 GB on-chip SRAM, 21.6 PB/s bandwidth, MemoryX, SwarmX, roofline analysis, CS-3 system, performance benchmarks), **Z** (JAX — jit, vmap, grad, pmap, jax.sharding, XLA compilation, Flax NNX, Equinox, MaxText, JAX vs PyTorch/CUDA/Triton/Mojo comparison)
 
 ---
 
