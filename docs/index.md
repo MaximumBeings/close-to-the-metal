@@ -123,7 +123,7 @@ hide:
       <div class="toc-part-header toc-piv">
         <span class="toc-part-label">Part IV</span>
         <span class="toc-part-title">Advanced Techniques</span>
-        <span class="toc-part-range">Ch 22–33.5</span>
+        <span class="toc-part-range">Ch 22–33</span>
       </div>
       <div class="toc-entries">
         <a href="part4-advanced/chapter22.html" class="toc-entry"><span class="toc-num">22</span><span class="toc-etitle">LoRA Serving and Adapter Hot-Swapping</span></a>
@@ -164,7 +164,7 @@ hide:
     <div class="toc-part">
       <div class="toc-part-header toc-pa">
         <span class="toc-part-label">App.</span>
-        <span class="toc-part-title">Appendices A – X</span>
+        <span class="toc-part-title">Appendices A – Z</span>
         <span class="toc-part-range">Reference</span>
       </div>
       <div class="toc-entries">
@@ -191,7 +191,7 @@ hide:
         <a href="appendices/appendix-s.html" class="toc-entry"><span class="toc-num">S</span><span class="toc-etitle">CI/CD Pipelines for LLM Inference Systems</span></a>
         <a href="appendices/appendix-t.html" class="toc-entry"><span class="toc-num">T</span><span class="toc-etitle">Embedding and Reranker Model Serving</span></a>
         <a href="appendices/appendix-u.html" class="toc-entry"><span class="toc-num">U</span><span class="toc-etitle">Quantization Calibration Workflow — AWQ, GPTQ, FP8, and GGUF</span></a>
-        <a href="appendices/appendix-v.html" class="toc-entry"><span class="toc-num">V</span><span class="toc-etitle">TurboQuant — Online Vector Quantization for KV Cache (Addendum)</span></a>
+        <a href="appendices/appendix-v.html" class="toc-entry"><span class="toc-num">V</span><span class="toc-etitle">TurboQuant — Online Vector Quantization for KV Cache</span></a>
         <a href="appendices/appendix-w.html" class="toc-entry"><span class="toc-num">W</span><span class="toc-etitle">Glossary — 70+ Terms Defined</span></a>
         <a href="appendices/appendix-x.html" class="toc-entry"><span class="toc-num">X</span><span class="toc-etitle">References — 40+ Key Papers</span></a>
         <a href="appendices/appendix-y.html" class="toc-entry"><span class="toc-num">Y</span><span class="toc-etitle">Cerebras WSE-3 — Wafer-Scale Inference</span></a>
