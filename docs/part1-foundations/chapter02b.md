@@ -20,104 +20,149 @@
 
 ---
 
-## 2.5.1 The On-Chip Memory Hierarchy
+## 2.5.1 The GPU Memory Architecture
 
 `[FOUNDATIONAL]`
 
-### Intuition
+### On-Chip vs Near-Chip vs Off-Chip
 
-Chapter 2 showed the system-level memory hierarchy: HBM (fast, ~3 TB/s) → DRAM (slower, ~100 GB/s) → NVMe (much slower). That hierarchy describes what happens *between* the GPU and the outside world. But the GPU has its own internal hierarchy — a set of memory spaces with radically different properties — and understanding them is what separates kernel code that runs at peak hardware utilization from code that runs at 5% of it.
+Before mapping the hierarchy, one critical distinction that is consistently blurred in tutorials: **HBM is not on the GPU chip**. It is physically separate DRAM that sits extremely close to the GPU die — but it is not on the silicon itself. This matters because every optimization in this chapter is ultimately about avoiding round trips to HBM, which is the slowest tier you will regularly touch during a kernel.
 
-Think of the GPU's internal memory like a hospital:
+The three tiers of GPU memory by physical location:
 
-- **Registers** — each surgeon's hands. They hold exactly what is being operated on right now. Fast, tiny, strictly personal.
-- **Shared Memory (SMEM)** — the operating room countertop. The whole surgical team (a thread block) shares it. Medium size, fast, must be explicitly managed.
-- **L1 Cache** — the supply cart just outside the OR. Shared with SMEM on modern GPUs; hardware-managed.
-- **L2 Cache** — the hospital pharmacy. One per hospital (one per GPU). All OR teams share it. Bigger, a bit slower.
-- **Constant Memory** — the hospital's standard protocols binder. Read-only, broadcast to everyone simultaneously when they need the same page.
-- **Global Memory (HBM)** — the hospital's warehouse. Everything lives there. Enormous, but a slow walk away.
+**On-chip (on the GPU die itself):**
+These live on the same silicon as the CUDA cores and SMs. Accessing them costs 1–50 cycles. They use SRAM technology — extremely fast but expensive and power-hungry per bit, which is why capacity is tiny (kilobytes to tens of megabytes).
 
-Every memory access in a CUDA kernel touches one of these spaces. The art of GPU optimization is arranging work so that the hot data lives in registers and SMEM, warm data hits L1/L2, and cold data (model weights, KV cache) is fetched from global memory in large coalesced transactions to amortize the bandwidth cost.
+- Registers — inside each SM's compute units
+- Shared Memory (SMEM) — also inside the SM, programmer-controlled SRAM scratchpad
+- L1 Cache — shares the same physical SRAM block as SMEM on Ampere
+- L2 Cache — a large on-die SRAM cache shared across all SMs
+
+**Near-chip (off-die, but in the same package):**
+HBM (High Bandwidth Memory) stacks sit on the same **silicon interposer** as the GPU die — an intermediary substrate that connects everything with extremely short, extremely wide signal traces. This 2.5D packaging technique is what gives HBM its multi-terabyte-per-second bandwidth despite being physically off the GPU die. The stacks are typically 2–6 mm away from the GPU die, connected by thousands of through-silicon vias (TSVs).
+
+This is fundamentally different from traditional GDDR memory, which sits on the PCB board — centimeters away, connected via narrow PCIe-width traces.
+
+```
+  Traditional GPU (GDDR):
+  ┌────────────────────────────┐  PCB board
+  │  [GDDR chip] [GDDR chip]   │
+  │         ↑ ↑                │  ← long PCB traces (~cm)
+  │       [GPU die]            │  ← narrow bus (~256–384 bit)
+  └────────────────────────────┘
+  Typical BW: 300–900 GB/s
+
+  HBM GPU (A100 / H100):
+  ┌────────────────────────────────────────────────┐
+  │  ┌──────────┐   ┌──────────┐   ┌──────────┐   │  Silicon interposer
+  │  │  HBM     │   │  GPU die │   │  HBM     │   │
+  │  │  Stack   │   │  (A100)  │   │  Stack   │   │  ← µm-scale TSV connections
+  │  │  (40 GB) │   │  (54B Tr)│   │  (40 GB) │   │  ← 5120-bit bus per stack
+  │  └──────────┘   └──────────┘   └──────────┘   │
+  └────────────────────────────────────────────────┘
+  Typical BW: 2,000–3,350 GB/s  (A100–H100)
+```
+
+Why not put more memory directly on the GPU die as SRAM? Because SRAM is ~100× larger per bit than DRAM. An A100 has 40 GB of HBM. Storing 40 GB as on-chip SRAM would require a die roughly 50× the size of the actual A100 — physically and economically impossible with current process nodes.
+
+**Off-chip (system DRAM / NVMe):**
+System RAM and storage are separated from the GPU by the PCIe bus. Bandwidth drops to 32–100 GB/s (PCIe) or 5–15 GB/s (NVMe). These are covered in Chapter 2.
 
 ---
 
-### The Complete On-Chip Memory Map
+### The Complete GPU Memory Map
 
 ```
-  GPU ON-CHIP MEMORY HIERARCHY  (NVIDIA Ampere — A100 / RTX 3090 class)
-  ═══════════════════════════════════════════════════════════════════════════════
+  GPU MEMORY ARCHITECTURE  (NVIDIA Ampere — A100 / RTX 3090)
+  ═══════════════════════════════════════════════════════════════════════════
 
-  ┌─────────────────────────────────────────────────────────────────────────┐
-  │                        SM (Streaming Multiprocessor)                    │
-  │                                                                         │
-  │  ┌─────────────────────┐   ┌─────────────────────┐                     │
-  │  │   Warp 0            │   │   Warp 1  ...        │   ← up to 64 warps │
-  │  │  ┌────┐ ┌────┐ ...  │   │  ┌────┐ ┌────┐ ...  │      per SM        │
-  │  │  │ R0 │ │ R1 │      │   │  │ R0 │ │ R1 │      │                    │
-  │  │  └────┘ └────┘      │   │  └────┘ └────┘      │                    │
-  │  │  Registers (256 KB  │   │  Registers           │   FASTEST          │
-  │  │  per SM, 255 per    │   │  (per thread)        │   ~1 cycle         │
-  │  │  thread max)        │   │                      │                    │
-  │  └─────────────────────┘   └─────────────────────┘                     │
-  │                                                                         │
-  │  ┌───────────────────────────────────────────────────────────────────┐  │
-  │  │         Shared Memory / L1 Cache   (192 KB total per SM)          │  │
-  │  │  ┌─────────────────────────┐  ┌─────────────────────────────────┐ │  │
-  │  │  │  Shared Memory (SMEM)   │  │       L1 Data Cache             │ │  │
-  │  │  │  configurable: 0–160 KB │  │  remainder of 192 KB            │ │  │
-  │  │  │  __shared__ variables   │  │  hardware-managed               │ │  │
-  │  │  │  explicit, programmer-  │  │  global/local memory cache      │ │  │
-  │  │  │  controlled             │  │                                 │ │  │
-  │  │  └─────────────────────────┘  └─────────────────────────────────┘ │  │
-  │  │                                                       ~5-10 cycles │  │
-  │  └───────────────────────────────────────────────────────────────────┘  │
-  │                                                                         │
-  │  ┌───────────────────────────────────────────────────────────────────┐  │
-  │  │         Constant Cache   (per SM, ~8 KB)                          │  │
-  │  │         Texture Cache    (per SM, ~256 KB)                        │  │
-  │  │         Read-only Cache  (L1 for __ldg() loads)                   │  │
-  │  └───────────────────────────────────────────────────────────────────┘  │
-  │                                                                         │
-  └─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-  ┌─────────────────────────────────────────────────────────────────────────┐
-  │                    L2 Cache  (40 MB on A100, 50 MB on H100)             │
-  │                    Shared by ALL SMs on the GPU                         │
-  │                    ~30–50 cycles latency                                │
-  └─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-  ┌─────────────────────────────────────────────────────────────────────────┐
-  │                    Global Memory (HBM)                                  │
-  │                    A100: 80 GB @ 2 TB/s                                 │
-  │                    H100: 80 GB @ 3.35 TB/s  (SXM5 variant)             │
-  │                    ~400–800 cycles latency                              │
-  │                    Holds: model weights, KV cache, activations          │
-  └─────────────────────────────────────────────────────────────────────────┘
-
-  Also present in global memory address space (logically separate):
-  ┌──────────────────────────────┐  ┌──────────────────────────────┐
-  │ Constant Memory   (64 KB)    │  │ Texture Memory (part of HBM) │
-  │ Cached in per-SM const cache │  │ Cached in texture cache      │
-  │ Read-only, broadcast-optimal │  │ 2D spatial locality optimized│
-  └──────────────────────────────┘  └──────────────────────────────┘
+  ╔═══════════════════════════════════════════════════════════════════════╗
+  ║  ON-CHIP  (GPU silicon die)                                          ║
+  ║                                                                       ║
+  ║  ┌─────────────────────────────────────────────────────────────────┐  ║
+  ║  │  SM (Streaming Multiprocessor)  ×108 on A100                   │  ║
+  ║  │                                                                 │  ║
+  ║  │  ┌──────────────────┐  ┌──────────────────┐                    │  ║
+  ║  │  │  Warp 0          │  │  Warp 1 ... 63   │  ← 64 warps/SM    │  ║
+  ║  │  │  ┌──┐ ┌──┐ ...   │  │  ┌──┐ ┌──┐ ...  │                    │  ║
+  ║  │  │  │R0│ │R1│        │  │  │R0│ │R1│       │  REGISTERS        │  ║
+  ║  │  │  └──┘ └──┘        │  │  └──┘ └──┘       │  ~1 cycle        │  ║
+  ║  │  │  255 regs/thread  │  │  per-thread       │  256 KB/SM total │  ║
+  ║  │  └──────────────────┘  └──────────────────┘                    │  ║
+  ║  │                                                                 │  ║
+  ║  │  ┌─────────────────────────────────────────────────────────┐   │  ║
+  ║  │  │  Unified SMEM + L1  (192 KB total per SM, Ampere)       │   │  ║
+  ║  │  │  ┌────────────────────┐  ┌──────────────────────────┐   │   │  ║
+  ║  │  │  │  Shared Memory     │  │  L1 Data Cache           │   │   │  ║
+  ║  │  │  │  (SMEM)  0–160 KB  │  │  remainder of 192 KB     │   │   │  ║
+  ║  │  │  │  __shared__        │  │  hardware-managed        │   │   │  ║
+  ║  │  │  │  programmer ctrl   │  │  global mem cache        │   │   │  ║
+  ║  │  │  └────────────────────┘  └──────────────────────────┘   │   │  ║
+  ║  │  │  ~5–10 cycles latency                                    │   │  ║
+  ║  │  └─────────────────────────────────────────────────────────┘   │  ║
+  ║  │                                                                 │  ║
+  ║  │  ┌─────────────────────────────────────────────────────────┐   │  ║
+  ║  │  │  Constant Cache (~8 KB)  │  Texture Cache (~256 KB)     │   │  ║
+  ║  │  └─────────────────────────────────────────────────────────┘   │  ║
+  ║  └─────────────────────────────────────────────────────────────────┘  ║
+  ║                                                                       ║
+  ║  ┌─────────────────────────────────────────────────────────────────┐  ║
+  ║  │  L2 Cache  (40 MB on A100, 50 MB on H100)                      │  ║
+  ║  │  Shared by ALL SMs  │  ~30–50 cycle latency                    │  ║
+  ║  └─────────────────────────────────────────────────────────────────┘  ║
+  ╚═══════════════════════════════════════════════════════════════════════╝
+                    │  Through silicon interposer (µm-scale)
+  ╔═══════════════════════════════════════════════════════════════════════╗
+  ║  NEAR-CHIP  (off-die, same package — silicon interposer)             ║
+  ║                                                                       ║
+  ║  ┌─────────────────────────────────────────────────────────────────┐  ║
+  ║  │  HBM (High Bandwidth Memory) — DRAM technology, NOT SRAM       │  ║
+  ║  │  A100: 80 GB  @ 2.0 TB/s  │  H100: 80 GB @ 3.35 TB/s          │  ║
+  ║  │  ~400–800 cycle latency                                         │  ║
+  ║  │  Holds: model weights · KV cache · activations · intermediates  │  ║
+  ║  │                                                                 │  ║
+  ║  │  Constant Memory (64 KB logical) ─────────── cached on-chip    │  ║
+  ║  │  Texture Memory  (part of HBM)  ─────────── cached on-chip     │  ║
+  ║  └─────────────────────────────────────────────────────────────────┘  ║
+  ╚═══════════════════════════════════════════════════════════════════════╝
+                    │  PCIe bus (32–64 GB/s)
+  ╔═══════════════════════════════════════════════════════════════════════╗
+  ║  OFF-CHIP  (system board)                                            ║
+  ║  System DRAM: 50–100 GB/s   │   NVMe SSD: 5–15 GB/s                 ║
+  ╚═══════════════════════════════════════════════════════════════════════╝
 ```
 
 ---
 
-### Capacity and Latency Table
+### Why Not More On-Chip Memory?
 
-| Memory Space | Scope | Capacity | Latency | Bandwidth | Managed by |
+The constraint is physics and economics. SRAM (the technology behind registers, SMEM, and L1/L2 caches) requires 6 transistors per bit. DRAM (the technology behind HBM and system RAM) requires 1 transistor + 1 capacitor per bit. SRAM is ~6× larger per bit and ~10× more power-hungry per bit than DRAM.
+
+| Technology | Transistors/bit | Area/bit | Speed | Cost/GB |
+|---|---|---|---|---|
+| Register file (SRAM) | 6T | Largest | ~1 cycle | Highest |
+| SMEM / L1 / L2 (SRAM) | 6T | Large | 5–50 cycles | High |
+| HBM (DRAM, stacked) | 1T+1C | Small | 400–800 cycles | Medium |
+| System DRAM (DDR5) | 1T+1C | Small | ~800 cycles + PCIe | Low |
+
+The A100 has 40 MB of L2 cache (on-chip SRAM). Scaling that to 40 GB — the HBM size — would require a die roughly 1,000× larger. HBM's answer is to use dense DRAM stacked vertically in multiple layers and place it millimeters away on the interposer, not micrometers away on the die.
+
+---
+
+### Capacity and Latency Reference
+
+| Memory Space | Location | Capacity | Latency | Bandwidth | Managed by |
 |---|---|---|---|---|---|
-| Registers | Per thread | 255 regs / thread (256 KB / SM) | 1 cycle | ~100 TB/s | Compiler |
-| Shared Memory | Per block | 0–160 KB / SM (Ampere) | ~5–10 cycles | ~20 TB/s | Programmer |
-| L1 Cache | Per SM | Remainder of 192 KB shared with SMEM | ~5–10 cycles | ~20 TB/s | Hardware |
-| L2 Cache | Per GPU | 40 MB (A100), 50 MB (H100) | ~30–50 cycles | ~4–12 TB/s | Hardware |
-| Constant Memory | Per GPU | 64 KB | ~5 cycles (cached) / ~400 cycles (miss) | Broadcast | Programmer |
-| Texture Cache | Per SM | ~256 KB | ~10–30 cycles | ~4 TB/s | Hardware |
-| Global Memory | Per GPU | 40–192 GB | ~400–800 cycles | 2–3.35 TB/s | Programmer |
-| Local Memory | Per thread | Part of global | ~400–800 cycles | 2–3.35 TB/s | Compiler (spill) |
+| Registers | **On-chip** (per SM) | 255 regs/thread · 256 KB/SM | ~1 cycle | ~100 TB/s | Compiler |
+| Shared Memory | **On-chip** (per SM) | 0–160 KB/SM (Ampere) | ~5–10 cycles | ~20 TB/s | Programmer |
+| L1 Cache | **On-chip** (per SM) | Remainder of 192 KB | ~5–10 cycles | ~20 TB/s | Hardware |
+| L2 Cache | **On-chip** (per GPU) | 40 MB (A100), 50 MB (H100) | ~30–50 cycles | ~4–12 TB/s | Hardware |
+| Constant Cache | **On-chip** (per SM) | ~8 KB | ~5 cycles (hit) | Broadcast | Hardware |
+| HBM / Global Mem | **Near-chip** (interposer) | 40–192 GB | ~400–800 cycles | 2–3.35 TB/s | Programmer |
+| Local Memory | **Near-chip** (spill→HBM) | Part of HBM | ~400–800 cycles | 2–3.35 TB/s | Compiler |
+| System DRAM | **Off-chip** (PCIe) | 32 GB–2 TB | ~1000+ cycles | 50–100 GB/s | OS |
+
+The fundamental insight every CUDA optimization flows from: **every time a thread touches HBM, it pays a 400–800 cycle penalty**. Tiling, shared memory staging, register blocking, FlashAttention fusion, tensor core pipelining — these are all strategies for reusing data before going back to HBM.
 
 ---
 
@@ -898,28 +943,28 @@ This is why FlashAttention is not merely a performance optimization — it is wh
 ```
 MEMORY SPACE QUICK REFERENCE
 
-  Space          Size          Latency    Key property                  LLM use
+  Space          Location      Latency    Key property                  LLM use
   ─────────────────────────────────────────────────────────────────────────────────
-  Registers      255/thread    1 cycle    Private, fastest              Accumulators,
-                 256 KB/SM                Compiler-managed              softmax stats
+  Registers      ON-CHIP       1 cycle    Private, fastest              Accumulators,
+                 (per SM)                 Compiler-managed              softmax stats
   ─────────────────────────────────────────────────────────────────────────────────
-  Shared Mem     0–160 KB/SM   ~5 cycles  Programmable, block-shared    Q/K/V tiles,
-                 (Ampere)                 Bank-conflict risk            GEMM tiles
+  Shared Mem     ON-CHIP       ~5 cycles  Programmable, block-shared    Q/K/V tiles,
+                 (per SM)                 Bank-conflict risk            GEMM tiles
   ─────────────────────────────────────────────────────────────────────────────────
-  L1 Cache       Rest of       ~5 cycles  HW-managed, shares with SMEM  Frequent
-                 192 KB/SM               __ldg() for read-only          weight access
+  L1 Cache       ON-CHIP       ~5 cycles  HW-managed, shares with SMEM  Frequent
+                 (per SM)                __ldg() for read-only          weight access
   ─────────────────────────────────────────────────────────────────────────────────
-  L2 Cache       40 MB (A100)  ~30 cycles Chip-wide, persistent hint    Hot weights,
-                 50 MB (H100)            cudaAccessPropertyPersisting   decode phase
+  L2 Cache       ON-CHIP       ~30 cycles Chip-wide, persistent hint    Hot weights,
+                 (per GPU)               cudaAccessPropertyPersisting   decode phase
   ─────────────────────────────────────────────────────────────────────────────────
-  Constant Mem   64 KB         ~5 cycles  Broadcast-optimized, RO       Scale factors,
-                               (cached)  Per-SM constant cache          RoPE freqs
+  Constant Mem   ON-CHIP cache ~5 cycles  Broadcast-optimized, RO       Scale factors,
+                 (logical: HBM)(cached)  Per-SM constant cache          RoPE freqs
   ─────────────────────────────────────────────────────────────────────────────────
-  Global Mem     80–192 GB     ~400 cyc   Coalescing critical (128 B)   All weights,
-  (HBM)                                  Highest capacity, lowest BW   KV cache
+  Global Mem     NEAR-CHIP     ~400 cyc   Coalescing critical (128 B)   All weights,
+  (HBM)          (interposer)            DRAM, not SRAM — avoid trips  KV cache
   ─────────────────────────────────────────────────────────────────────────────────
-  Local Mem      Part of HBM   ~400 cyc   Register spill → avoid       Avoid entirely
-                               (same)     nvcc -ptxas to detect
+  Local Mem      NEAR-CHIP     ~400 cyc   Register spill → HBM          Avoid entirely
+                 (spills→HBM)            nvcc -ptxas to detect
 ```
 
 **The three rules that govern GPU memory performance in LLM inference:**

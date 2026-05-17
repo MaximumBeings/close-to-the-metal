@@ -17,7 +17,7 @@ hide:
         <div class="book-rule"></div>
         <div class="book-engines">LLM Inference from First Principles</div>
         <div class="book-cover-footer">
-          <div class="book-authors">Oluwaseyi Awoga, written with AI assistance</div>
+          <div class="book-authors">Oluwaseyi Awoga</div>
           <div class="book-edition">52 Chapters · 26 Appendices · May 2026</div>
         </div>
       </div>
