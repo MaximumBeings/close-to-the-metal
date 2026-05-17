@@ -43,7 +43,8 @@ hide:
 <!-- ── AUTHOR QUOTE ──────────────────────────────────────────── -->
 <div class="book-footer">
   <em>"The first time you see a KV cache eviction cause a 40-second request, you will wish you had read Chapter 6 before it happened. This book is here so you read it first."</em>
-  <br><strong>— Oluwaseyi Awoga, written with AI assistance, May 2026 (Under development)</strong>
+  <br><strong>— Oluwaseyi Awoga, May 2026 (Under development)</strong>
+  <br><em>Drafted with the assistance of AI tools.</em>
 </div>
 
 <!-- ── TABLE OF CONTENTS ─────────────────────────────────────── -->
