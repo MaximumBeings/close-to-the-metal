@@ -31,7 +31,6 @@ hide:
       <div class="book-metric"><span class="bm-n">52</span><span class="bm-l">chapters</span></div>
       <div class="book-metric"><span class="bm-n">28</span><span class="bm-l">appendices</span></div>
       <div class="book-metric"><span class="bm-n">48</span><span class="bm-l">code demos</span></div>
-      <div class="book-metric"><span class="bm-n">11×</span><span class="bm-l">cost savings</span></div>
     </div>
     <div class="book-cta-row">
       <a href="part1-foundations/chapter01.html" class="bcta-primary">Start Reading — Chapter 1 →</a>
@@ -41,16 +40,10 @@ hide:
 
 </div>
 
-<!-- ── CASE STUDY BANNER ─────────────────────────────────────── -->
-<div class="case-banner">
-  <div class="case-text">
-    <strong>The Running Case Study</strong> — A team spending <span class="case-before">$1.2M/month</span> on the OpenAI GPT-4 API migrates to self-hosted open-source models and applies the techniques in this book systematically: model routing, semantic caching, quantization, prefix caching, speculative decoding, and auto-scaling. By Chapter 38, the combined effect reduces their GPU cluster bill to <span class="case-after">$108K/month</span> — an 11× reduction. The largest single lever is the API-to-self-hosted transition (Chapter 31). For teams already self-hosted, Chapters 10, 19, 23, and 30 alone deliver a 2–5× reduction from the current spend.
-  </div>
-  <div class="case-numbers">
-    <div class="cn-before">$1.2M<small>/mo</small></div>
-    <div class="cn-arrow">→ 11×</div>
-    <div class="cn-after">$108K<small>/mo</small></div>
-  </div>
+<!-- ── AUTHOR QUOTE ──────────────────────────────────────────── -->
+<div class="book-footer">
+  <em>"The first time you see a KV cache eviction cause a 40-second request, you will wish you had read Chapter 6 before it happened. This book is here so you read it first."</em>
+  <br><strong>— Oluwaseyi Awoga, written with AI assistance, May 2026 (Under development)</strong>
 </div>
 
 <!-- ── TABLE OF CONTENTS ─────────────────────────────────────── -->
@@ -202,10 +195,6 @@ hide:
   </div>
 </div>
 
-<!-- ── FOOTER NOTE ───────────────────────────────────────────── -->
-<div class="book-footer">
-  <em>"The first time you see a KV cache eviction cause a 40-second request, you will wish you had read Chapter 6 before it happened. This book is here so you read it first."</em>
-  <br><strong>— Oluwaseyi Awoga, written with AI assistance, May 2026 (Under development)</strong>
-</div>
+
 
 </div>
