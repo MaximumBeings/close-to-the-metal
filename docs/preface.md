@@ -42,87 +42,53 @@ Every chapter has two companion code blocks — Python for vLLM, C++ for llama.c
 
 ## The Running Case Study
 
-Chapter 1 introduces a scenario that recurs throughout the book: a service handling 50,000 concurrent users, starting from a naive deployment that costs $1.2M per month at 28% GPU utilization. This case study appears as a callout in every major chapter — the scheduler chapter, the quantization chapter, the multi-GPU chapter, the speculative decoding chapter — showing exactly how much of that bill each technique removes, and why. By Chapter 38, every optimization layer has been applied, and the bill has been reduced to $108K per month — an 11× reduction that required no new hardware, no new model, and no magic. Just systematic application of the techniques in this book, measured carefully and deployed incrementally.
+Chapter 1 introduces a scenario that recurs throughout the book: a service handling 50,000 concurrent users, starting from a naive deployment that costs $1.2M per month at 28% GPU utilization. This case study appears as a callout in every major chapter — the scheduler chapter, the quantization chapter, the multi-GPU chapter, the speculative decoding chapter — showing exactly how much of that bill each technique removes, and why.
 
-This is not a hypothetical. Every technique described is in production somewhere. The tools are open source. The mathematics is in this book. The rest is engineering.
+By Chapter 38, every layer has been applied and the total cost is $108K per month. It is worth being precise about what that 11× reduction represents: the largest single factor is the decision to move from a third-party API to self-hosted inference — a build-vs-buy choice, not an inference optimization. The techniques in this book account for the remaining reduction, applied systematically on top of a self-hosted baseline. Chapter 38 documents both paths explicitly, so you can measure the portion that is relevant to your situation.
+
+Every technique described is in production somewhere. The tools are open source. The mathematics is in this book. The rest is engineering.
 
 ---
 
 ## How the Book Is Organized
 
-**Part I: Foundations (Chapters 1–5)** establishes the hardware and algorithmic context that everything else depends on.
-
-- **Chapter 1** introduces both engines — vLLM and llama.cpp — and the LinkedIn scenario that runs through the entire book.
-- **Chapter 2** maps the GPU and CPU memory landscape — every performance bottleneck in LLM inference traces back to this map.
-- **Chapter 2.5** goes inside the GPU: registers, shared memory, L1/L2 caches, constant memory, and global memory — the on-chip hierarchy that determines kernel performance. Covers bank conflicts, coalescing, occupancy, and how FlashAttention, PagedAttention, and tiled GEMM exploit each space.
-- **Chapter 3** explains tokens, sequences, and batching in the depth that most introductions skip.
-- **Chapters 4 and 5** build from raw attention mechanics up through Flash Attention, with every matrix operation written out by hand.
+**Part I: Foundations (Chapters 1–5)** establishes the hardware and algorithmic context that everything else depends on. It opens with the memory landscape — GPU HBM, CPU DRAM, NVMe, and the on-chip hierarchy of registers, shared memory, and L1/L2 caches — because every performance constraint in the rest of the book traces back to one of those layers. From there it builds through tokens, batching, and attention mechanics up to Flash Attention, with every matrix operation worked out by hand before any code appears.
 
 ---
 
-**Part II: Engine Internals (Chapters 6–13, plus 7.5, 8.5, 11.5, 11.6, 12.5)** goes inside both engines.
-
-- **Chapter 6** is the centerpiece of Part II: PagedAttention and the KV cache block manager, including a detailed block-eviction worked example under memory pressure.
-- **Chapter 7** follows the scheduler and request lifecycle. **Chapter 7.5** deepens this into continuous batching — the iteration-level loop, token budget admission control, and preemption accounting that determines real-world throughput.
-- **Chapter 8** covers startup and initialization. **Chapter 8.5** explains CUDA graphs — how collapsing 820 kernel launches into one submission eliminates the 25% CPU overhead that otherwise dominates decode latency at small batch sizes.
-- **Chapters 9–11** cover the forward pass, quantization, and prefill. **Chapter 11.5** adds KV cache eviction — attention sinks, the H2O Heavy Hitter Oracle, SnapKV, and token merging.
-- **Chapter 11.6** is a deep dive into RadixAttention and prefix caching — the radix tree data structure, LRU eviction on the tree, vLLM block-level vs SGLang token-exact cache comparison, and worked economics showing 80% prefill compute reduction on a shared system prompt.
-- **Chapter 12** covers sampling — from logits to tokens. **Chapter 12.5** covers structured generation and constrained decoding — FSM-based token masking, JSON schema enforcement, EBNF grammars, the `outlines` and `lm-format-enforcer` libraries, vLLM guided decoding, llama.cpp grammar sampling, and function calling as constrained generation.
-- **Chapter 13** completes the path through token streaming.
+**Part II: Engine Internals (Chapters 6–13)** goes inside both engines at the level of individual decisions. The centerpiece is Chapter 6: PagedAttention and the KV cache block manager, including a detailed block-eviction worked example under memory pressure. Subsequent chapters follow the full request path — scheduling, startup, CUDA graph capture, the forward pass, quantization, prefill, prefix caching, sampling, and token streaming — with each chapter showing how vLLM and llama.cpp make different choices to solve the same problem. Chapter 11.6 is a deep dive into RadixAttention and prefix caching. Chapter 12.5 covers structured generation and constrained decoding: FSM-based token masking, JSON schema enforcement, and function calling as constrained generation.
 
 ---
 
-**Part III: Production Configuration (Chapters 14–21, plus 15.5)** is the practical operations manual.
-
-- **Chapter 14** examines the eight vLLM configuration knobs and their llama.cpp equivalents in depth.
-- **Chapter 15** covers multi-GPU tensor parallelism, now expanded with expert parallelism and pipeline bubble analysis. **Chapter 15.5** extends this to Flash Decoding and context parallelism, which together unlock attention at 100K+ token contexts.
-- **Chapter 16** covers observability. **Chapter 17** covers benchmarking methodology. **Chapter 18** covers disaggregated prefill/decode.
-- **Chapter 19** covers Kubernetes and KubeRay auto-scaling. **Chapter 20** covers cost engineering. **Chapter 21** covers API security.
-- **Appendix H** provides an operational decision tree and troubleshooting guide for common production failure modes.
+**Part III: Production Configuration (Chapters 14–21)** is the practical operations manual. It covers the eight vLLM configuration knobs, multi-GPU tensor and pipeline parallelism, observability, benchmarking methodology, disaggregated prefill/decode, Kubernetes auto-scaling, cost engineering, and API security. Readers who are already running vLLM in production but want to push further will find most of their questions answered here.
 
 ---
 
-**Part IV: Advanced Techniques (Chapters 22–33.5)** covers the techniques that separate baseline deployments from optimized ones.
-
-- **Chapter 22** covers LoRA adapter hot-swapping. **Chapter 23** covers speculative decoding — now including Medusa, EAGLE, EAGLE-2, and tree-based speculation with a numerical tree-attention mask worked example.
-- **Chapter 24** covers reasoning models. **Chapter 25** covers RL serving policies. **Chapter 26** is the CS336 alignment field guide.
-- **Chapter 27** covers long-context inference at 128K+ tokens. **Chapter 28** covers llama.cpp as a programming platform. **Chapter 29** covers multimodal inference.
-- **Chapter 30** covers semantic caching. **Chapter 31** covers model routing and cascading. **Chapter 32** covers debugging inference systems.
-- **Chapter 33** surveys the full engine landscape in 2026. **Chapter 33.5** provides a practical engine-selection guide for SGLang, TRT-LLM, MLC-LLM, and Ollama.
+**Part IV: Advanced Techniques (Chapters 22–33)** covers the techniques that separate baseline deployments from optimized ones: LoRA adapter serving, speculative decoding (Medusa, EAGLE, tree-based speculation), reasoning model inference, RL serving policies, long-context inference at 128K+ tokens, multimodal serving, semantic caching, model routing and cascading, and debugging. The part closes with a full engine landscape survey and a practical selection guide for SGLang, TRT-LLM, MLC-LLM, Ollama, and MAX (Modular).
 
 ---
 
-**Part V: The Model Zoo (Chapters 34–42)** examines production model families and the architectural decisions behind them.
-
-- **Chapter 34** covers DeepSeek — MLA, MoE, and FP8 at scale.
-- **Chapter 35** covers Qwen — multilingual, long-context, and model family engineering.
-- **Chapter 36** covers Kimi — Moon-Cache hierarchical KV storage.
-- **Chapter 37** covers Nemotron — TRT-LLM, FP8, and 2:4 sparsity.
-- **Chapter 38** synthesizes the entire book into the complete $1.2M → $108K production architecture.
-- **Chapter 39** covers evaluation and regression testing.
-- **Chapter 40** documents the vLLM V1 architecture — the three-process ZMQ design, hash-based KV block deduplication, and the multi-step scheduler that makes V1 meaningfully faster than V0 at production scale.
-- **Chapter 41** covers Meta Llama 3 — the architecture of the ecosystem's dominant open-weight family: GQA with 8 KV heads at all sizes, SwiGLU FFN, RoPE with θ = 500,000, the 128K-token tiktoken vocabulary, the Llama 3.1/3.2/3.3 release progression, Llama Guard safety classification, and complete vLLM and llama.cpp serving configurations including quantization sweet spots.
-- **Chapter 42** covers Phi-4 and Gemma 3 — the small-model frontier: Phi-4's data-quality hypothesis and MMLU scores exceeding Llama 3.1 70B at 14B parameters; Gemma 3's interleaved local/global attention for 128K context, tied input/output embeddings, 256K vocabulary, and multimodal SigLIP integration; edge deployment decision framework and quantization quality comparison.
+**Part V: The Model Zoo (Chapters 34–42)** examines the model families that matter most in production — DeepSeek, Qwen, Kimi, Nemotron, Meta Llama 3, Phi-4, and Gemma 3 — through the lens of serving, not benchmarking. Each chapter focuses on the architectural decisions that affect inference: memory layout, KV head count, context length trade-offs, quantization behaviour, and recommended hardware configurations. Chapter 38 synthesizes the entire book into a single end-to-end production architecture. Chapter 40 documents the vLLM V1 redesign.
 
 ---
 
-**Appendices A–Z** (28 appendices, grouped by theme) provide reference material designed for repeated use.
+**Appendices A–Z** (28 appendices) provide reference material designed for repeated use, grouped by theme.
 
-*Foundations* — **A** (Mathematical Foundations), **A.2** (Tensor Contractions — 2D/3D/5D/ND with CUDA, Triton, CUTLASS, Mojo; arithmetic intensity; Einstein notation), **A.3** (The Chain Rule — scalar through transformer backpropagation; Jacobians; softmax/LayerNorm/attention backward; QAT STE; LoRA gradient flow; 15 manual worked examples), **B** (Installation Guide), **C** (PyTorch for LLM Inference: dtypes, devices, `torch.compile`, quantization APIs, `torch.distributed`, custom ops, profiling, `torch.export`)
+*Foundations* — Mathematical foundations (A), tensor contractions with CUDA/Triton/CUTLASS/Mojo (A.2), the chain rule from scalars through transformer backpropagation (A.3), installation guide (B), and PyTorch for LLM inference (C).
 
-*LLM Engine References* — **D** (vLLM EngineArgs), **E** (llama.cpp CLI), **F** (Production Templates), **G** (Benchmarking Reference), **H** (Operational Decision Tree)
+*Engine References* — vLLM EngineArgs (D), llama.cpp CLI flags (E), production configuration templates (F), benchmarking reference (G), and an operational decision tree for production failure modes (H).
 
-*Systems Programming — CPU* — **I** (C++ Build Patterns), **J** (libtorch: The C++ API — CMake build, `torch::Tensor`, `torch::jit::load`, IValue system, custom CUDA ops in C++, inference server example, Python→C++ cheatsheet), **K** (`std::mdspan` for CPU Inference — C++23 multidimensional views, custom layouts, FP8 accessor, tiled GEMM, KV cache management)
+*Systems Programming* — C++ build patterns (I), libtorch C++ API (J), and `std::mdspan` for CPU inference (K).
 
-*GPU Kernel Programming* — **L** (CUDA C++ Introduction), **M** (Introduction to Triton), **N** (CUTLASS and Tensor Cores), **O** (Introduction to Mojo)
+*GPU Kernel Programming* — CUDA C++ introduction (L), Triton (M), CUTLASS and Tensor Cores (N), and Mojo (O).
 
-*Hardware Platforms* — **P** (ROCm and AMD GPU — MI300X, HIP porting, Composable Kernel, cost comparison), **Q** (Mobile and Edge: Android, Apple Silicon, MLX), **R** (Edge Inference: Raspberry Pi and NVIDIA Jetson)
+*Hardware Platforms* — ROCm and AMD GPU inference including MI300X (P), mobile and edge deployment on Android, Apple Silicon, and MLX (Q), and Raspberry Pi / NVIDIA Jetson (R).
 
-*Production and Serving* — **S** (CI/CD Pipelines), **T** (Embedding and Reranker Serving — BGE-M3, ColBERT, vLLM embed/score), **U** (Quantization Calibration — AWQ, GPTQ, FP8, GGUF), **V** (TurboQuant)
+*Production and Serving* — CI/CD pipelines (S), embedding and reranker serving (T), quantization calibration for AWQ/GPTQ/FP8/GGUF (U), and TurboQuant (V).
 
-*Reference* — **W** (Glossary, 85+ terms), **X** (References, 40+ papers)
+*Reference* — Glossary of 85+ terms (W) and an annotated bibliography of 40+ papers (X).
 
-*Accelerator Platforms* — **Y** (Cerebras WSE-3 — wafer-scale die, 44 GB on-chip SRAM, 21.6 PB/s bandwidth, MemoryX, SwarmX, roofline analysis, CS-3 system, performance benchmarks), **Z** (JAX — jit, vmap, grad, pmap, jax.sharding, XLA compilation, Flax NNX, Equinox, MaxText, JAX vs PyTorch/CUDA/Triton/Mojo comparison)
+*Accelerator Platforms* — Cerebras WSE-3 wafer-scale inference including MemoryX and SwarmX (Y), and JAX/XLA covering jit, vmap, grad, pmap, jax.sharding, and the Flax/MaxText/Equinox ecosystem (Z).
 
 ---
 
@@ -229,5 +195,4 @@ If you are searching for a specific answer rather than reading linearly, use thi
 
 ---
 
-*— Oluwaseyi Awoga, written with AI assistance, May 2026*
-*May 2026*
+*— Oluwaseyi Awoga, May 2026*
