@@ -118,7 +118,7 @@ This is not a hypothetical. Every technique described is in production somewhere
 
 *Hardware Platforms* — **P** (ROCm and AMD GPU — MI300X, HIP porting, Composable Kernel, cost comparison), **Q** (Mobile and Edge: Android, Apple Silicon, MLX), **R** (Edge Inference: Raspberry Pi and NVIDIA Jetson)
 
-*Production and Serving* — **S** (CI/CD Pipelines), **T** (Embedding and Reranker Serving — BGE-M3, ColBERT, vLLM embed/score), **U** (Quantization Calibration — AWQ, GPTQ, FP8, GGUF), **V** (TurboQuant Addendum)
+*Production and Serving* — **S** (CI/CD Pipelines), **T** (Embedding and Reranker Serving — BGE-M3, ColBERT, vLLM embed/score), **U** (Quantization Calibration — AWQ, GPTQ, FP8, GGUF), **V** (TurboQuant)
 
 *Reference* — **W** (Glossary, 85+ terms), **X** (References, 40+ papers)
 
