@@ -15,6 +15,7 @@ The engines in scope:
 | **TensorRT-LLM** | Highest throughput on NVIDIA hardware | AOT compile cost, NVIDIA-only |
 | **MLC-LLM** | Cross-device (GPU/CPU/WebGPU/mobile) | Lower peak throughput than compiled |
 | **Ollama** | Developer UX, one-command serving | Not designed for multi-user production |
+| **MAX (Modular)** | Mojo-compiled kernels, multi-backend (GPU/CPU/Apple Silicon) | Smaller ecosystem; fewer pre-built model configs than vLLM |
 | **llama.cpp** | CPU/edge, GGUF ecosystem | Limited GPU batching throughput |
 
 ---
@@ -28,7 +29,7 @@ Every engine comparison collapses to five questions. Score each 1–5 for your s
 
 - NVIDIA H100/A100 only → TRT-LLM, vLLM, SGLang all viable
 - AMD MI300X → vLLM (ROCm backend), MLC-LLM
-- Apple Silicon (M-series) → llama.cpp, MLC-LLM, Ollama
+- Apple Silicon (M-series) → llama.cpp, MLC-LLM, Ollama, MAX (Modular)
 - Browser / WebGPU → MLC-LLM exclusively
 - CPU-only → llama.cpp, Ollama (wraps llama.cpp)
 
@@ -56,6 +57,7 @@ vLLM supports guided decoding via `--guided-decoding-backend outlines`, but SGLa
 | Engine | Cold start | Config surface | Upgrade path |
 |---|---|---|---|
 | Ollama | `ollama run llama3` — one command | Modelfile (~10 lines) | `ollama pull` |
+| MAX | `max serve model-id` | YAML config | `max model download` |
 | vLLM | `pip install vllm` + 15 flags | ~30 important flags | pip upgrade |
 | SGLang | `pip install sglang` + backend setup | Similar to vLLM | pip upgrade |
 | TRT-LLM | `trtllm-build` (1–5 hrs compile) | Extensive JSON config | Re-compile on update |
@@ -74,6 +76,7 @@ vLLM FP8                  ≈  2.0×
 vLLM BF16                 ≈  1.0×   (baseline)
 MLC-LLM (quantized)       ≈  0.7×
 Ollama (llama.cpp)        ≈  0.3×   (GPU path; CPU is further reduced)
+MAX (Modular) GPU         ≈  0.9×   (Mojo-compiled kernels, close to vLLM on A100)
 ```
 
 These ratios vary significantly with batch size, sequence length, and prefix reuse rate. The companion code lets you compute them for your exact configuration.
@@ -81,7 +84,7 @@ These ratios vary significantly with batch size, sequence length, and prefix reu
 ### Axis 5: Quantization Support
 *Which quantization formats does your workflow need?*
 
-| Format | vLLM | SGLang | TRT-LLM | MLC-LLM | Ollama |
+| Format | vLLM | SGLang | TRT-LLM | MLC-LLM | Ollama | MAX |
 |---|---|---|---|---|---|
 | BF16 / FP16 | ✓ | ✓ | ✓ | ✓ | ✓ |
 | FP8 (E4M3) | ✓ | ✓ | ✓ | ✓ | ✗ |
@@ -613,4 +616,51 @@ The saving approaches 100% as N -> infinity (all users share the prefix). It app
 3. **Update complexity:** New vLLM versions frequently change APIs, add features, and deprecate flags. Ollama's simpler architecture changes less frequently.
 
 4. **CUDA dependency management:** vLLM requires specific CUDA/cuDNN/PyTorch versions aligned. Ollama ships as a static binary with no CUDA dependency management.
+
+
+---
+
+## 33b.6  MAX (Modular) Deep Dive
+
+MAX is Modular's production inference platform, built on the same Mojo compiler stack described in Appendix O. Unlike Python-based engines, MAX compiles model graphs end-to-end using MLIR — the same infrastructure that powers XLA and LLVM — producing kernels that are competitive with hand-written CUDA for standard transformer workloads.
+
+### Architecture
+
+MAX uses a three-layer design:
+
+- **MAX Graph** — a hardware-agnostic graph IR, similar in spirit to XLA HLO or ONNX but with Mojo-native types and layouts
+- **MAX Engine** — the compiler that lowers MAX Graph to hardware-specific code (PTX for NVIDIA, ROCm for AMD, Apple Metal for M-series)
+- **MAX Serving** — an OpenAI-compatible HTTP server built on top of MAX Engine with continuous batching and KV cache management
+
+### Key Differentiators
+
+**Multi-backend without recompilation.** The same model checkpoint can be compiled to NVIDIA, AMD, or Apple Silicon targets using `max build --target cuda|rocm|cpu`. This is more principled than llama.cpp's backend selection (which is a compile-time flag) and supports backends that TensorRT-LLM does not.
+
+**Mojo kernels for attention.** MAX ships a FlashAttention-equivalent kernel written in Mojo that the compiler can target to any backend. On NVIDIA A100, it achieves within ~10% of the hand-written Triton FlashAttention-2 kernel. On Apple M3 Max, it uses Metal compute shaders and outperforms llama.cpp's Metal backend for prefill.
+
+**Python API.** MAX exposes an API intentionally similar to vLLM's:
+
+```python
+from max.serve import LLMEngine, SamplingParams
+
+engine = LLMEngine("meta-llama/Llama-3.1-8B-Instruct")
+
+params = SamplingParams(temperature=0.7, max_tokens=512)
+outputs = engine.generate("Explain PagedAttention in two paragraphs.", params)
+print(outputs[0].text)
+```
+
+### When to Choose MAX
+
+MAX makes sense when:
+
+- You need a single codebase targeting NVIDIA, AMD, and Apple Silicon without separate build configs
+- You are already using Mojo for custom kernel development and want the inference stack to share the same compiler
+- You want OpenAI-compatible serving with competitive NVIDIA throughput and do not need vLLM's mature LoRA ecosystem
+
+MAX is a weaker choice when:
+
+- You need vLLM's full adapter-serving ecosystem (dozens of LoRA adapters hot-swapped per request)
+- You need TensorRT-LLM's absolute peak throughput on NVIDIA (hand-tuned CUDA still wins at the extremes)
+- Your team has no Mojo/MLIR background and the compiler error messages would be opaque
 

@@ -23,6 +23,7 @@ The engines covered:
 | SGLang | UC Berkeley / Lianmin Zheng | Jan 2024 | Structured generation, high throughput |
 | Text Generation Inference (TGI) | Hugging Face | Dec 2022 | OpenAI-compatible API |
 | MLC-LLM | MLC AI / CMU | May 2023 | Cross-platform, mobile/edge |
+| MAX (Modular) | Modular | Mar 2024 | GPU/CPU/Apple Silicon, Mojo-compiled kernels |
 | DeepSpeed-FastGen | Microsoft DeepSpeed | Nov 2023 | Large models, hybrid parallelism |
 | Mooncake / Kimi Serving | Moonshot AI | Mar 2024 | Disaggregated prefill/decode |
 | NVIDIA Dynamo | NVIDIA | Feb 2025 | Disaggregated, datacenter-scale |
@@ -76,7 +77,9 @@ kv_bytes_per_token = 2 × n_layers × n_kv_heads × head_dim × dtype_bytes
 | SGLang | ✓ | partial | ✗ | ✗ | ✗ | ✗ |
 | TGI | ✓ | ✓ (ROCm) | ✗ | ✗ | ✗ | ✗ |
 | MLC-LLM | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| MAX (Modular) | ✓ | ✓ | ✓ (Metal) | ✓ | ✓ | ✗ |
 | DeepSpeed-FastGen | ✓ | partial | ✗ | ✗ | ✗ | ✗ |
+| MAX (Modular) | ✓ | ✓ | ✓ (Metal) | ✓ | ✓ | ✗ |
 
 ### 33.2.5 Operational Simplicity
 
