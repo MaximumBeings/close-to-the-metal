@@ -48,7 +48,7 @@ GPU compute is sold in three modes, each with a different cost/risk trade-off:
   └───────────────┴──────────────────┴───────────────────────────────────┘
 ```
 
-### 2025 Reference Prices (approximate)
+### 2024–2025 Reference Prices (approximate — verify current rates at provider sites)
 
 ```
   ┌────────────────────────────────┬───────────┬───────────┬────────────┐

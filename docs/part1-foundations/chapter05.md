@@ -984,9 +984,12 @@ cmake .. -DLLAMA_CUDA=ON -DLLAMA_FLASH_ATTN=ON
 cmake --build . --config Release -j $(nproc)
 
 # Verify FA is active
+# Key flag choices:
+#   --flash-attn   enable FA kernel
+#   -ngl 35        GPU layers
 ./llama-cli -m llama3-8b.gguf \
-    --flash-attn \          # enable FA kernel
-    -ngl 35 \               # GPU layers
+    --flash-attn \
+    -ngl 35 \
     --ctx-size 16384 \
     -p "Explain attention mechanisms:"
 ```

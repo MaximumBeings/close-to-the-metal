@@ -174,7 +174,7 @@ Qwen2.5-57B-A14B is a 57B parameter MoE model that activates only 14B parameters
   │ Attention layers: standard GQA (dense, not MoE)              │
   ├──────────────────────────────────────────────────────────────┤
   │ FFN layers: MoE                                              │
-  │   64 experts, top-8 routing (vs DeepSeek's 256, top-2)       │
+  │   64 experts, top-8 routing (vs DeepSeek's 256, top-8+1 shared)│
   │   Each expert: 1/8 of dense FFN size                         │
   │   Active per token: 8 experts × (1/8 FFN) = 1 full FFN      │
   └──────────────────────────────────────────────────────────────┘
@@ -269,11 +269,13 @@ huggingface-cli download Qwen/Qwen2.5-7B-Instruct-GGUF \
     --include "qwen2.5-7b-instruct-q4_k_m.gguf" --local-dir ./models
 
 # Run with llama.cpp
+# Key flag choices:
+#   --chat-template qwen   important: use Qwen chat format
 ./build/bin/llama-cli \
     -m ./models/qwen2.5-7b-instruct-q4_k_m.gguf \
     -n 512 \
     -c 16384 \
-    --chat-template qwen \    # ← important: use Qwen chat format
+    --chat-template qwen \
     -p "You are a helpful assistant." \
     --in-prefix "<|im_start|>user\n" \
     --in-suffix "<|im_end|>\n<|im_start|>assistant\n"

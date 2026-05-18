@@ -642,12 +642,17 @@ llama.cpp's single-sequence architecture is well-suited for reasoning in the sin
 
 ```bash
 # Critical flags for reasoning models
+# Key flag choices:
+#   --ctx-size 65536       MUST cover prompt + full reasoning trace
+#   --n-predict 32768      hard cap on output tokens
+#   --temp 0.6             reasoning models prefer lower temperature
+#   --repeat-penalty 1.0   do NOT penalise repetition — reasoning repeats concepts
 llama-cli \
   --model deepseek-r1-distill-llama-8b-q4_k_m.gguf \
-  --ctx-size 65536 \          # MUST cover prompt + full reasoning trace
-  --n-predict 32768 \         # hard cap on output tokens
-  --temp 0.6 \                # reasoning models prefer lower temperature
-  --repeat-penalty 1.0 \      # do NOT penalise repetition — reasoning repeats concepts
+  --ctx-size 65536 \
+  --n-predict 32768 \
+  --temp 0.6 \
+  --repeat-penalty 1.0 \
   --prompt "[prompt here]"
 ```
 

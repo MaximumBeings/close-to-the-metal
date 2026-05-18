@@ -7,7 +7,7 @@
 **What you will understand after this chapter:**
 
 - How Multi-head Latent Attention (MLA) compresses the KV cache by 5–13× without quality loss
-- How DeepSeek's 256-expert MoE routes tokens and why only 2 experts fire per token
+- How DeepSeek's 256-expert MoE routes tokens and why 8 routed + 1 shared expert fire per token
 - Why FP8 training/inference is practical now and what it gains on H100/H200
 - How to serve DeepSeek-V2/V3/R1 with vLLM and llama.cpp
 
@@ -36,7 +36,7 @@ The three architectural innovations that set DeepSeek apart:
   │    DeepSeek-V3:  =  576 KB/token  (55% smaller)               │
   │    At 128K context: saves 90 GB HBM on 8-GPU cluster          │
   ├─────────────────────────────────────────────────────────────────┤
-  │ 2. MoE — 256 Experts, Top-2 Routing                           │
+  │ 2. MoE — 256 Experts, Top-8 Routing + 1 Shared Expert         │
   │    671B total params, only 37B active per token                │
   │    Throughput: similar to a 37B dense model on same hardware   │
   │    Quality:    competes with GPT-4o, Claude Sonnet             │
@@ -164,7 +164,7 @@ So the inner product is computed without ever materializing full K — only the 
 
 ---
 
-## 34.3 Mixture of Experts — 256 Experts, Top-2 Routing
+## 34.3 Mixture of Experts — 256 Experts, Top-8 Routing + 1 Shared Expert
 
 `[FOUNDATIONAL]` DeepSeek-V3 uses MoE for the FFN (Feed-Forward Network) layers. Understanding MoE requires understanding what the FFN does in a standard transformer.
 
@@ -188,12 +188,11 @@ For a 70B model: $d_{\text{model}} = 8192$, $d_{\text{ffn}} = 28{,}672$ — the 
        ▼                                ▼
   FFN (always active)          Router: compute scores for 256 experts
   W_1: d_model × d_ffn              ↓
-  W_2: d_ffn × d_model        Top-2 selection (scores → softmax weights)
-       │                             / \
-       ▼                      Expert 47 Expert 183
-  output [d_model]             (active)  (active)  ← only these 2 run
-                               ↓           ↓
-                               output_47 + output_183 (weighted sum)
+  W_2: d_ffn × d_model        Top-8 selection (scores → softmax weights)
+       │                        / | | | | | | \
+       ▼               Expert 12 47 89 ... 183 (8 active routed experts)
+  output [d_model]         ↓    ↓  ↓       ↓
+                        weighted sum of 8 expert outputs + shared expert
                                      │
                                      ▼
                                output [d_model]
@@ -202,7 +201,7 @@ For a 70B model: $d_{\text{model}} = 8192$, $d_{\text{ffn}} = 28{,}672$ — the 
 DeepSeek-V3 specifics:
 
 - **256 routed experts** + **1 shared expert** (always active)
-- **Top-2 routing**: each token activates exactly 2 of the 256 routed experts
+- **Top-8 routing**: each token activates exactly 8 of the 256 routed experts (plus the always-active shared expert = 9 total)
 - **Expert size**: each expert is a small FFN (~1/4 the size of a standard 7B FFN)
 - **Effective active params**: 37B out of 671B total (~5.5% active per forward pass)
 
@@ -214,7 +213,7 @@ Architecture:
   d_model  = 7168
   n_experts = 256 (routed) + 1 (shared)
   Expert FFN intermediate: 2048 (one expert's d_ffn)
-  Top-k = 2
+  Top-k = 8
 
 Per-layer MoE parameter count:
   Router W: d_model × 256 = 7168 × 256 = 1.84M params
@@ -226,14 +225,15 @@ Total MoE params (61 layers): 61 × 7.55B ≈ 460B
 Total attention params (61 layers): ≈ 61 × 3.4B ≈ 210B
 Total: ≈ 670B (matches reported 671B)
 
-Active per token per layer:
+Active per token per layer (9 active experts: 8 routed + 1 shared):
   Shared expert: 29.4M (always)
-  Top-2 routed: 2 × 29.4M = 58.8M
-  Active per layer: ≈ 88M params
+  Top-8 routed: 8 × 29.4M = 235.2M
+  Active MoE per layer: ≈ 264M params
 
-Active per token (full forward pass): 61 × 88M ≈ 5.4B params
-  Plus attention: 61 × ~57M ≈ 3.5B
-  Total active: ≈ 37B (as reported)
+Note: The DeepSeek-V3 paper reports ~37B active params per forward pass.
+The exact per-expert size (intermediate dim, gate projections) yields this
+figure when summed across all 61 layers including MLA attention weights;
+the above uses simplified expert size estimates for illustration.
 ─────────────────────────────────────────────────────────────────────
 ```
 
@@ -289,9 +289,9 @@ FP8 has two variants used for different purposes:
   │ Format   │ Bits   │ Max val  │ Precision  │ H100 TFLOPS     │
   ├──────────┼────────┼──────────┼────────────┼─────────────────┤
   │ FP32     │ 32     │ 3.4e38   │ ~0.00001%  │ ~67 TFLOPS      │
-  │ BF16     │ 16     │ 3.4e38   │ ~0.8%      │ ~989 TFLOPS     │
-  │ FP16     │ 16     │ 65504    │ ~0.1%      │ ~989 TFLOPS     │
-  │ FP8 E4M3 │ 8      │ 448      │ ~1.5%      │ ~1,979 TFLOPS   │
+  │ BF16     │ 16     │ 3.4e38   │ ~0.8%      │ ~1,979 TFLOPS   │
+  │ FP16     │ 16     │ 65504    │ ~0.1%      │ ~1,979 TFLOPS   │
+  │ FP8 E4M3 │ 8      │ 448      │ ~1.5%      │ ~3,958 TFLOPS   │
   └──────────┴────────┴──────────┴────────────┴─────────────────┘
 ```
 
@@ -532,10 +532,13 @@ capabilities — it does not need to rediscover reasoning via RL.
 # HuggingFace: deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
 # GGUF from: bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF
 
+# Key flag choices:
+#   --n-gpu-layers 33   all layers on GPU
+#   -c 16384            16K context for reasoning
 llama-server \
     -m DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf \
-    --n-gpu-layers 33 \           # all layers on GPU
-    -c 16384 \                    # 16K context for reasoning
+    --n-gpu-layers 33 \
+    -c 16384 \
     --temp 0.6 \
     --flash-attn \
     --port 8080
@@ -567,10 +570,12 @@ vllm serve deepseek-ai/DeepSeek-R1-Distill-Qwen-7B \
     --trust-remote-code
 
 # Distilled 14B on RTX 4090 (24 GB) — fits in BF16
+# Key flag choices:
+#   --quantization bitsandbytes   4-bit to fit in 24 GB
 vllm serve deepseek-ai/DeepSeek-R1-Distill-Qwen-14B \
     --dtype bfloat16 \
     --max-model-len 16384 \
-    --quantization bitsandbytes \  # 4-bit to fit in 24 GB
+    --quantization bitsandbytes \
     --trust-remote-code
 
 # Distilled 32B on A100 (40 GB) — fits in FP8
@@ -729,7 +734,7 @@ DeepSeek introduced three architectural innovations that matter for every infere
 
 **MLA** compresses the KV cache by ~5× through low-rank latent projection. At 128K context, this recovers ~31 GB of HBM per model instance — the difference between fitting or not fitting on 8× H100.
 
-**MoE** with 256 experts and top-2 routing achieves frontier quality at 37B effective parameters. The memory cost is 671B params, but the compute cost (and thus throughput) matches a 37B dense model.
+**MoE** with 256 routed experts and top-8 routing (plus 1 always-active shared expert, giving 9 active experts per token) achieves frontier quality at ~37B effective parameters. The memory cost is 671B params, but the compute cost (and thus throughput) matches a 37B dense model.
 
 **FP8** halves weight memory versus BF16 on supported hardware (H100+), and nearly doubles throughput on Hopper tensor cores.
 

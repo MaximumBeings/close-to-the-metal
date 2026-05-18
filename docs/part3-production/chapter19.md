@@ -639,11 +639,9 @@ Peak demand: 3,000 req/s × avg decode length 150 tokens × 50ms ITL
 = 3,000 × 150 × 0.05 = 22,500 token-slots needed
 Per-pod capacity: 80 active_sequences
 Required pods: ceil(22,500 / 80) = 282
-
-Wait — that can't be right.
 ```
 
-The error: not all 3,000 req/s are in the decode phase simultaneously. With TTFT of ~200ms and decode length of 150 tokens at 50ms ITL, each request occupies a decode slot for 150 × 0.05 = 7.5 seconds. So concurrent decode requests:
+This first estimate is incorrect — not all 3,000 req/s are in the decode phase simultaneously. With TTFT of ~200ms and decode length of 150 tokens at 50ms ITL, each request occupies a decode slot for 150 × 0.05 = 7.5 seconds. So concurrent decode requests:
 
 ```
 concurrent_decode = arrival_rate × decode_time

@@ -610,9 +610,19 @@ Use the actual prompts (anonymized if needed) as the benchmark corpus. This pres
 
 **Step 3 — Configure `vllm bench serve`:**
 ```bash
-python -m vllm.entrypoints.benchmark_serving   --backend vllm   --model meta-llama/Llama-3.1-70B   --dataset-name sharegpt \   # or use --dataset-path for custom corpus
-  --dataset-path ./production_prompts.jsonl   --num-prompts 10000   --request-rate 50 \        # match production QPS
-  --max-concurrency 200   --percentile-metrics p50,p90,p99   --save-result
+# Key flag choices:
+#   --dataset-name sharegpt    or use --dataset-path for a custom corpus
+#   --request-rate 50          match production QPS
+python -m vllm.entrypoints.benchmark_serving \
+  --backend vllm \
+  --model meta-llama/Llama-3.1-70B \
+  --dataset-name sharegpt \
+  --dataset-path ./production_prompts.jsonl \
+  --num-prompts 10000 \
+  --request-rate 50 \
+  --max-concurrency 200 \
+  --percentile-metrics p50,p90,p99 \
+  --save-result
 ```
 
 **Step 4 — Sweep request rates.**

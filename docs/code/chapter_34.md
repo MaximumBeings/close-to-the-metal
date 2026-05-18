@@ -114,7 +114,7 @@ def demo_moe_routing():
     section("MoE Routing — Load Balance Analysis")
 
     configs = {
-        "DeepSeek-V3 (256 exp, top-2)": MoEConfig(256, 2, 61),
+        "DeepSeek-V3 (256 exp, top-8)": MoEConfig(256, 8, 61),
         "Mixtral (8 exp, top-2)":        MoEConfig(8,   2, 32),
         "Small MoE (16 exp, top-2)":     MoEConfig(16,  2, 8),
     }
@@ -448,7 +448,7 @@ static void demo_moe_routing() {
 
     struct Cfg { const char* name; MoEConfig cfg; };
     Cfg configs[] = {
-        {"DeepSeek-V3 (256 exp, top-2)", {256, 2, 61}},
+        {"DeepSeek-V3 (256 exp, top-8)", {256, 8, 61}},
         {"Mixtral (8 exp, top-2)",        {8,   2, 32}},
         {"Small MoE (16 exp, top-2)",     {16,  2, 8}},
     };

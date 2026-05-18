@@ -714,30 +714,29 @@ Each slot has its own KV cache range within the global context buffer.
 ### 28.4.2  Key Server Flags
 
 ```bash
+# Key flag choices:
+#   -c 32768        total context = sum of all slots
+#   -np 4           4 parallel slots; each gets 32768/4 = 8192 tokens
+#   -ngl 99         offload all layers to GPU
+#   --flash-attn    mandatory for long context
+#   -b 512          batch size for prefill (tokens per decode call)
+#   -ub 512         micro-batch size for ubatch optimization
+#   --threads 4     CPU threads for CPU-side ops
+#   --metrics       expose /metrics Prometheus endpoint
 llama-server \
     -m Llama-3.1-8B-Instruct-Q4_K_M.gguf \
-
-    # Context and concurrency
-    -c 32768        \   # total context = sum of all slots
-    -np 4           \   # 4 parallel slots; each gets 32768/4 = 8192 tokens
+    -c 32768 \
+    -np 4 \
     --rope-freq-base 500000 \
-
-    # GPU offload
-    -ngl 99         \   # offload all layers to GPU
-    --flash-attn    \   # mandatory for long context
-
-    # Network
+    -ngl 99 \
+    --flash-attn \
     --host 127.0.0.1 \
-    --port 8080      \
-
-    # Performance
-    -b 512          \   # batch size for prefill (tokens per decode call)
-    -ub 512         \   # micro-batch size for ubatch optimization
-    --threads 4     \   # CPU threads for CPU-side ops
-
-    # Logging and metrics
+    --port 8080 \
+    -b 512 \
+    -ub 512 \
+    --threads 4 \
     --log-format json \
-    --metrics           # expose /metrics Prometheus endpoint
+    --metrics
 ```
 
 ### 28.4.3  API Endpoints

@@ -100,12 +100,15 @@ Compilation benefits:
 
 ```bash
 # Step 1: Convert checkpoint
+# Key flag choices:
+#   --use_fp8_rowwise   FP8 for linear layers
+#   --tp_size 4         tensor parallelism
 python convert_checkpoint.py \
     --model_dir /path/to/nemotron-70b \
     --output_dir ./trt_ckpt/nemotron-70b-fp8 \
     --dtype float16 \
-    --use_fp8_rowwise \      # FP8 for linear layers
-    --tp_size 4 \            # tensor parallelism
+    --use_fp8_rowwise \
+    --tp_size 4 \
     --pp_size 1
 
 # Step 2: Build engine
@@ -265,10 +268,12 @@ vLLM works with Nemotron models because they use standard Llama architecture:
 
 ```bash
 # Llama-3.1-Nemotron-70B-Instruct
+# Key flag choices:
+#   --quantization fp8   use if H100
 vllm serve nvidia/Llama-3.1-Nemotron-70B-Instruct-HF \
     --tensor-parallel-size 4 \
     --max-model-len 131072 \
-    --quantization fp8 \        # use if H100
+    --quantization fp8 \
     --kv-cache-dtype fp8
 
 # Nemotron-4-340B (needs 8× H100)

@@ -149,7 +149,7 @@ Pair          Count
 (e, s)          5   ← "newest</w>"×3 + "widest</w>"×2 ?
 ```
 
-Wait — let me be precise. Let me list all pairs:
+The complete pair counts, listed by word:
 
 From `l o w </w>` × 5:
   - `(l, o)`: 5

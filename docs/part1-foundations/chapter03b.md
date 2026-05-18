@@ -198,10 +198,10 @@ For LLaMA 3 70B (d_model=8192, d_ff=28672):
 × 80 blocks = 194 GFLOPs per generated token
 ```
 
-An H100 SXM5 does ~989 TFLOPS (BF16 Tensor Core, dense). At 100% efficiency, it could generate:
+An H100 SXM5 does ~1,979 TFLOPS (BF16 Tensor Core, dense). At 100% efficiency, it could generate:
 
 ```
-989 × 10¹² / (194 × 10⁹) ≈ 5,100 tokens/second
+1,979 × 10¹² / (194 × 10⁹) ≈ 10,200 tokens/second
 ```
 
 Real throughput is 1,000–2,500 tok/s — about 4–10× below theoretical peak — because memory bandwidth, not compute, is the bottleneck during decode (see Chapter 2).
@@ -899,7 +899,7 @@ int main() {
 
 4. **[SYSTEMS]** A model has d_model=4096, d_ff=14336, n_layers=32. You quantise only the FFN weights to INT4 and keep attention in BF16. What fraction of model weight memory does each component use before and after? Is this a good trade-off?
 
-5. **[APPLIED]** A DeepSeek-V3-style MoE has 256 experts, each with d_ff=2048, d_model=2048, and top-2 routing. How does its per-token FLOPs compare to a dense model with the same d_model and d_ff=2048? How does its total parameter count compare?
+5. **[APPLIED]** A DeepSeek-V3-style MoE has 256 routed experts + 1 shared expert, each with d_ff=2048, d_model=2048, and top-8 routing (8 routed + 1 shared = 9 active per token). How does its per-token FLOPs compare to a dense model with the same d_model and d_ff=2048? How does its total parameter count compare?
 
 ---
 

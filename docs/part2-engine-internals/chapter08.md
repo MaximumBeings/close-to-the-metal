@@ -379,9 +379,9 @@ Per-layer cache tensor:
 Total across 32 layers:  32 × 2.07 = 66.2 GB  ← close to kv_memory (52.7 GB)
 ```
 
-Wait — 66 GB ≠ 52.7 GB?  The discrepancy is because `num_blocks` is computed
+Note: 66 GB ≠ 52.7 GB. The discrepancy is because `num_blocks` is computed
 from `kv_memory` *divided by block size in bytes*, which already includes the
-per-layer factor.  Let me re-check:
+per-layer factor. Verification:
 
 ```
 kv_block_bytes per layer = 2 × 1 × 16 × 8 × 128 × 2 = 65 536 bytes

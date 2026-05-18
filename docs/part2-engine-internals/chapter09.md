@@ -657,7 +657,7 @@ Per-layer total           4887 µs     400 MB
 × 32 layers           156 584 µs    12.8 GB total HBM reads
 ≈ 157 ms
 
-Wait — that's for 32 layers × 64 seqs.  Per-step total: ~18 ms (measured).
+Note: the 157 ms figure sums each layer sequentially. Per-step total: ~18 ms (measured).
 The discrepancy: individual kernel times overlap (pipelined), and B=64 is
 batched so per-sequence cost is already amortised.
 ```

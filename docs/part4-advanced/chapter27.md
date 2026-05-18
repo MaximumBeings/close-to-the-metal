@@ -855,7 +855,7 @@ Memory budget for 70B at TP=4 (4× H100 80GB):
 
 ### 27.7.4  V2 Block Manager and Prefix Caching
 
-vLLM's V2 block manager (enabled with `--use-v2-block-manager`, default in vLLM ≥ 0.5)
+vLLM's V2 block manager (the default and only block manager in vLLM ≥ 0.8; the `--use-v2-block-manager` flag was removed)
 supports prefix caching: if two requests share an identical prefix (e.g., the same system
 prompt), the KV blocks for that prefix are computed once and shared.
 
@@ -887,7 +887,7 @@ Production setups at 128K+ typically use:
   to the decode pool
 
 ```python
-# vLLM disaggregated mode (experimental as of vLLM 0.6)
+# vLLM disaggregated mode (introduced in vLLM 0.6; check current docs for production status)
 # Prefill node:
 python -m vllm.entrypoints.disagg_prefill_proxy \
     --prefill-model meta-llama/Llama-3.1-8B-Instruct \
@@ -985,13 +985,15 @@ uses O(T²) memory in VRAM for intermediate attention scores, which will OOM at 
 llama.cpp's server supports continuous batching via the `-np` (parallel slots) flag:
 
 ```bash
+# Key flag choices:
+#   -np 2   2 parallel sequences
 llama-server \
     -m Llama-3.1-8B-Instruct-Q4_K_M.gguf \
     -c 131072 \
     --rope-freq-base 500000 \
     -ngl 99 \
     --flash-attn \
-    -np 2 \        # 2 parallel sequences
+    -np 2 \
     --host 0.0.0.0 \
     --port 8080
 ```
@@ -1904,9 +1906,9 @@ FLOPs = 2 x T x T x d_model x layers
       = 2 x 128000 x 128000 x 8192 x 32
 ```
 
-Hmm, standard formula for multi-head attention is:
-QK^T: 2 * T * T * d_model FLOPs per layer (T queries, each dotted with T keys at d_model total)
-Wait, per head: 2 * T * T * d_k. Across 64 heads: 2 * T^2 * d_k * 64 = 2 * T^2 * d_model.
+Standard formula for multi-head attention:
+QK^T: 2 × T × T × d_model FLOPs per layer (T queries, each dotted with T keys at d_model total)
+Per head: 2 × T × T × d_k. Across 64 heads: 2 × T² × d_k × 64 = 2 × T² × d_model.
 
 ```
 per_layer = 2 x (128000)^2 x 8192 = 2 x 1.638e10 x 8192 = 2.685e14 FLOPs

@@ -554,8 +554,7 @@ vLLM supports prompt lookup decoding via `--speculative_draft_tensor_parallel_si
 vllm serve meta-llama/Llama-3.1-70B-Instruct \
     --speculative-model meta-llama/Llama-3.2-3B-Instruct \
     --num-speculative-tokens 5 \
-    --speculative-draft-tensor-parallel-size 1 \
-    --use-v2-block-manager
+    --speculative-draft-tensor-parallel-size 1
 ```
 
 Key flags:
@@ -563,7 +562,8 @@ Key flags:
 - `--speculative-model`: path or HuggingFace ID of the draft model
 - `--num-speculative-tokens`: K (speculation width)
 - `--speculative-draft-tensor-parallel-size`: TP degree for the draft model (usually 1)
-- `--use-v2-block-manager`: required for speculative decoding in current vLLM
+
+Note: `--use-v2-block-manager` was removed in vLLM ≥ 0.8. The V2 block manager is now the default and only block manager; speculative decoding no longer requires any extra flag.
 
 **With EAGLE:**
 
@@ -676,14 +676,20 @@ llama.cpp implements speculative decoding with two model contexts:
 
 ```bash
 # Method 1: llama-cli with --draft flags
+# Key flag choices:
+#   --n-gpu-layers 80      target: full GPU offload
+#   --n-gpu-layers-draft 28  draft: full GPU offload
+#   --draft-max 5          K = 5
+#   --draft-min 1          minimum draft tokens before verify
+#   --draft-p-min 0.8      only draft if draft confidence > 0.8
 ./build/bin/llama-cli \
     --model  ./Llama-3.1-70B-Q4_K_M.gguf \
     --model-draft ./Llama-3.2-3B-Q4_K_M.gguf \
-    --n-gpu-layers 80 \          # target: full GPU offload
-    --n-gpu-layers-draft 28 \    # draft: full GPU offload
-    --draft-max 5 \              # K = 5
-    --draft-min 1 \              # minimum draft tokens before verify
-    --draft-p-min 0.8 \          # only draft if draft confidence > 0.8
+    --n-gpu-layers 80 \
+    --n-gpu-layers-draft 28 \
+    --draft-max 5 \
+    --draft-min 1 \
+    --draft-p-min 0.8 \
     --prompt "Explain quantum entanglement: "
 
 # Method 2: llama-server (serving mode)
@@ -1840,7 +1846,7 @@ High-throughput batch serving (batch > 8):
 - Token trees generalize linear speculation: multiple draft branches verified with one ragged-attention target pass. EAGLE-2's adaptive tree achieves the best accepted-tokens-per-pass ratio.
 - Self-speculation variants eliminate the external draft model: EAGLE trains a ~40M-parameter head that achieves 0.85–0.91 α on code; Medusa attaches K parallel heads but has higher memory cost (~4 GB); ngram and prompt lookup require no training.
 - Enable speculative decoding when: batch ≤ 8, α > 0.75, task is code or structured output, low temperature. Disable when: batch > 32, creative generation, temperature > 0.9.
-- vLLM: `--speculative-model`, `--num-speculative-tokens`, `--use-v2-block-manager`. Each request gets both a draft and target KV cache — ~20–35% extra KV usage for small draft models.
+- vLLM: `--speculative-model`, `--num-speculative-tokens`. Each request gets both a draft and target KV cache — ~20–35% extra KV usage for small draft models. (`--use-v2-block-manager` was removed in vLLM ≥ 0.8; no longer needed.)
 - llama.cpp: `--model-draft`, `--draft-max`, `--draft-p-min`. The `--draft-p-min` flag adds conditional drafting — only draft when confident — which raises effective α and reduces wasted target calls.
 
 ## Self-Check Questions

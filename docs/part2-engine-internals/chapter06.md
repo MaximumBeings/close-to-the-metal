@@ -251,12 +251,10 @@ Free pool: [5, 6, 7, 8, 9, 10, 11]
 ```
 r2 done → free phys_2, phys_3.  Free pool: [2, 3, 5, 6, 7, 8, 9, 10, 11]
 
-r1: token 12 falls at position 12 = block index ceil(12/4)=3.
-    Actually position 12 means slot 0 of logical block 2 (0-indexed: positions
-    0-3 in blk 0, 4-7 in blk 1, 8-11 in blk 2, 12-15 in blk 3).
-    Wait — let me recalculate: r1 started with 7 tokens (0-6), generated tokens
-    at positions 7,8,9 in step C/D above. Token at position 12 → block
-    index = 12 // 4 = 3.  Allocate phys_2 (first free).
+r1: token 12 falls at position 12.
+    r1 started with 7 tokens (0-6) and generated tokens at positions 7, 8, 9
+    in steps C/D above. Position 12 → block index = 12 // 4 = 3.
+    Allocate phys_2 (first free).
 
 Block table r1:
   logical 0 → phys_0   (tokens  0- 3)

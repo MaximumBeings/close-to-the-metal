@@ -172,12 +172,17 @@ In practice vLLM recommends loading a subset of "hot" adapters and swapping cold
 ### 22.4.1  Enabling Multi-LoRA Serving
 
 ```bash
+# Key flag choices:
+#   --max-loras 4              max adapters loaded simultaneously in HBM
+#   --max-lora-rank 64         maximum r across all adapters
+#   --lora-extra-vocab-size 0  for adapters with custom vocab tokens
+#   --max-cpu-loras 32         LRU cache of adapters in CPU RAM
 vllm serve meta-llama/Llama-3.1-8B-Instruct \
     --enable-lora \
-    --max-loras 4 \              # max adapters loaded simultaneously in HBM
-    --max-lora-rank 64 \         # maximum r across all adapters
-    --lora-extra-vocab-size 0 \  # for adapters with custom vocab tokens
-    --max-cpu-loras 32           # LRU cache of adapters in CPU RAM
+    --max-loras 4 \
+    --max-lora-rank 64 \
+    --lora-extra-vocab-size 0 \
+    --max-cpu-loras 32
 ```
 
 `--max-loras` controls **hot slots** — how many adapters are resident in HBM at once. `--max-cpu-loras` controls the warm LRU cache in CPU RAM. Adapters not in either are fetched from disk.

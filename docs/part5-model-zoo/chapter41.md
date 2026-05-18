@@ -364,27 +364,33 @@ vllm serve meta-llama/Llama-3.2-3B-Instruct \
 
 ```bash
 # 70B at Q4_K_M (best quality/size tradeoff for 70B)
+# Key flag choices:
+#   --n-gpu-layers 80   all 80 layers to GPU (requires 2× 80GB GPU)
 llama-server \
     --model Meta-Llama-3.1-70B-Instruct-Q4_K_M.gguf \
     --ctx-size 32768 \
-    --n-gpu-layers 80 \     # all 80 layers to GPU (requires 2× 80GB GPU)
+    --n-gpu-layers 80 \
     --threads 8 \
     --batch-size 512 \
     --ubatch-size 128 \
     --port 8080
 
 # 8B at Q4_K_M — runs on a single consumer GPU (RTX 3090/4090)
+# Key flag choices:
+#   --n-gpu-layers 33   all 32 layers + embed
 llama-server \
     --model Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf \
     --ctx-size 32768 \
-    --n-gpu-layers 33 \     # all 32 layers + embed
+    --n-gpu-layers 33 \
     --port 8080
 
 # 3B for edge on Apple Silicon
+# Key flag choices:
+#   --n-gpu-layers 99   all to Metal GPU
 llama-server \
     --model Llama-3.2-3B-Instruct-Q4_K_M.gguf \
     --ctx-size 8192 \
-    --n-gpu-layers 99 \     # all to Metal GPU
+    --n-gpu-layers 99 \
     --port 8080
 ```
 

@@ -192,9 +192,11 @@ The practical implication: **llama.cpp's server should never be exposed directly
 ### 21.3.1  API Key for llama.cpp
 
 ```bash
+# Key flag choices:
+#   --host 127.0.0.1   bind to localhost only — critical
 llama-server \
     --model ./Llama-3.1-8B-Instruct-Q4_K_M.gguf \
-    --host 127.0.0.1 \          # bind to localhost only — critical
+    --host 127.0.0.1 \
     --port 8080 \
     --api-key "local-secret-xyz"
 ```

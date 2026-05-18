@@ -111,10 +111,12 @@ vllm serve microsoft/phi-4 \
 
 ```bash
 # Q4_K_M: 8.1 GB — fits in 12 GB VRAM with 2 GB for context
+# Key flag choices:
+#   --n-gpu-layers 40   all 40 layers to GPU
 llama-server \
     --model phi-4-q4_k_m.gguf \
     --ctx-size 16384 \
-    --n-gpu-layers 40 \  # all 40 layers to GPU
+    --n-gpu-layers 40 \
     --threads 4 \
     --port 8080
 
@@ -308,8 +310,10 @@ resolution image per request.
 
 ```bash
 # Gemma 3 27B on 1× H100 (text only)
+# Key flag choices:
+#   --max-model-len 32768   128K possible but expensive
 vllm serve google/gemma-3-27b-it \
-    --max-model-len 32768 \    # 128K possible but expensive
+    --max-model-len 32768 \
     --gpu-memory-utilization 0.90 \
     --enable-prefix-caching
 
@@ -331,17 +335,21 @@ vllm serve google/gemma-3-12b-it \
 
 ```bash
 # 27B at Q4_K_M: 16.5 GB — fits in 20 GB VRAM
+# Key flag choices:
+#   --n-gpu-layers 62   all 62 layers
 llama-server \
     --model gemma-3-27b-it-q4_k_m.gguf \
     --ctx-size 32768 \
-    --n-gpu-layers 62 \   # all 62 layers
+    --n-gpu-layers 62 \
     --port 8080
 
 # 4B at Q4_K_M on Raspberry Pi 5 (8GB RAM)
+# Key flag choices:
+#   --n-gpu-layers 0   CPU only
 llama-server \
     --model gemma-3-4b-it-q4_k_m.gguf \
     --ctx-size 4096 \
-    --n-gpu-layers 0 \    # CPU only
+    --n-gpu-layers 0 \
     --threads 4 \
     --port 8080
 ```

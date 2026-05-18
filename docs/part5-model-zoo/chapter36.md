@@ -176,20 +176,26 @@ vLLM supports 128K+ contexts directly. Key parameters:
 
 ```bash
 # 128K context serving
+# Key flag choices:
+#   --max-num-batched-tokens 2048   chunk size
+#   --kv-cache-dtype fp8            halve KV memory
 vllm serve Qwen/Qwen2.5-72B-Instruct \
     --tensor-parallel-size 4 \
     --max-model-len 131072 \
     --enable-chunked-prefill \
-    --max-num-batched-tokens 2048 \    # chunk size
-    --kv-cache-dtype fp8 \             # halve KV memory
+    --max-num-batched-tokens 2048 \
+    --kv-cache-dtype fp8 \
     --gpu-memory-utilization 0.92
 
 # For Kimi-compatible models (ultra-long context)
+# Key flag choices:
+#   --max-model-len 1048576   1M tokens
+#   --swap-space 64           64 GB CPU DRAM swap (Tier 2 analog)
 vllm serve moonshot-ai/kimi-model \
-    --max-model-len 1048576 \          # 1M tokens
+    --max-model-len 1048576 \
     --enable-chunked-prefill \
     --max-num-batched-tokens 4096 \
-    --swap-space 64 \                  # 64 GB CPU DRAM swap (Tier 2 analog)
+    --swap-space 64 \
     --kv-cache-dtype fp8
 ```
 

@@ -1695,7 +1695,7 @@ Group size = Hq / Hkv = 4 / 2 = 2 heads per group:
 
 - Head 3 and Head 0 share the **same K and V** (they are in different groups, actually: Head 0 in group 0, Head 3 in group 1 — different KVs).
 
-Wait — let me re-examine: Head 0 → Group 0 (KV₀). Head 3 → Group 1 (KV₁). They use **different** K/V sets.
+Correcting the group assignment: Head 0 → Group 0 (KV₀). Head 3 → Group 1 (KV₁). They use **different** K/V sets.
 
 Even if they shared KV, they would still produce different context vectors because:
 

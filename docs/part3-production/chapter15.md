@@ -649,33 +649,33 @@ Mitigations used in practice:
 
 ### Expert Parallelism in DeepSeek-V3
 
-DeepSeek-V3 uses **256 routed experts + 1 shared expert** per MoE layer. With top-2 routing (each token selects 2 of the 256 routed experts), the routing pattern per token is:
+DeepSeek-V3 uses **256 routed experts + 1 shared expert** per MoE layer. With top-8 routing (each token selects 8 of the 256 routed experts plus the always-active shared expert, giving 9 total active experts per token), the routing pattern per token is:
 
 ```
 DeepSeek-V3 EP configuration (from their technical report):
   Total experts:       256 routed + 1 shared
   EP degree:           EP=8 (32 routed experts per GPU)
-  Routing:             top-2 of 256 routed experts
+  Routing:             top-8 of 256 routed experts + 1 shared (always active)
   Shared expert:       1 (processed on every GPU in parallel)
-  All-to-all:          required for 2 of the 3 expert computations per token
+  All-to-all:          required for 8 of the 9 expert computations per token
 ```
 
-The shared expert runs locally on every GPU — no all-to-all needed for it. Only the 2 routed expert lookups require cross-GPU all-to-all, making the shared expert a free computation that stabilises training and inference.
+The shared expert runs locally on every GPU — no all-to-all needed for it. Only the 8 routed expert lookups require cross-GPU all-to-all, making the shared expert a free computation that stabilises training and inference.
 
 ### Worked Example: Token Distribution Variance
 
 Setup:
 
-- 256 experts, EP=8 (32 experts/GPU), top-2 routing, batch=64 tokens
+- 256 routed experts, EP=8 (32 experts/GPU), top-8 routing, batch=64 tokens
 
 Expected tokens per expert (uniform routing):
 ```
-  2 activations per token × 64 tokens = 128 activations total
-  128 / 256 experts = 0.5 tokens per expert on average
-  Per GPU (32 experts): 0.5 × 32 = 16 tokens expected
+  8 routed activations per token × 64 tokens = 512 activations total
+  512 / 256 experts = 2 tokens per expert on average
+  Per GPU (32 experts): 2 × 32 = 64 tokens expected
 ```
 
-With uniform routing, each GPU processes 16 tokens — ideal load balance.
+With uniform routing, each GPU processes 64 tokens — ideal load balance.
 
 In practice, popular experts receive 3–5× the average load. A GPU with 5× load serves 80 tokens; a GPU with 0.2× load serves ~3 tokens. The slowest GPU determines the step latency, so variance directly hurts throughput.
 
@@ -683,7 +683,7 @@ Communication cost estimate (NVLink, H100 SXM, 600 GB/s bidirectional):
 ```
   Token embedding: d_model = 7168 (DeepSeek-V3), BF16 = 2 bytes
   Bytes per token: 7168 × 2 = 14 336 bytes ≈ 14 KB
-  Tokens dispatched per GPU: 64 tokens × 2/8 = 16 tokens (2 routed, spread across 8)
+  Tokens dispatched per GPU: 64 tokens × 8/8 = 64 tokens (8 routed, spread across 8 GPUs)
   Dispatch bytes per GPU: 16 × 14 KB = 224 KB
   All-to-all time: 224 KB / (600 GB/s / 8 peers) ≈ 224 KB / 75 GB/s ≈ 3 µs
 ```
@@ -825,7 +825,7 @@ For inference-only pipelines, the relevant schedule is the **all-forward-then-dr
 - **NVLink vs PCIe**: NVLink (600 GB/s bidirectional on H100 SXM) is 10× faster than PCIe 4.0 (64 GB/s); TP efficiency drops sharply without NVLink.
 - **Expert parallelism (EP)**: for MoE models, experts are distributed across GPUs via `--expert-parallel-size`; each token is routed to its top-K experts on potentially different devices via all-to-all communication.
 - **Load imbalance in EP**: popular experts receive 3–5× average token load; auxiliary load-balancing loss during training and expert capacity buffers during inference mitigate this.
-- **DeepSeek-V3 EP**: 256 routed experts + 1 shared expert, EP=8 (32 experts/GPU), top-2 routing; shared expert runs locally with no all-to-all overhead.
+- **DeepSeek-V3 EP**: 256 routed experts + 1 shared expert, EP=8 (32 experts/GPU), top-8 routing (9 active per token including shared); shared expert runs locally with no all-to-all overhead.
 
 ---
 
