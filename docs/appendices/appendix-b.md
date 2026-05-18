@@ -75,23 +75,32 @@ GPU Architecture Support:
 
 ## B.2 vLLM Installation
 
-### B.2.1 Quick Install (pip)
+### B.2.1 Quick Install (pip / uv)
 
 ```bash
-# Create a clean virtual environment
-python3 -m venv vllm-env
-source vllm-env/bin/activate  # Linux/macOS
+# ── Recommended: use uv (faster resolver, handles torch-backend automatically) ──
+pip install uv
+
+# Create a virtualenv with Python 3.12 (preferred; 3.9–3.14 supported)
+uv venv vllm-env --python 3.12
+source vllm-env/bin/activate   # Linux/macOS
 # .\vllm-env\Scripts\activate   # Windows
 
-# Upgrade pip first (important)
+# Install latest vLLM — uv auto-selects the right CUDA wheel
+uv pip install vllm --torch-backend auto
+
+# ── Alternative: plain pip ──
+python3 -m venv vllm-env
+source vllm-env/bin/activate
 pip install --upgrade pip setuptools wheel
 
-# Install vLLM (CUDA 12.4 wheels)
+# Install vLLM (defaults to CUDA 13.0 wheel as of vLLM 0.21+)
 pip install vllm
 
-# For specific CUDA version:
-pip install vllm --extra-index-url https://download.pytorch.org/whl/cu121  # CUDA 12.1
-pip install vllm --extra-index-url https://download.pytorch.org/whl/cu118  # CUDA 11.8
+# Pin to a specific CUDA version:
+pip install vllm --extra-index-url https://download.pytorch.org/whl/cu130  # CUDA 13.0
+pip install vllm --extra-index-url https://download.pytorch.org/whl/cu128  # CUDA 12.8
+pip install vllm --extra-index-url https://download.pytorch.org/whl/cu124  # CUDA 12.4 (legacy)
 ```
 
 ### B.2.2 Installation Verification
@@ -155,8 +164,8 @@ pip install -r requirements-build.txt
 pip install -e . --no-build-isolation
 
 # For specific CUDA compute capability (skip auto-detection):
-TORCH_CUDA_ARCH_LIST="8.0 8.6 9.0" pip install -e . --no-build-isolation
-# 8.0 = A100, 8.6 = RTX 3090/A40, 9.0 = H100
+TORCH_CUDA_ARCH_LIST="8.0 8.6 9.0 10.0 12.0" pip install -e . --no-build-isolation
+# 8.0 = A100, 8.6 = RTX 3090/A40, 9.0 = H100/H200, 10.0 = B100/B200, 12.0 = RTX 5090
 
 # Enable FlashInfer (faster attention kernels):
 VLLM_ATTENTION_BACKEND=FLASHINFER pip install -e . --no-build-isolation
@@ -414,7 +423,7 @@ print(f'P2P 1→0: {torch.cuda.can_device_access_peer(1, 0)}')
 
 ```bash
 # Create environment with specific Python + CUDA
-conda create -n vllm python=3.11 cuda-toolkit=12.4 -c nvidia
+conda create -n vllm python=3.12 cuda-toolkit=12.8 -c nvidia
 conda activate vllm
 
 # Install vLLM
@@ -464,14 +473,18 @@ services:
 
 ## B.7 SGLang Installation
 
-SGLang is an alternative serving framework with strong structured generation support:
+SGLang (v0.5.12, May 2026) is an alternative serving framework with strong structured generation and speculative decoding support:
 
 ```bash
-# Install SGLang
+# Install SGLang (uv recommended)
+pip install uv
+uv pip install sglang
+
+# Or with pip
 pip install "sglang[all]"
 
 # Start server
-python -m sglang.launch_server \
+python3 -m sglang.launch_server \
     --model-path meta-llama/Llama-3.1-8B-Instruct \
     --port 30000 \
     --tp 1
@@ -497,11 +510,11 @@ print(state['answer'])
 TensorRT-LLM requires specific NVIDIA toolchain versions:
 
 ```bash
-# Prerequisites: CUDA 12.x, cuDNN 8.x, TensorRT 9.x
+# Prerequisites: CUDA 12.8.1+, cuDNN 9.x, TensorRT 10.x
 # Best approach: use official NGC container
 
-# Pull TRT-LLM container (update tag to latest)
-docker pull nvcr.io/nvidia/tritonserver:24.01-trtllm-python-py3
+# Pull TRT-LLM container (update tag to latest — check catalog.ngc.nvidia.com)
+docker pull nvcr.io/nvidia/tritonserver:25.12-trtllm-python-py3
 
 # Or install directly (may have dependency conflicts)
 pip install tensorrt-llm --extra-index-url https://pypi.nvidia.com
@@ -546,15 +559,24 @@ OOM during prefill but not decode   | Context too long      | Reduce --max-model
 ## B.10 Version Compatibility Table
 
 ```
-vLLM Version | PyTorch | CUDA  | Python | Notes
-─────────────────────────────────────────────────────────────
-0.6.x        | 2.5.x   | 12.4  | 3.9-3.12 | Current stable
-0.5.x        | 2.4.x   | 12.2  | 3.8-3.12 | Previous stable  
-0.4.x        | 2.3.x   | 12.1  | 3.8-3.11 | Legacy
+vLLM Version | PyTorch | CUDA (default) | Python    | Notes
+──────────────────────────────────────────────────────────────────────
+0.21.x       | 2.11    | 13.0           | 3.9-3.14  | Current stable
+0.9.x–0.20.x | 2.7–2.10| 12.8–13.0     | 3.9-3.12  | Recent; use Python 3.12
+0.6.x–0.8.x  | 2.5–2.6 | 12.4–12.6     | 3.9-3.12  | Legacy
+0.5.x        | 2.4.x   | 12.2           | 3.8-3.12  | Legacy
+0.4.x        | 2.3.x   | 12.1           | 3.8-3.11  | Legacy (avoid)
+
+Notes:
+  • Install: uv pip install vllm --torch-backend auto  (picks correct wheel)
+  • vLLM < v0.10.0: pin Python 3.12 (uv venv --python 3.12)
+  • vLLM v0.9.x: requires transformers < 4.54.0
+  • C++20 toolchain required for building from source (vLLM 0.18+)
 
 llama.cpp    | GGUF    | Build System  | Notes
-────────────────────────────────────────────────────────
-b4000+       | v3      | CMake         | Current (2025+)
+────────────────────────────────────────────────────────────────
+b5000+       | v3      | CMake         | Current (2026); check GitHub for latest tag
+b4000-b4999  | v3      | CMake         | 2025
 b3000-b3999  | v3      | CMake/Makefile| Transition period
 < b3000      | v2/v3   | Makefile      | Legacy (avoid)
 ```
@@ -565,11 +587,11 @@ b3000-b3999  | v3      | CMake/Makefile| Transition period
 
 Running vLLM and llama.cpp in Docker ensures reproducible environments and simplifies deployment. These are pinned to specific versions — update the tags when upgrading.
 
-### vLLM Docker (CUDA 12.4, PyTorch 2.5)
+### vLLM Docker (CUDA 13.0, PyTorch 2.11)
 
 ```dockerfile
 # Dockerfile.vllm
-FROM vllm/vllm-openai:v0.6.3
+FROM vllm/vllm-openai:v0.21.0
 
 # Pin Python deps for reproducibility
 RUN pip install --no-cache-dir \
@@ -592,7 +614,7 @@ ENTRYPOINT ["python", "-m", "vllm.entrypoints.openai.api_server"]
 
 ```bash
 # Build and run vLLM container (single H100)
-docker build -t my-vllm:v0.6.3 -f Dockerfile.vllm .
+docker build -t my-vllm:v0.21.0 -f Dockerfile.vllm .
 
 docker run -d \
   --name vllm-serve \
@@ -602,7 +624,7 @@ docker run -d \
   -v /data/models:/models \
   -v /tmp/vllm-cache:/root/.cache/huggingface \
   -e HF_TOKEN="${HF_TOKEN}" \
-  my-vllm:v0.6.3 \
+  my-vllm:v0.21.0 \
     --model /models/Meta-Llama-3.1-8B-Instruct \
     --served-model-name llama3-8b \
     --max-model-len 8192 \
@@ -619,7 +641,7 @@ version: "3.9"
 
 services:
   vllm:
-    image: vllm/vllm-openai:v0.6.3
+    image: vllm/vllm-openai:v0.21.0
     ipc: host
     network_mode: host
     deploy:
@@ -658,21 +680,22 @@ services:
 
 ```dockerfile
 # Dockerfile.llama-cpp
-FROM nvidia/cuda:12.4.1-devel-ubuntu22.04
+FROM nvidia/cuda:12.8.1-devel-ubuntu22.04
 
 RUN apt-get update && apt-get install -y \
     git cmake build-essential curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Pin llama.cpp to a specific build tag
-ARG LLAMA_CPP_TAG=b4235
+# Pin llama.cpp to a specific build tag — check https://github.com/ggml-org/llama.cpp/releases
+# for the latest tag (project releases ~170+ builds/month; was b5000+ as of mid-2026)
+ARG LLAMA_CPP_TAG=b5300
 RUN git clone --depth 1 --branch ${LLAMA_CPP_TAG} \
-    https://github.com/ggerganov/llama.cpp.git /llama.cpp
+    https://github.com/ggml-org/llama.cpp.git /llama.cpp
 
 WORKDIR /llama.cpp
 RUN cmake -B build \
     -DGGML_CUDA=ON \
-    -DCMAKE_CUDA_ARCHITECTURES="80;89;90" \
+    -DCMAKE_CUDA_ARCHITECTURES="80;89;90;100;120" \
     -DCMAKE_BUILD_TYPE=Release \
     && cmake --build build --config Release -j$(nproc) \
     && cp build/bin/llama-server /usr/local/bin/
@@ -684,14 +707,14 @@ ENTRYPOINT ["llama-server"]
 
 ```bash
 # Run llama.cpp server
-docker build -t my-llamacpp:b4235 -f Dockerfile.llama-cpp .
+docker build -t my-llamacpp:b5300 -f Dockerfile.llama-cpp .
 
 docker run -d \
   --name llamacpp-serve \
   --gpus '"device=0"' \
   -p 8080:8080 \
   -v /data/models:/models:ro \
-  my-llamacpp:b4235 \
+  my-llamacpp:b5300 \
     --model /models/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf \
     --n-gpu-layers 999 \
     --ctx-size 8192 \
@@ -708,22 +731,22 @@ For development machines where Docker overhead is undesirable:
 
 ```bash
 # Create pinned environment
-conda create -n vllm-dev python=3.11 -y
+conda create -n vllm-dev python=3.12 -y
 conda activate vllm-dev
 
 # Install CUDA toolkit matching your driver
-conda install -c nvidia cuda-toolkit=12.4 -y
+conda install -c nvidia cuda-toolkit=12.8 -y
 
-# Install PyTorch (pinned)
-pip install torch==2.5.1 torchvision==0.20.1 \
-    --index-url https://download.pytorch.org/whl/cu124
+# Install PyTorch (pinned) — check https://pytorch.org/get-started/locally/ for latest
+pip install torch==2.11.0 torchvision==0.22.0 \
+    --index-url https://download.pytorch.org/whl/cu128
 
 # Install vLLM (pinned)
-pip install vllm==0.6.3
+pip install vllm==0.21.0
 
 # Install llama-cpp-python with CUDA
 CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=native" \
-pip install llama-cpp-python==0.3.2 --no-cache-dir
+pip install llama-cpp-python --no-cache-dir
 
 # Save exact environment
 pip freeze > requirements-vllm-dev.txt
@@ -753,7 +776,7 @@ check() {
 }
 
 echo "=== vLLM Health Check ==="
-check "Python 3.9+"          "python3 --version | grep -E '3\.(9|10|11|12)'"
+check "Python 3.9+"          "python3 --version | grep -E '3\.(9|10|11|12|13|14)'"
 check "CUDA available"       "python3 -c 'import torch; assert torch.cuda.is_available()'"
 check "vLLM importable"      "python3 -c 'import vllm; print(vllm.__version__)'"
 check "vLLM serve starts"    "timeout 5 python3 -m vllm.entrypoints.openai.api_server --help"
@@ -783,22 +806,25 @@ Running vLLM or llama.cpp locally requires a capable GPU. When you are working o
 ### B.14.1 Platform Comparison at a Glance
 
 ```
-Platform     GPU Selection    Pricing Model     Best For
-──────────────────────────────────────────────────────────────────────────
-AWS EC2      Wide (A100/H100) On-demand/Spot    Production, compliance, VPC
-Lambda       B200/H100/A100   Hourly on-demand  Research, simple setup, no egress fees
-RunPod       A100/H100/RTX    Hourly pods       Dev/experimentation, cheap
-Modal        A100/H100/T4     Per-second billed Serverless functions, CI
-Vast.ai      Mixed (market)   Bid/on-demand     Cheapest H100, flexible
-──────────────────────────────────────────────────────────────────────────
+Platform     GPU Selection              Pricing Model      Best For
+──────────────────────────────────────────────────────────────────────────────
+AWS EC2      T4/A10G/A100/H100/H200/B200 On-demand/Spot  Production, compliance, VPC
+Lambda       B200/H100/A100/V100        Hourly on-demand   Research, no egress fees
+RunPod       25+ GPUs (A100–B200)       Per-minute pods    Dev/experimentation, cheap
+Modal        B200/H200/H100/A100/L40S   Per-second billed  Serverless functions, CI
+Vast.ai      Mixed (marketplace)        Bid/on-demand      Cheapest H100, flexible
+──────────────────────────────────────────────────────────────────────────────
 
-Approximate spot prices for one H100 SXM5 80GB (May 2026, varies):
-  AWS EC2 p5.xlarge:    $6.98/hr on-demand,  ~$2.50/hr spot
-  Lambda H100 SXM:      $3.99/hr on-demand   (no spot)
-  Lambda B200 SXM6:     $6.69/hr on-demand   (no spot)
-  RunPod H100 SXM:      $2.49/hr on-demand   (community cloud)
-  Modal H100:           $4.63/hr (billed per second)
-  Vast.ai H100 SXM:     $1.89–$3.20/hr       (marketplace bid)
+Approximate prices for one H100 SXM5 80GB (May 2026, varies):
+  AWS EC2 p5.48xlarge:    ~$6.98/GPU/hr on-demand,  ~$2.50/hr spot
+  AWS EC2 p5e.48xlarge:   ~$4.30/GPU/hr (H200 SXM)  on-demand
+  Lambda H100 SXM:         $3.99/hr on-demand         (no spot)
+  Lambda B200 SXM6:        $6.69/hr on-demand         (no spot)
+  RunPod H100 SXM:         $2.69/hr community cloud / $2.99/hr secure cloud
+  Modal H100 (preemptible):$3.95/hr ($0.001097/sec)
+  Modal H200 (preemptible):$4.54/hr ($0.001261/sec)
+  Modal B200 (preemptible):$6.25/hr ($0.001736/sec)  — non-preemptible 3×
+  Vast.ai H100 SXM:        $1.89–$3.20/hr            (marketplace bid)
 ```
 
 ---
@@ -810,16 +836,17 @@ AWS EC2 is the right choice when you need production-grade SLAs, VPC networking,
 **Recommended instance types for LLM inference:**
 
 ```
-Instance         GPU                  VRAM     Use case
-───────────────────────────────────────────────────────────────────
-g4dn.xlarge      T4 (1×)              16 GB    7B Q4 models, dev/test
-g4dn.12xlarge    T4 (4×)              64 GB    13B–34B models
-g5.xlarge        A10G (1×)            24 GB    7B BF16, 13B Q4
-g5.12xlarge      A10G (4×)            96 GB    70B Q4, 34B BF16
-p3.2xlarge       V100 (1×)            16 GB    Legacy; prefer g5
-p4d.24xlarge     A100 40GB (8×)       320 GB   70B BF16, large batches
-p4de.24xlarge    A100 80GB (8×)       640 GB   2×70B, MoE models
-p5.48xlarge      H100 SXM5 (8×)       640 GB   Frontier models
+Instance         GPU                  VRAM     On-demand/GPU  Use case
+──────────────────────────────────────────────────────────────────────────────
+g4dn.xlarge      T4 (1×)              16 GB    ~$0.53/hr      7B Q4 models, dev/test
+g4dn.12xlarge    T4 (4×)              64 GB    ~$0.53/hr      13B–34B models
+g5.xlarge        A10G (1×)            24 GB    ~$1.01/hr      7B BF16, 13B Q4
+g5.12xlarge      A10G (4×)            96 GB    ~$1.01/hr      70B Q4, 34B BF16
+p4d.24xlarge     A100 40GB (8×)       320 GB   ~$3.21/hr      70B BF16, large batches
+p4de.24xlarge    A100 80GB (8×)       640 GB   ~$4.07/hr      2×70B, MoE models
+p5.48xlarge      H100 SXM5 (8×)       640 GB   ~$6.98/hr      Frontier models (Hopper)
+p5e.48xlarge     H200 SXM (8×)        1128 GB  ~$4.30/hr      Large KV cache, 70B+ BF16
+p6-b200.48xlarge B200 SXM (8×)        1440 GB  ~$14.24/hr     Blackwell; FP4/FP8 training
 ```
 
 **Step 1 — Launch via AWS CLI:**
@@ -829,13 +856,13 @@ p5.48xlarge      H100 SXM5 (8×)       640 GB   Frontier models
 pip install awscli
 aws configure   # enter Access Key, Secret Key, region (e.g. us-east-1)
 
-# Find the latest Deep Learning AMI (Ubuntu 22.04, CUDA 12.x pre-installed)
+# Find the latest Deep Learning AMI (Ubuntu 22.04, CUDA 13.x pre-installed)
 aws ec2 describe-images \
   --owners amazon \
   --filters "Name=name,Values=Deep Learning OSS Nvidia Driver AMI GPU PyTorch*Ubuntu*" \
   --query "sort_by(Images, &CreationDate)[-1].[ImageId,Name]" \
   --output text
-# e.g. ami-0abcd1234efgh5678  Deep Learning OSS Nvidia Driver AMI GPU PyTorch 2.5 ...
+# e.g. ami-0abcd1234efgh5678  Deep Learning OSS Nvidia Driver AMI GPU PyTorch 2.11 ...
 
 # Create a key pair (skip if you have one)
 aws ec2 create-key-pair --key-name my-gpu-key \
@@ -1039,12 +1066,12 @@ curl -u "${LAMBDA_API_KEY}:" \
 
 ### B.14.4 RunPod
 
-RunPod offers GPU pods with per-minute billing, a marketplace of community cloud GPUs, and a clean web UI. It is the most flexible in terms of GPU variety (including older A6000, 3090, 4090 for small models) and often the cheapest option for H100s in the community cloud tier.
+RunPod offers GPU pods with per-minute billing, 25+ GPU models across 31 global regions, and a clean web UI. It is the most flexible in terms of GPU variety (A10 through H100 SXM, RTX 4090, and more) and often the cheapest H100 option in the community cloud tier.
 
 **Two tiers:**
 
-- **Secure Cloud**: RunPod-operated data centres, higher reliability, slightly higher price.
-- **Community Cloud**: Third-party hosts, lower price, occasional interruptions.
+- **Secure Cloud** ($2.99/hr H100 SXM): RunPod-operated data centres, higher reliability, network storage, enterprise SLA.
+- **Community Cloud** ($2.69/hr H100 SXM): Third-party hosts, lower price, occasional interruptions — suitable for batch jobs.
 
 **Step 1 — Launch a pod via RunPod CLI:**
 
@@ -1166,8 +1193,8 @@ import modal
 
 # Define the container image with vLLM pre-installed
 vllm_image = (
-    modal.Image.debian_slim(python_version="3.11")
-    .pip_install("vllm==0.6.3", "huggingface_hub")
+    modal.Image.debian_slim(python_version="3.12")
+    .pip_install("vllm==0.21.0", "huggingface_hub")
     .env({"HF_TOKEN": modal.Secret.from_name("hf-token")})
 )
 
@@ -1181,7 +1208,7 @@ MODEL_NAME = "meta-llama/Llama-3.1-8B-Instruct"
 
 @app.function(
     image=vllm_image,
-    gpu="H100",                  # or "A100", "A10G", "T4"
+    gpu="H100",                  # or "H200", "B200", "A100", "L40S", "A10G", "T4"
     volumes={MODEL_DIR: model_volume},
     timeout=3600,                # 1 hour max runtime
     allow_concurrent_inputs=100, # handle 100 concurrent requests
@@ -1287,7 +1314,7 @@ modal run batch_inference.py
 
 **Modal-specific tips:**
 
-- Modal bills **per second of GPU time** — you pay for exactly the compute used, with no idle time. A batch job that runs for 3 minutes on an H100 costs $4.63/hr × 3/60 hr ≈ $0.23.
+- Modal bills **per second of GPU time** — you pay for exactly the compute used, with no idle time. A batch job that runs for 3 minutes on an H100 costs $3.95/hr × 3/60 hr ≈ $0.20. Non-preemptible execution is 3× base price ($11.85/hr H100); region selection adds 1.5–1.75×.
 - Use `modal.Volume` to cache model weights; without it, the container re-downloads the model on every cold start (~5 min for an 8B model).
 - Cold start for a new container (with a warm Volume) is typically 30–90 seconds for vLLM. Use `keep_warm=1` on the function decorator if you need sub-second latency.
 - Modal's `concurrency_limit` controls how many GPU containers it will spin up simultaneously — use this to control maximum spend on parallel jobs.
