@@ -572,15 +572,15 @@ The reference progression for GPU kernel expertise in LLM inference: start with 
 
 ## Self-Check Questions
 
-1. A Triton kernel is launched with `grid = (M // 128, N // 256)` and `BLOCK_M=128, BLOCK_N=256`. How many program instances are launched for M=4096, N=8192? What does each program instance compute? *(Section P.2)*
+1. A Triton kernel is launched with `grid = (M // 128, N // 256)` and `BLOCK_M=128, BLOCK_N=256`. How many program instances are launched for M=4096, N=8192? What does each program instance compute? *(Section M.2)*
 
-2. Explain why `tl.dot(a, b)` in a Triton kernel with `BLOCK_M=128, BLOCK_N=256, BLOCK_K=64` produces Tensor Core instructions on an A100, but the same call with `BLOCK_K=3` does not. *(Section P.4)*
+2. Explain why `tl.dot(a, b)` in a Triton kernel with `BLOCK_M=128, BLOCK_N=256, BLOCK_K=64` produces Tensor Core instructions on an A100, but the same call with `BLOCK_K=3` does not. *(Section M.4)*
 
-3. The fused softmax kernel in §P.6 requires the entire row to fit in `BLOCK_SIZE` registers. For a 128K-context model with sequence length 131,072 and FP32 accumulation, how much register memory does one row require? Why does this constraint force FlashAttention to use the tiling approach instead? *(Section P.6)*
+3. The fused softmax kernel in §M.6 requires the entire row to fit in `BLOCK_SIZE` registers. For a 128K-context model with sequence length 131,072 and FP32 accumulation, how much register memory does one row require? Why does this constraint force FlashAttention to use the tiling approach instead? *(Section M.6)*
 
-4. An autotuner runs 6 configurations × 50 warmup + 100 timed iterations each. Each kernel call takes 2 ms. Estimate the total autotuning time for one (M, N, K) shape. When does this cost amortise? *(Section P.7)*
+4. An autotuner runs 6 configurations × 50 warmup + 100 timed iterations each. Each kernel call takes 2 ms. Estimate the total autotuning time for one (M, N, K) shape. When does this cost amortise? *(Section M.7)*
 
-5. The fused dequantise + GEMV kernel in §P.11.1 loads INT4 weights packed 2 per byte and applies per-group FP16 scales. For a 7B-parameter model with 4096 rows × 4096 columns in each weight matrix and group size=128, compute the total HBM reads for one forward pass token, and compare to serving the same model in BF16. *(Section P.11)*
+5. The fused dequantise + GEMV kernel in §M.11.1 loads INT4 weights packed 2 per byte and applies per-group FP16 scales. For a 7B-parameter model with 4096 rows × 4096 columns in each weight matrix and group size=128, compute the total HBM reads for one forward pass token, and compare to serving the same model in BF16. *(Section M.11)*
 
 
 ---

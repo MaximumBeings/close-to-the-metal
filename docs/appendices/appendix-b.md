@@ -1630,3 +1630,7 @@ python -m vllm.entrypoints.openai.api_server --help
 vllm serve meta-llama/Llama-3.1-8B 2>&1 | grep -i deprecat
 ```
 
+Always test flag compatibility in a staging environment before updating production deployments. When in doubt, `vllm serve --help` is the authoritative source — the online changelog at <https://docs.vllm.ai/en/latest/changelog.html> tracks every rename and removal across releases.
+
+*Next: Appendix C covers model loading internals — how vLLM converts HuggingFace weights into its own tensor layout and which dtypes are supported natively versus via automatic conversion.*
+

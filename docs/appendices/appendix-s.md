@@ -2574,3 +2574,7 @@ if __name__ == "__main__":
   Results: 22/22 passed ✓
 ======================================================================
 ```
+
+All 22 checks validate the full CI/CD surface: YAML syntax, health-poll simulation, SLO gating (p95 TTFT and ITL), smoke-test client, and secret hygiene scanning. To extend the harness, pass `--server http://localhost:8000` to exercise the live smoke-test path, or add a `test_rollback_trigger()` section that verifies your pipeline aborts and rolls back when the p95 TTFT gate fails.
+
+*Next: Appendix T covers cold-start latency — how model loading time, CUDA graph capture, and JIT compilation affect the time-to-first-token for a freshly launched vLLM instance.*

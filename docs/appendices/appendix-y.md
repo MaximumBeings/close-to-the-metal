@@ -906,3 +906,7 @@ if __name__ == "__main__":
   Results: 11/11 passed ✓
 ======================================================================
 ```
+
+The 11 offline checks cover roofline arithmetic, ridge-point calculation, SRAM budget analysis, MemoryX streaming headroom, and weight/KV-cache sizing for both BF16 and FP8 regimes. To enable the live API section, obtain a Cerebras Cloud API key, set `CEREBRAS_API_KEY`, and run without `--offline` — the harness will benchmark `llama3.1-8b` and `llama3.1-70b` and assert that measured throughput exceeds the H100 baseline by the predicted factor.
+
+*Next: Appendix Z covers JAX and XLA — how Google's functional array framework compiles Python to optimised HLO, and how `jit`, `vmap`, `grad`, and `pmap` compose to express the full LLM forward pass without imperative mutation.*

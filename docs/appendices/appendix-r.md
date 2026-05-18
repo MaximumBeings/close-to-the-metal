@@ -1446,3 +1446,7 @@ if __name__ == "__main__":
   Results: 21/21 passed ✓
 ======================================================================
 ```
+
+All 21 checks cover the full edge-inference stack: hardware detection, SIMD capability, quantized-model size estimates, and per-device decode-throughput floors. To extend the harness, add a `test_llama_cpp_generation()` section that calls `llama-cli` with a short prompt and verifies the token/s figure lands within the predicted bandwidth-bound range for your specific board.
+
+*Next: Appendix S covers CI/CD pipelines for LLM serving — automated health checks, SLO gating, and secret hygiene scanning that keep production deployments green.*

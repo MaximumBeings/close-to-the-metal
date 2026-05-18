@@ -558,15 +558,15 @@ The reference path for this book's GPU kernel appendices: Appendix L (CUDA funda
 
 ## Self-Check Questions
 
-1. A `fn` in Mojo requires explicit type annotations and uses `borrowed` by default for arguments. A `def` uses dynamic typing like Python. Write a `fn` that takes a `borrowed` float array pointer and its length, and returns the maximum value using SIMD operations. Why is `borrowed` the correct convention here rather than `inout` or `owned`? *(Section R.2)*
+1. A `fn` in Mojo requires explicit type annotations and uses `borrowed` by default for arguments. A `def` uses dynamic typing like Python. Write a `fn` that takes a `borrowed` float array pointer and its length, and returns the maximum value using SIMD operations. Why is `borrowed` the correct convention here rather than `inout` or `owned`? *(Section O.2)*
 
-2. `parallelize[compute_row](M)` distributes M rows across CPU cores. For M=4096 on a 16-core machine, how many rows does each core handle? If each row operation takes 2 µs, what is the theoretical parallel speedup vs sequential, and what limits it in practice? *(Section R.6)*
+2. `parallelize[compute_row](M)` distributes M rows across CPU cores. For M=4096 on a 16-core machine, how many rows does each core handle? If each row operation takes 2 µs, what is the theoretical parallel speedup vs sequential, and what limits it in practice? *(Section O.6)*
 
-3. The embedding lookup in §R.8.2 copies `embed_dim` floats using SIMD for each token. For a sequence of 2,048 tokens with embed_dim=4096 and simd_width=16, compute the total number of SIMD load+store operations. Compare to a naive Python loop in terms of instruction count. *(Section R.8)*
+3. The embedding lookup in §O.8.2 copies `embed_dim` floats using SIMD for each token. For a sequence of 2,048 tokens with embed_dim=4096 and simd_width=16, compute the total number of SIMD load+store operations. Compare to a naive Python loop in terms of instruction count. *(Section O.8)*
 
-4. Mojo's `SIMD[DType.float32, 16]` maps to a 512-bit AVX-512 register. An A100 GPU's SIMD width for FP32 is effectively 32 (one warp = 32 threads, each doing one FP32 op). Compare the theoretical FLOPs/second for: (a) a single AVX-512 core at 5 GHz, (b) one A100 SM (128 FP32 CUDA cores at 1.41 GHz), (c) a full A100 (108 SMs). *(Sections R.4, Appendix L.2)*
+4. Mojo's `SIMD[DType.float32, 16]` maps to a 512-bit AVX-512 register. An A100 GPU's SIMD width for FP32 is effectively 32 (one warp = 32 threads, each doing one FP32 op). Compare the theoretical FLOPs/second for: (a) a single AVX-512 core at 5 GHz, (b) one A100 SM (128 FP32 CUDA cores at 1.41 GHz), (c) a full A100 (108 SMs). *(Sections O.4, Appendix L.2)*
 
-5. The MAX `LLMPipeline` compiles a HuggingFace model to optimized code. For a deployment on Apple M3 Max (128 GB unified memory, Metal GPU), describe what hardware path MAX would use for: (a) the embedding lookup, (b) the attention GEMM, (c) the output logit computation. Why is unified memory particularly advantageous for MAX's multi-target compilation on Apple Silicon? *(Section R.9)*
+5. The MAX `LLMPipeline` compiles a HuggingFace model to optimized code. For a deployment on Apple M3 Max (128 GB unified memory, Metal GPU), describe what hardware path MAX would use for: (a) the embedding lookup, (b) the attention GEMM, (c) the output logit computation. Why is unified memory particularly advantageous for MAX's multi-target compilation on Apple Silicon? *(Section O.9)*
 
 
 ---
