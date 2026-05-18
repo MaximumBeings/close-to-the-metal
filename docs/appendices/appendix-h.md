@@ -672,6 +672,20 @@ vllm serve <model> --role decode \
 
 ---
 
+## Self-Check Questions
+
+1. You are deploying a 7B-parameter model (BF16) on a single A100 80GB GPU to serve an interactive chat API. The service must handle 100 requests per minute with a P99 TTFT below 500 ms. Prompt lengths vary widely, from 128 to 4,096 tokens. Which vLLM flags are most important, and why? *(Section H.4)*
+
+2. Your team needs to serve a 70B-parameter model and expects 1,000 requests per minute. The team has no on-premises GPU cluster and is cost-sensitive. What combination of model format, hardware configuration, and routing strategy would you recommend? *(Section H.7)*
+
+3. You are building a streaming chatbot that must run locally on an Apple M2 MacBook Pro with 16 GB of unified memory, supporting up to 10 concurrent users. Which model, quantization format, and runtime would you choose, and how do you verify the memory budget? *(Section H.2)*
+
+4. A RAG pipeline sends the same 2,048-token system prompt to every user. The service must handle 500 concurrent requests. Which single flag delivers the highest ROI, and what latency improvement should you expect after the cache warms up? *(Section H.5)*
+
+5. You must maintain 99.9% uptime for a production vLLM service that experiences a predictable 10× traffic spike every weekday at 8 AM. Design a Kubernetes autoscaling policy — including baseline replicas, max replicas, scale-up speed, and predictive pre-scaling — to meet the SLA without over-provisioning. *(Section H.9)*
+
+---
+
 ## Worked Solutions
 
 ### Question 1

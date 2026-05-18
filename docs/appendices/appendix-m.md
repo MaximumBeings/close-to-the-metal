@@ -17,7 +17,7 @@
 
 **What you need first:**
 
-- Appendix L (CUDA C++) — especially sections J.2 (GPU hardware) and J.5 (memory hierarchy)
+- Appendix L (CUDA C++) — especially sections L.2 (GPU hardware) and L.5 (memory hierarchy)
 - Python comfort (decorators, NumPy-style indexing)
 - No prior Triton experience required
 

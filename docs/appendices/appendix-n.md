@@ -16,7 +16,7 @@
 
 **What you need first:**
 
-- Appendix L (CUDA C++) — sections J.2 through J.6
+- Appendix L (CUDA C++) — sections L.2 through L.6
 - Appendix M (Triton) — optional but helpful for context on the abstraction stack
 - C++ template familiarity (CUTLASS is heavily templated)
 
@@ -77,21 +77,22 @@ On H100, the `wgmma.mma_async` instruction is issued by an entire **warp group**
 Inside a Tensor Core, the computation is performed by a grid of multiply-accumulate units wired to process small fixed-size matrix fragments simultaneously:
 
 ```
-WORKED EXAMPLE Q.1 — A100 Tensor Core Throughput
+WORKED EXAMPLE N.2.1 — A100 Tensor Core Throughput
 ──────────────────────────────────────────────────────────────────
 A100 SM configuration:
-  4 Tensor Core units per SM
-  Each Tensor Core: processes one 16×16×16 MMA per clock
-  One 16×16×16 MMA: 2 × 16 × 16 × 16 = 8,192 FP16 MACs
+  4 sub-partitions × 4 Tensor Cores = 16 Tensor Cores per SM
+  Each Tensor Core: 4×4×4 FP16 MMA = 128 FLOP/clock
   SM clock: ~1.41 GHz
 
 Per-SM Tensor Core throughput:
-  4 × 8,192 × 1.41 × 10⁹ = 46.3 TFLOPS per SM (FP16)
+  16 × 128 = 2,048 FLOP/SM/clock
+  2,048 × 1.41 × 10⁹ = 2,888 GFLOPS/SM ≈ 2.89 TFLOPS/SM
 
 A100 total (108 SMs):
-  108 × 46.3 = 4,998 TFLOPS ≈ 312 TFLOPS (with 2 ops per MAC)
+  108 × 2.89 TFLOPS = 312 TFLOPS (dense FP16) ✓
 
-This matches NVIDIA's published 312 TFLOPS FP16 Tensor Core spec.
+This matches NVIDIA's published 312 TFLOPS dense FP16 Tensor Core spec.
+Sparse FP16 (2:4 structured sparsity) doubles this to 624 TFLOPS.
 ──────────────────────────────────────────────────────────────────
 ```
 
@@ -595,15 +596,15 @@ For LLM inference engineering, CUTLASS matters at three levels:
 
 ## Self-Check Questions
 
-1. An A100 SM has 4 Tensor Core units, each executing one 16×16×16 FP16 MMA per clock. The SM clock is 1.41 GHz. Verify the 312 TFLOPS A100 specification by computing per-SM throughput × 108 SMs. *(Section Q.2)*
+1. An A100 SM has 4 sub-partitions each with 4 Tensor Cores, and each Tensor Core executes a 4×4×4 FP16 MMA (128 FLOP) per clock. The SM clock is 1.41 GHz. Verify the 312 TFLOPS A100 specification by computing per-SM throughput × 108 SMs. *(Section N.2)*
 
-2. A CuTe layout `make_layout(make_shape(4, 8), make_stride(1, 4))` describes a column-major 4×8 tensor. Compute the memory offset for element (3, 5) and verify it matches column-major indexing. *(Section Q.3)*
+2. A CuTe layout `make_layout(make_shape(4, 8), make_stride(1, 4))` describes a column-major 4×8 tensor. Compute the memory offset for element (3, 5) and verify it matches column-major indexing. *(Section N.3)*
 
-3. A CUTLASS FP16 GEMM uses `BLOCK_M=128, BLOCK_N=256, BLOCK_K=32` with 3-stage pipelining. Each stage requires two FP16 tiles (A and B) in shared memory. Compute the total shared memory per block and the maximum number of blocks per SM (H100 has 228 KB shared memory per SM). *(Section Q.9)*
+3. A CUTLASS FP16 GEMM uses `BLOCK_M=128, BLOCK_N=256, BLOCK_K=32` with 3-stage pipelining. Each stage requires two FP16 tiles (A and B) in shared memory. Compute the total shared memory per block and the maximum number of blocks per SM (H100 has 228 KB shared memory per SM). *(Section N.9)*
 
-4. A 70B model has weight matrices of shape 8192×28672 (FFN up-projection). At FP8 with 2:4 sparsity, compute the memory savings vs BF16 dense for this single weight matrix. How many such matrices are in a 70B model (assuming 80 transformer layers), and what is the total memory saving? *(Section Q.8)*
+4. A 70B model has weight matrices of shape 8192×28672 (FFN up-projection). At FP8 with 2:4 sparsity, compute the memory savings vs BF16 dense for this single weight matrix. How many such matrices are in a 70B model (assuming 80 transformer layers), and what is the total memory saving? *(Section N.8)*
 
-5. TensorRT-LLM compiles a 70B model for H100 FP8 on a machine with 8 H100 GPUs. The profiler tests 24 tile configurations × 3 pipeline depths × 4 swizzle patterns = 288 kernel variants. Each variant benchmarks for 5 seconds. Estimate the minimum compile time, and explain why the actual time (30–60 minutes) might be longer. *(Section Q.10)*
+5. TensorRT-LLM compiles a 70B model for H100 FP8 on a machine with 8 H100 GPUs. The profiler tests 24 tile configurations × 3 pipeline depths × 4 swizzle patterns = 288 kernel variants. Each variant benchmarks for 5 seconds. Estimate the minimum compile time, and explain why the actual time (30–60 minutes) might be longer. *(Section N.10)*
 
 
 ---
@@ -611,68 +612,32 @@ For LLM inference engineering, CUTLASS matters at three levels:
 ## Worked Solutions
 
 ### Question 1
-**A100: 4 Tensor Core units/SM, one 16x16x16 FP16 MMA per clock, 1.41 GHz clock, 108 SMs. Verify 312 TFLOPS.**
+**A100: 16 Tensor Cores per SM (4 sub-partitions × 4 TCs), each executing a 4×4×4 FP16 MMA (128 FLOP/clock), 1.41 GHz clock, 108 SMs. Verify 312 TFLOPS.**
 
-**Per-SM throughput:**
-Each SM has 4 Tensor Core units. Each unit executes one 16x16x16 FP16 MMA per clock cycle.
-
-FLOPs per MMA:
+**Step 1 — FLOP per Tensor Core per clock:**
 ```
-FLOPs = 2 x 16 x 16 x 16 = 8,192 FLOPs  (multiply-accumulate = 2 FLOPs per element)
-```
-
-FLOPs per SM per clock:
-```
-4 units x 8,192 FLOPs = 32,768 FLOPs/SM/clock
+Each TC executes a 4×4×4 FP16 MMA (fused multiply-add):
+  4×4×4 FP16 MACs = 64 multiply-accumulate operations
+  2 FLOPs per MAC (multiply + add) = 128 FLOP/clock per TC
 ```
 
-FLOPs per SM per second:
+**Step 2 — FLOP per SM per clock:**
 ```
-32,768 x 1.41 GHz = 32,768 x 1.41e9 = 46.2e9 FLOPs/SM = 46.2 GFLOPS/SM
-```
-
-**Total for 108 SMs:**
-```
-108 x 46.2 GFLOPS = 4,990 GFLOPS = 4.99 TFLOPS
+A100 SM: 4 sub-partitions, each with 4 Tensor Cores = 16 TCs per SM
+16 TCs × 128 FLOP/clock = 2,048 FLOP/SM/clock
 ```
 
-Hmm — this gives ~5 TFLOPS, not 312 TFLOPS. The discrepancy is because modern Tensor Cores are warp-level instructions that run across all 4 warp schedulers per SM simultaneously.
-
-**Corrected calculation:**
-The A100 SM has 4 warp schedulers, each capable of issuing one Tensor Core instruction per clock. Each scheduler drives one 16x16x16 MMA simultaneously. Additionally, the A100 runs at Tensor Core throughput that is 4 operations per clock per SM (not 4 units x 1 op = 4, but the actual microarchitecture allows 4 concurrent MMA tiles per clock via 4 warp schedulers):
-
+**Step 3 — Per-SM throughput:**
 ```
-FLOPs/SM/clock = 4 schedulers x 8,192 FLOPs/MMA = 32,768 FLOPs/SM/clock
+2,048 FLOP/clock × 1.41 GHz = 2,888 GFLOPS/SM ≈ 2.89 TFLOPS/SM
 ```
 
-Wait -- NVIDIA's official 312 TFLOPS for FP16 Tensor Cores on A100:
+**Step 4 — Total for 108 SMs:**
 ```
-312 TFLOPS / 108 SMs = 2.89 TFLOPS/SM
-2.89 TFLOPS/SM / 1.41 GHz = 2.05 GFLOPS/SM/GHz = 2,048 FLOPs/SM/clock
-2,048 / 8,192 = 0.25 MMAs/clock/SM? 
+108 × 2.89 TFLOPS = 312.1 TFLOPS ≈ 312 TFLOPS (dense FP16) ✓
 ```
 
-The actual A100 microarchitecture runs **4 concurrent 16x16x16 FP16 MMAs per clock per SM** via 4 warp schedulers each issuing one MMA:
-```
-4 x 8,192 = 32,768 FLOPs/clock/SM
-32,768 x 1.41e9 x 108 = 4.99e15 = 4.99 PFLOPS
-```
-
-The 312 TFLOPS figure is for **TF32** Tensor Cores (not FP16). FP16 Tensor Core peak is 312 TFLOPS with **sparse** (2:4) acceleration. Dense FP16 is 77.6 TFLOPS. The commonly cited 312 TFLOPS figure corresponds to:
-
-```
-Sparse FP16: 2 x dense = 2 x 156 = 312 TFLOPS (with 2:4 sparsity)
-Dense FP16:  4 MMAs/SM/clock x 8,192 FLOPs x 1.41 GHz x 108 SMs = 4.99 PFLOPS ???
-```
-
-**Resolution:** The discrepancy comes from quoting different precision formats. The 312 TFLOPS figure in NVIDIA's A100 datasheet refers to **FP16 with 2:4 structured sparsity**. Dense FP16 is 77.6 TFLOPS. Let's verify the 77.6 TFLOPS figure:
-```
-77,600 GFLOPS / 108 SMs = 718.5 GFLOPS/SM
-718.5 / 1.41 GHz = 509.6 GFLOPS/SM/GHz = ~512 FLOPs/clock/SM
-512 / 8,192 FLOPs/MMA = 0.0625 MMAs/clock -> 1 MMA per 16 clocks
-```
-
-This still doesn't resolve cleanly. The practical takeaway: NVIDIA's marketing figures use different precision/sparsity combinations. For exam purposes: A100 achieves ~312 TFLOPS dense for TF32, 77.6 TFLOPS for FP32, and up to 624 TFLOPS for FP16 with sparsity. Always check the specific format when citing TFLOPS figures.
+This matches NVIDIA's published 312 TFLOPS dense FP16 Tensor Core spec. With 2:4 structured sparsity the hardware skips zero-valued weights, doubling throughput to **624 TFLOPS sparse FP16**. Always note which mode (dense vs sparse) a TFLOPS figure refers to.
 
 ---
 

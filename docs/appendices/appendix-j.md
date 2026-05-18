@@ -43,12 +43,12 @@ The simplest method: download the pre-built libtorch archive from the PyTorch
 website matching your CUDA version.
 
 ```bash
-# libtorch for CUDA 12.4, C++11 ABI (matches PyTorch 2.5+)
-wget https://download.pytorch.org/libtorch/cu124/libtorch-cxx11-abi-shared-with-deps-2.5.1%2Bcu124.zip
+# libtorch for CUDA 13.0, C++11 ABI (matches PyTorch 2.11+)
+wget https://download.pytorch.org/libtorch/cu130/libtorch-cxx11-abi-shared-with-deps-2.11.0%2Bcu130.zip
 unzip libtorch-*.zip
 
 # CPU-only (for testing / edge without CUDA)
-wget https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.5.1%2Bcpu.zip
+wget https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.11.0%2Bcpu.zip
 ```
 
 ### J.2.2 Extracting from an existing PyTorch install
@@ -1168,7 +1168,7 @@ PASS: column-parallel simulation matches reference (shape [2, 1024])
 
 ---
 
-*Cross-references: Appendix C (PyTorch Python API), Appendix J (CUDA C++ Introduction),
+*Cross-references: Appendix C (PyTorch Python API), Appendix L (CUDA C++ Introduction),
 Appendix I (C++ Build Patterns), Appendix N (CUTLASS), Chapter 8.5 (CUDA Graphs),
 Chapter 15 (Multi-GPU Serving).*
 

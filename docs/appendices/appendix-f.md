@@ -15,34 +15,39 @@ This appendix provides complete, production-tested configuration templates for c
 ```bash
 #!/bin/bash
 # deploy_8b_a100.sh
-# 
+#
 # Target: Interactive chat API, <500ms TTFT, ~50 concurrent users
 # Hardware: 1× A100 80GB SXM
+#
+# Key flag choices:
+#   --dtype bfloat16               A100 supports BF16 natively
+#   --max-model-len 8192           8K context (saves 4× KV vs 32K)
+#   --gpu-memory-utilization 0.88  leave 12% headroom for activations
+#   --kv-cache-dtype fp8           2× KV capacity vs BF16
+#   --swap-space 8                 8GB CPU swap for preemption
+#   --max-num-seqs 256             up to 256 concurrent sequences
+#   --enable-chunked-prefill       prevent long prefills from blocking decode
+#   --max-num-batched-tokens 2048  prefill chunk size (2K tokens/step)
+#   --scheduler-delay-factor 0.0   prioritize TTFT (interactive)
+#   --enable-prefix-caching        cache shared system prompt prefix
+#   --disable-log-requests         reduce log volume in production
+#   --max-log-len 100              truncate logged prompts for privacy
 
 vllm serve meta-llama/Llama-3.1-8B-Instruct \
-    # --- Model ---
-    --dtype bfloat16 \               # A100 supports BF16 natively
-    --max-model-len 8192 \           # 8K context (saves 4× KV vs 32K)
-    \
-    # --- Memory ---
-    --gpu-memory-utilization 0.88 \  # leave 12% headroom for activations
-    --kv-cache-dtype fp8 \           # 2× KV capacity vs BF16
-    --swap-space 8 \                 # 8GB CPU swap for preemption
-    \
-    # --- Batching ---
-    --max-num-seqs 256 \             # up to 256 concurrent sequences
-    --enable-chunked-prefill \       # prevent long prefills from blocking decode
-    --max-num-batched-tokens 2048 \  # prefill chunk size (2K tokens/step)
-    --scheduler-delay-factor 0.0 \   # prioritize TTFT (interactive)
-    \
-    # --- Caching ---
-    --enable-prefix-caching \        # cache shared system prompt prefix
-    \
-    # --- Server ---
+    --dtype bfloat16 \
+    --max-model-len 8192 \
+    --gpu-memory-utilization 0.88 \
+    --kv-cache-dtype fp8 \
+    --swap-space 8 \
+    --max-num-seqs 256 \
+    --enable-chunked-prefill \
+    --max-num-batched-tokens 2048 \
+    --scheduler-delay-factor 0.0 \
+    --enable-prefix-caching \
     --host 0.0.0.0 \
     --port 8000 \
-    --disable-log-requests \         # reduce log volume in production
-    --max-log-len 100               # truncate logged prompts for privacy
+    --disable-log-requests \
+    --max-log-len 100
 ```
 
 ### F.1.2 Single RTX 4090 24GB — Qwen2.5-7B-Instruct
@@ -53,21 +58,21 @@ vllm serve meta-llama/Llama-3.1-8B-Instruct \
 #
 # Target: Development/staging environment, moderate load
 # Hardware: 1× RTX 4090 24GB (Ada Lovelace, SM89)
+#
+# Key flag choices:
+#   --max-model-len 16384           16K context (model default is 128K but costs KV)
+#   --gpu-memory-utilization 0.85   more conservative on consumer GPU
 
 vllm serve Qwen/Qwen2.5-7B-Instruct \
     --dtype bfloat16 \
-    --max-model-len 16384 \          # 16K context (model default is 128K but costs KV)
-    \
-    --gpu-memory-utilization 0.85 \  # more conservative on consumer GPU
+    --max-model-len 16384 \
+    --gpu-memory-utilization 0.85 \
     --kv-cache-dtype fp8 \
     --swap-space 4 \
-    \
     --max-num-seqs 64 \
     --enable-chunked-prefill \
     --max-num-batched-tokens 2048 \
-    \
     --enable-prefix-caching \
-    \
     --host 0.0.0.0 \
     --port 8000
 ```
@@ -84,28 +89,27 @@ vllm serve Qwen/Qwen2.5-7B-Instruct \
 #
 # Target: Production API, high concurrency, <800ms TTFT at p95
 # Hardware: 4× H100 80GB NVLink
+#
+# Key flag choices:
+#   --tensor-parallel-size 4        split across 4 H100s
+#   --max-model-len 32768           32K context
+#   --gpu-memory-utilization 0.90   4× 80GB = 320GB; ~140GB weights, ~180GB KV
+#   --kv-cache-dtype fp8            2× KV capacity: ~360GB equivalent
+#   --swap-space 16                 per-node CPU swap
+#   --scheduler-delay-factor 0.1    small delay to build larger decode batches
 
 vllm serve meta-llama/Llama-3.1-70B-Instruct \
-    # --- Model and Parallelism ---
     --dtype bfloat16 \
-    --tensor-parallel-size 4 \       # split across 4 H100s
-    --max-model-len 32768 \          # 32K context
-    \
-    # --- Memory (4× 80GB = 320GB total, 140GB for weights, 180GB for KV) ---
+    --tensor-parallel-size 4 \
+    --max-model-len 32768 \
     --gpu-memory-utilization 0.90 \
-    --kv-cache-dtype fp8 \           # 2× KV capacity: ~360GB equivalent
-    --swap-space 16 \                # per-node CPU swap
-    \
-    # --- Batching ---
+    --kv-cache-dtype fp8 \
+    --swap-space 16 \
     --max-num-seqs 512 \
     --enable-chunked-prefill \
     --max-num-batched-tokens 4096 \
-    --scheduler-delay-factor 0.1 \   # small delay to build larger decode batches
-    \
-    # --- Prefix Caching ---
+    --scheduler-delay-factor 0.1 \
     --enable-prefix-caching \
-    \
-    # --- Server ---
     --host 0.0.0.0 \
     --port 8000 \
     --disable-log-requests \
@@ -120,24 +124,24 @@ vllm serve meta-llama/Llama-3.1-70B-Instruct \
 #
 # Target: Frontier-model quality production API
 # Hardware: 8× H200 141GB NVLink (1,128GB total)
+#
+# Key flag choices:
+#   --gpu-memory-utilization 0.88   conservative with 671B model
+#   --swap-space 32                 32GB swap per node
+#   --trust-remote-code             DeepSeek uses custom MoE code
 
 vllm serve deepseek-ai/DeepSeek-V3 \
     --dtype bfloat16 \
     --tensor-parallel-size 8 \
     --max-model-len 32768 \
-    \
-    --gpu-memory-utilization 0.88 \  # conservative with 671B model
+    --gpu-memory-utilization 0.88 \
     --kv-cache-dtype fp8 \
-    --swap-space 32 \                # 32GB swap per node
-    \
+    --swap-space 32 \
     --max-num-seqs 128 \
     --enable-chunked-prefill \
     --max-num-batched-tokens 4096 \
-    \
     --enable-prefix-caching \
-    \
-    --trust-remote-code \            # DeepSeek uses custom MoE code
-    \
+    --trust-remote-code \
     --host 0.0.0.0 \
     --port 8000 \
     --disable-log-requests
@@ -155,29 +159,28 @@ vllm serve deepseek-ai/DeepSeek-V3 \
 #
 # Target: Edge deployment, no GPU, low-latency single-user
 # Hardware: 32-core server, 128GB RAM
+#
+# Key flag choices:
+#   -t 16       16 threads for generation
+#   -tb 32      32 threads for prompt processing (batch/prefill phase)
+#   -c 8192     8K context window
+#   -np 4       4 parallel slots (concurrent users)
+#   -b 512      conservative batch size for CPU
+#   --no-mmap   pre-load entire model into RAM (consistent latency)
+#   --mlock     lock model in RAM (prevent swapping under load)
 
 llama-server \
     -m ./models/qwen2.5-7b-instruct-q4_k_m.gguf \
-    \
-    # --- CPU Threading ---
-    -t 16 \                  # 16 threads for generation
-    -tb 32 \                 # 32 threads for prompt processing
-    \
-    # --- Context ---
-    -c 8192 \                # 8K context
-    -np 4 \                  # 4 parallel slots
-    -b 512 \                 # conservative batch size for CPU
-    \
-    # --- Loading ---
-    --no-mmap \              # pre-load everything (consistent latency)
-    --mlock \                # lock in RAM
-    \
-    # --- Sampling Defaults ---
+    -t 16 \
+    -tb 32 \
+    -c 8192 \
+    -np 4 \
+    -b 512 \
+    --no-mmap \
+    --mlock \
     --temp 0.7 \
     --top-k 40 \
     --top-p 0.95 \
-    \
-    # --- Server ---
     --chat-template qwen \
     -cb \
     --host 0.0.0.0 \
@@ -193,16 +196,21 @@ llama-server \
 #
 # Target: Home lab or small team, RTX 3090/4090
 # Hardware: RTX 4090 24GB
+#
+# Key flag choices:
+#   -ngl 99     offload all layers to GPU (99 = "all")
+#   -c 16384    16K context window
+#   -np 8       8 parallel slots (concurrent users)
+#   -b 2048     batch size for prefill phase
+#   -ub 512     micro-batch size for decode phase
 
 llama-server \
     -m ./models/llama-3.1-8b-instruct-q4_k_m.gguf \
-    \
-    -ngl 99 \                # all layers to GPU
-    -c 16384 \               # 16K context
-    -np 8 \                  # 8 parallel slots
-    -b 2048 \                # batch size for prefill
-    -ub 512 \                # micro-batch size
-    \
+    -ngl 99 \
+    -c 16384 \
+    -np 8 \
+    -b 2048 \
+    -ub 512 \
     --chat-template llama3 \
     -cb \
     --host 0.0.0.0 \
@@ -217,19 +225,22 @@ llama-server \
 #
 # Target: 70B model split across 2× GPUs
 # Hardware: 2× RTX 3090 24GB = 48GB total
+#
+# Key flag choices:
+#   -sm layer   split by layer across GPUs (row/none are alternatives)
+#   -ts 1,1     equal tensor split across GPUs
+#   -mg 0       main GPU is device 0 (receives final logits)
+#   -c 4096     conservative context — 70B is memory intensive
 
 llama-server \
     -m ./models/llama-3.1-70b-instruct-q4_k_m.gguf \
-    \
     -ngl 99 \
-    -sm layer \              # split by layer across GPUs
-    -ts 1,1 \               # equal split
-    -mg 0 \                 # main GPU is 0
-    \
-    -c 4096 \               # conservative context (70B is memory intensive)
+    -sm layer \
+    -ts 1,1 \
+    -mg 0 \
+    -c 4096 \
     -np 4 \
     -b 2048 \
-    \
     --chat-template llama3 \
     -cb \
     --host 0.0.0.0 \

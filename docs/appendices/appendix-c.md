@@ -1073,9 +1073,9 @@ ffn                      9.8ms       54%
 ## C.14 Test Harness — PyTorch Inference Primitives
 
 ```python
-# ── test_appendix_w.py ─────────────────────────────────────────────────
+# ── test_appendix_c.py ─────────────────────────────────────────────────
 """Offline tests for PyTorch inference primitives.
-Run with: python test_appendix_w.py"""
+Run with: python test_appendix_c.py"""
 
 import math
 import torch

@@ -400,8 +400,10 @@ Examples:
     = 2 × 80 × 8 × 128 × 1 = 163,840 bytes = 160 KB/token
 
   DeepSeek-V3 (MLA, d_latent=512, d_rope=64, BF16):
-    = 2 × 61 × (512 + 64) × 1 (latent dimension, not full KV)
-    ≈ 70,272 bytes = 68.6 KB/token  (4.7× smaller than Llama 70B)
+    MLA stores one latent KV vector + one decoupled RoPE key (not separate K/V):
+    = 1 × n_layers × (d_latent + d_rope) × bytes_per_element
+    = 1 × 61 × (512 + 64) × 2 bytes (BF16)
+    = 70,272 bytes = 68.6 KB/token  (4.7× smaller than Llama 70B)
 ```
 
 ### A.8.2 Maximum Batch Size from KV Cache
@@ -585,7 +587,8 @@ FLOPs vs. Dense:
   If each expert has d_ffn_expert = d_ffn/E × E = d_ffn (total same),
   then active FLOPs ≈ k/E fraction of dense FLOPs
   
-  DeepSeek-V3: k=2 active out of E=256 experts → 2/256 = 0.78% of weights active per FFN
+  DeepSeek-V3: k=8 routed + 1 shared expert active out of E=256 routed experts
+              → 8/256 = 3.1% of routed weights active per FFN, plus the always-on shared expert
 ```
 
 ### A.12.2 Expert Load Balancing

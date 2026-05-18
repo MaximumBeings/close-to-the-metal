@@ -43,23 +43,34 @@ topology of 70B deployments significantly.
 
 ### P.2.2 Memory architecture: Unified vs. discrete
 
-The MI300X uses a **unified CPU-GPU memory architecture**: the CPU and GPU
-share the same physical HBM3 memory pool. This means:
+AMD makes two distinct CDNA3 products with very different memory architectures:
 
-1. CPU can directly read/write GPU memory without explicit DMA transfers
-2. Model loading is faster (no PCIe copy to GPU memory)
-3. Memory spill to CPU RAM is effectively free in terms of bandwidth
+**MI300X** is a **discrete GPU** with 192 GB of dedicated HBM3. The CPU and GPU
+do *not* share this HBM3 pool — the CPU has its own separate DRAM, and
+CPU-to-GPU transfers go over PCIe as on any discrete GPU. The MI300X's
+advantage is the *size* of its dedicated GPU memory, not CPU-GPU unification.
+
+**MI300A** is an **APU (Accelerated Processing Unit)** that integrates CPU cores
+and GPU compute dies on the same package, sharing a single unified HBM3 memory
+pool. With the MI300A, the CPU and GPU genuinely share the same physical memory:
 
 ```
-MI300X unified memory:
-  192 GB HBM3 = GPU compute memory = CPU-accessible memory
-  No separate CPU DRAM required for model weights
-  KV cache, model weights, and CPU tensors share the same pool
+MI300A unified memory (APU):
+  192 GB HBM3 = shared CPU + GPU memory pool
+  CPU cores and GPU CUs access the same physical addresses
+  Zero-copy data sharing: no PCIe DMA required
+
+MI300X discrete GPU:
+  192 GB HBM3 = GPU-only memory
+  CPU has separate DDR5/HBM host memory
+  CPU↔GPU transfers via PCIe (same as NVIDIA)
 ```
 
-For very large models (405B), the unified architecture allows spreading weights
-across both the MI300X's memory and host memory without the bandwidth penalty
-that makes this impractical on NVIDIA.
+For the MI300X, the key differentiator for LLM inference is raw HBM3 capacity
+(192 GB on one device vs. 80 GB per H100), not unified memory. For very large
+models, the MI300A's unified architecture does allow spreading weights across
+a single address space, but the MI300X achieves large-model capacity through
+sheer HBM3 pool size.
 
 ### P.2.3 RDNA3 and consumer AMD GPUs
 

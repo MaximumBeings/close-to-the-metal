@@ -4,7 +4,7 @@
 
 ---
 
-This appendix documents all significant vLLM EngineArgs parameters, grouped by function. Values are for vLLM 0.6.x. Defaults are shown in brackets.
+This appendix documents all significant vLLM EngineArgs parameters, grouped by function. Values are for vLLM 0.21.x. Defaults are shown in brackets. Always verify against `vllm serve --help` for your installed version, as flags evolve with each release.
 
 ---
 
@@ -377,11 +377,12 @@ Tensor parallel size for the draft model.
 # Target can still use TP=4+
 ```
 
-### `--use-v2-block-manager` [True in recent versions]
-Use V2 block manager with speculative decoding support.
+### Block Manager (vLLM ≥ 0.8)
+The V2 block manager is the default and only block manager in vLLM ≥ 0.8. The `--use-v2-block-manager` flag was removed; speculative decoding no longer requires any extra flag.
 
 ```bash
---use-v2-block-manager  # required for speculative decoding
+# No flag needed — V2 block manager is always active in vLLM ≥ 0.8
+--speculative-model ./draft-model  # speculative decoding works out of the box
 ```
 
 ---
@@ -541,8 +542,7 @@ vllm serve MODEL \
 # === SPECULATIVE DECODING ===
 vllm serve LARGE_MODEL \
     --speculative-model SMALL_DRAFT_MODEL \
-    --num-speculative-tokens 5 \
-    --use-v2-block-manager
+    --num-speculative-tokens 5
 
 # === MULTI-GPU (4×H100) ===
 vllm serve LARGE_MODEL \

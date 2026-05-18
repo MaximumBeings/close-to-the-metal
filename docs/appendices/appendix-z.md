@@ -51,7 +51,7 @@ x = jax.random.normal(jax.random.key(0), (1024, 1024))
 y = matmul_jit(x)   # first call: traces + compiles; subsequent calls: cached kernel
 ```
 
-The consequence for inference: a JAX model that has been JIT-compiled has **no Python overhead per forward pass**. The entire computation graph is a single XLA program dispatched to hardware. This is equivalent in spirit to CUDA Graphs (Appendix 8.5) but applies to the entire model, not just one captured stream.
+The consequence for inference: a JAX model that has been JIT-compiled has **no Python overhead per forward pass**. The entire computation graph is a single XLA program dispatched to hardware. This is equivalent in spirit to CUDA Graphs (Chapter 8.5) but applies to the entire model, not just one captured stream.
 
 ---
 

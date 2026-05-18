@@ -195,10 +195,8 @@ Step 5: Decode (dequantize)
     k̂[2] = (1/2)( 0.200 + 0.618 - (-1.099) - 1.099) = (1/2)(0.818)  = 0.409
     k̂[3] = (1/2)( 0.200 - 0.618 - (-1.099) + 1.099) = (1/2)(1.780)  = 0.890
 
-    Wait — above is incorrect. Let me redo carefully:
-    Hᵀ = H for the normalized Hadamard (self-inverse up to d scaling).
-    Actually H × H = I (normalized), so H⁻¹ = H.
-
+    Note: the normalized Hadamard is self-inverse — H × H = I, so H⁻¹ = Hᵀ = H.
+    Applying H again to unapply the rotation:
     k̂[0] = (1/2)(0.200 + 0.618 + (-1.099) + 1.099) = (1/2)(0.818)   =  0.409
     k̂[1] = (1/2)(0.200 - 0.618 + (-1.099) - 1.099) = (1/2)(-2.616)  = -1.308
     k̂[2] = (1/2)(0.200 + 0.618 - (-1.099) - 1.099) = (1/2)(0.818)   =  0.409

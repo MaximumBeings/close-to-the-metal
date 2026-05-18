@@ -6,7 +6,7 @@
 
 ## Y.1 Why Wafer Scale Exists
 
-The central bottleneck of LLM inference is memory bandwidth, not arithmetic throughput (Chapter 1). For a batch-1 decode step on an H100, arithmetic intensity sits at roughly 1 FLOP/byte — 295 times below the GPU's ridge point. The compute units are nearly idle. The bottleneck is reading weights from HBM across a 5,120-bit bus at 3.35 TB/s.
+The central bottleneck of LLM inference is memory bandwidth, not arithmetic throughput (Chapter 1). For a batch-1 decode step on an H100, arithmetic intensity sits at roughly 1 FLOP/byte — some 590 times below the GPU's ridge point (~591 FLOPs/byte for FP16, i.e., 1,979 TFLOPS ÷ 3.35 TB/s). The compute units are nearly idle. The bottleneck is reading weights from HBM across a 5,120-bit bus at 3.35 TB/s.
 
 The standard industry response is to add more HBM stacks, widen the bus, or compress weights. Cerebras asked a different question: what if the weights never left the chip at all?
 
@@ -484,9 +484,9 @@ if __name__ == "__main__":
 
 ## Y.10 Self-Check Questions
 
-**Q1.** The WSE-3 has 21.6 PB/s of on-chip memory bandwidth and 125 PFLOPS of compute. Calculate its ridge point in FLOPs/byte. An H100 has a ridge of ~295 FLOPs/byte. What does the difference tell you about which workloads each chip favors?
+**Q1.** The WSE-3 has 21.6 PB/s of on-chip memory bandwidth and 125 PFLOPS of compute. Calculate its ridge point in FLOPs/byte. An H100 SXM5 has a ridge of ~591 FLOPs/byte (1,979 TFLOPS FP16 ÷ 3.35 TB/s). What does the difference tell you about which workloads each chip favors?
 
-**A1.** Ridge (WSE-3) = 125 × 10¹⁵ / 21.6 × 10¹⁵ ≈ 6 FLOPs/byte. The WSE-3 is bandwidth-dominant — its ratio of compute to bandwidth is far lower, meaning even low-arithmetic-intensity operations (like decode at ~1 FLOP/byte) run close to the bandwidth ceiling rather than far below it. The H100's high ridge point means most operations are memory-bound; the WSE-3's low ridge point means its bandwidth is proportionally so vast that even memory-bound operations complete very quickly.
+**A1.** Ridge (WSE-3) = 125 × 10¹⁵ / 21.6 × 10¹⁵ ≈ 6 FLOPs/byte. The WSE-3 is bandwidth-dominant — its ratio of compute to bandwidth is far lower, meaning even low-arithmetic-intensity operations (like decode at ~1 FLOP/byte) run close to the bandwidth ceiling rather than far below it. The H100's high ridge point (~591 FLOPs/byte) means most LLM operations are deeply memory-bound; the WSE-3's low ridge point means its bandwidth is proportionally so vast that even memory-bound operations complete very quickly.
 
 **Q2.** Llama 3.1 8B in BF16 occupies ~14 GB. Does it fit in WSE-3's on-chip SRAM? What about Llama 3.1 70B at BF16 (~140 GB)?
 

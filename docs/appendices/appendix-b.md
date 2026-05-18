@@ -569,7 +569,7 @@ vLLM Version | PyTorch | CUDA (default) | Python    | Notes
 
 Notes:
   • Install: uv pip install vllm --torch-backend auto  (picks correct wheel)
-  • vLLM < v0.10.0: pin Python 3.12 (uv venv --python 3.12)
+  • vLLM < 0.21.0: Python 3.13+ not supported; use Python 3.12 or earlier (uv venv --python 3.12)
   • vLLM v0.9.x: requires transformers < 4.54.0
   • C++20 toolchain required for building from source (vLLM 0.18+)
 

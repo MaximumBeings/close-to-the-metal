@@ -2136,5 +2136,4 @@ would be 32x the data size. With L2 cache (A100 has 40 MB L2), much of this
 is captured in-cache, especially for B (column-major access pattern). Production
 Triton kernels add software pipelining (`num_stages=3`) to further hide HBM
 latency via async copies.
-"""
 

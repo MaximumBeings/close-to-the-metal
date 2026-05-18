@@ -665,7 +665,7 @@ compute-sanitizer --tool racecheck ./my_binary  # detect race conditions
             0   10   20   50   100   200   500  1000
                    Arithmetic Intensity (FLOPS/byte)
   
-  Ridge point for H100 FP16: 4e15 / 3.35e12 = ~1,200 FLOPS/byte
+  Ridge point for H100 FP16: 1.979e15 / 3.35e12 = ~591 FLOPS/byte
 ```
 
 **Arithmetic Intensity (AI)** = total FLOPs executed / total bytes moved from HBM
@@ -1268,7 +1268,7 @@ target_link_libraries(my_binary CUDA::cudart CUDA::cublas)
 | Register limit | 65,536 per SM; more registers/thread = fewer concurrent threads |
 | Coalescing rule | Map `threadIdx.x` to the contiguous (innermost) dimension |
 | Bank conflict rule | `smem[threadIdx.x]` is fine; `smem[threadIdx.x * 32]` is a 32-way conflict |
-| Roofline ridge (H100 FP16) | ~1,200 FLOPS/byte — decode attention AI ≈ 1 → memory bound |
+| Roofline ridge (H100 FP16) | ~591 FLOPS/byte — decode attention AI ≈ 1 → memory bound |
 | Warp divergence cost | 2-way divergence = 2× slower; avoid inside performance-critical loops |
 | `__syncthreads()` | Required after every shared memory write; never inside a conditional |
 
@@ -1286,7 +1286,7 @@ target_link_libraries(my_binary CUDA::cudart CUDA::cublas)
 2. 80/3350 = 2.4% — almost certainly due to uncoalesced memory access (strided reads).
 3. `int col = blockIdx.x * 16 + threadIdx.x; int row = blockIdx.y * 16 + threadIdx.y; if (col < N && row < M) { ... }`
 4. Online softmax uses the identity that the running sum can be re-scaled when the maximum increases: `d_new = d_old × exp(m_old - m_new) + exp(x_new - m_new)`. This requires only a running (max, sum) state.
-5. FLOPs: 2 × 8192² = 134M. Bytes: 8192² × 2 = 134MB. AI = 134M/134M = 1 FLOP/byte. Ridge point is ~1,200 FLOPS/byte, so AI=1 is far below the ridge → **memory-bound**. At 3.35 TB/s peak bandwidth, roofline predicts: 3.35e12 × 1 FLOP/byte = 3.35 TFLOPS. Achieving 2.0 TFLOPS = 2.0/3.35 = 60% of the BW roof — reasonable for a straightforward GEMV.
+5. FLOPs: 2 × 8192² = 134M. Bytes: 8192² × 2 = 134MB. AI = 134M/134M = 1 FLOP/byte. Ridge point is ~591 FLOPS/byte (1,979 TFLOPS ÷ 3.35 TB/s), so AI=1 is far below the ridge → **memory-bound**. At 3.35 TB/s peak bandwidth, roofline predicts: 3.35e12 × 1 FLOP/byte = 3.35 TFLOPS. Achieving 2.0 TFLOPS = 2.0/3.35 = 60% of the BW roof — reasonable for a straightforward GEMV.
 
 ---
 

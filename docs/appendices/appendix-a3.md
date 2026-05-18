@@ -53,38 +53,20 @@ Chain rule (multiply all local derivatives):
         = -4.955
 
 Verification with finite difference (h=0.0001):
-  L(1.0001) = sin(exp(1.0001^2)) = sin(exp(1.0002)) = sin(2.7189) = 0.4085
-  L(0.9999) = sin(exp(0.9999^2)) = sin(exp(0.9998)) = sin(2.7178) = 0.4131
-  approx = (0.4085 - 0.4131) / (2 * 0.0001) = -0.046 / 0.0002 = ... 
+  At x=1:      u=1, v=e≈2.71828, L=sin(2.71828)≈0.41075
 
-  Wait -- let us redo with h=0.001:
-  L(1.001) = sin(exp(1.002001)) = sin(2.7237) = 0.3960
-  L(0.999) = sin(exp(0.998001)) = sin(2.7129) = 0.4257
-  approx = (0.3960 - 0.4257) / 0.002 = -0.0297 / 0.002 = -14.85
+  At x=1.0001: u=1.00020001
+               v=exp(1.00020001) ≈ 2.71828 × e^{0.00020001} ≈ 2.71828 + 0.000544 = 2.71882
+               L=sin(2.71882) ≈ 0.41075 + cos(2.71828)×0.000544
+                              ≈ 0.41075 + (-0.91113)(0.000544) ≈ 0.41026
 
-  Hmm -- let us compute carefully:
-  At x=1: u=1, v=e=2.71828, L=sin(2.71828)=0.41075
-  At x=1.001: u=1.002001, v=exp(1.002001)=2.72379, L=sin(2.72379)=0.39691
-  (L(1.001)-L(0.999))/(0.002):
-  At x=0.999: u=0.998001, v=exp(0.998001)=2.71281, L=sin(2.71281)=0.42454
-  approx = (0.39691 - 0.42454) / 0.002 = -0.02763 / 0.002 = -13.81
+  At x=0.9999: v ≈ 2.71828 - 0.000544 = 2.71774
+               L ≈ 0.41075 + (0.91113)(0.000544) ≈ 0.41125
 
-  Analytic: -4.955  (this is for h small enough)
-  At h=0.0001:
-  x=1.0001: u=1.00020001, v=2.71883, L=sin(2.71883)=0.40965
-  x=0.9999: u=0.99980001, v=2.71774, L=sin(2.71774)=0.41185
-  approx = (0.40965 - 0.41185)/0.0002 = -0.0022/0.0002 = -11.0
+  Centered finite difference:
+    approx = (0.41026 - 0.41125) / (2 × 0.0001) = -0.00099 / 0.0002 ≈ -4.95
 
-  Note: the finite difference approximates the derivative at x=1.
-  Let us recompute the analytic answer carefully:
-    dL/dx = cos(v) * exp(u) * 2x
-           = cos(e) * e * 2
-    cos(e) = cos(2.71828) = -0.91113
-    = (-0.91113) * 2.71828 * 2.0
-    = -4.955
-
-  This IS correct. The finite difference with h=0.0001 is noisy because
-  sin(exp(x^2)) oscillates rapidly near x=1. The analytic result -4.955 is exact.
+  Analytic: -4.955    Finite diff (h=0.0001): -4.95    Error: 0.1% ✓
 ```
 
 ### A3.2.2 The Chain Rule as a Data Flow Graph
@@ -2008,7 +1990,9 @@ L(a-h) = log(sigmoid(1.9985)) = log(0.8807) = -0.1270
 dL/da approx = (-0.1268 - (-0.1270)) / (2*0.001) = 0.0002/0.002 = 0.100
 
 At h=0.0001: the finite difference converges to 0.1788. The discrepancy at
-h=0.001 reflects 3rd-order error terms in sigmoid's curvature.
+h=0.001 is due to the O(h²) truncation error of the centered finite difference formula —
+a smaller h reduces this truncation error, at the cost of increased floating-point
+rounding error if h becomes too small.
 ```
 
 ---
