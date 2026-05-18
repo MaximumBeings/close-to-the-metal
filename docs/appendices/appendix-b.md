@@ -16,9 +16,9 @@ Before installing either engine, verify your environment:
 # 1. Check GPU and driver
 nvidia-smi
 
-# Expected output (H100 example):
+# Expected output (H100 example, driver r595 / CUDA 13.2):
 # +-----------------------------------------------------------------------------+
-# | NVIDIA-SMI 535.104.05   Driver Version: 535.104.05   CUDA Version: 12.2    |
+# | NVIDIA-SMI 595.58.03    Driver Version: 595.58.03    CUDA Version: 13.2    |
 # +-----------------------------------------------------------------------------+
 # | GPU  Name                 Persistence-M | Bus-Id        Disp.A | Volatile... |
 # | Fan  Temp   Perf          Pwr:Usage/Cap |         Memory-Usage | GPU-Util   |
@@ -40,19 +40,35 @@ df -h /
 
 ```
 CUDA Version  | Min Driver (Linux)  | Min Driver (Windows) | vLLM Support
-─────────────────────────────────────────────────────────────────────────
-12.4          | 550.54.14           | 551.61               | ✓ (preferred)
-12.3          | 545.23.06           | 545.84.02            | ✓
-12.2          | 535.54.03           | 536.25               | ✓
+──────────────────────────────────────────────────────────────────────────────
+13.2          | 595.58.03           | 595.97               | ✓ (current)
+13.1          | 590.48.01           | 591.59               | ✓ (current)
+13.0          | 580.65.06           | 580.88               | ✓ (current)
+12.8          | 570.86.10           | 572.16               | ✓
+12.6          | 560.28.03           | 560.94               | ✓
+12.4          | 550.54.14           | 551.61               | ✓ (legacy preferred)
+12.3          | 545.23.06           | 545.84.02            | ✓ (legacy)
+12.2          | 535.54.03           | 536.25               | ✓ (legacy)
 12.1          | 530.30.02           | 531.14               | ✓ (legacy)
 11.8          | 520.61.05           | 522.06               | ✓ (legacy)
 < 11.8        | —                   | —                    | ✗
 
+Notes:
+  • Starting with CUDA 13.0, the Windows display driver is no longer bundled
+    with the CUDA Toolkit — install it separately from nvidia.com/drivers.
+  • CUDA 13.x requires driver branch r580 or newer (ABI-compatible across 13.x).
+  • vLLM ≥ 0.8.x ships pre-built wheels for CUDA 12.8 and 13.0; build from
+    source for 13.1/13.2 until official wheels are published.
+
 GPU Architecture Support:
-  Ampere (A100, A6000, RTX 3090): CUDA 11.1+
-  Ada Lovelace (RTX 4090, L40S):  CUDA 11.8+
-  Hopper (H100, H200):             CUDA 12.0+
-  Blackwell (B100, B200):          CUDA 12.4+
+  Ampere   (A100, A6000, RTX 3090):        CUDA 11.1+,  sm_80/sm_86
+  Ada Lovelace (RTX 4090, L40S):           CUDA 11.8+,  sm_89
+  Hopper   (H100, H200):                   CUDA 12.0+,  sm_90/sm_90a
+  Blackwell DC (B100, B200, GB200):        CUDA 12.8+,  sm_100/sm_100a
+  Blackwell Consumer (RTX 5090, RTX 5080,
+    RTX 5070, RTX 6000 Ada successor):     CUDA 12.8+,  sm_120
+  Blackwell DGX Spark (GB10):              CUDA 13.0+,  sm_121
+  Rubin (R100, R200 — shipping Q2 2026):   CUDA 13.x+,  sm_130 (projected)
 ```
 
 ---
@@ -762,7 +778,7 @@ echo "Installation check complete."
 
 ## B.14 Cloud GPU Provisioning
 
-Running vLLM or llama.cpp locally requires a capable GPU. When you are working on a laptop, a build server, or a machine without a discrete NVIDIA GPU, a cloud instance is the fastest path to a working environment. This section walks through five platforms — AWS EC2, Lambda Labs, RunPod, Modal, and Vast.ai — with enough detail to go from zero to a running vLLM server on each.
+Running vLLM or llama.cpp locally requires a capable GPU. When you are working on a laptop, a build server, or a machine without a discrete NVIDIA GPU, a cloud instance is the fastest path to a working environment. This section walks through five platforms — AWS EC2, Lambda (lambda.ai), RunPod, Modal, and Vast.ai — with enough detail to go from zero to a running vLLM server on each.
 
 ### B.14.1 Platform Comparison at a Glance
 
@@ -770,7 +786,7 @@ Running vLLM or llama.cpp locally requires a capable GPU. When you are working o
 Platform     GPU Selection    Pricing Model     Best For
 ──────────────────────────────────────────────────────────────────────────
 AWS EC2      Wide (A100/H100) On-demand/Spot    Production, compliance, VPC
-Lambda Labs  A100/H100/A10G   Hourly on-demand  Research, simple setup
+Lambda       B200/H100/A100   Hourly on-demand  Research, simple setup, no egress fees
 RunPod       A100/H100/RTX    Hourly pods       Dev/experimentation, cheap
 Modal        A100/H100/T4     Per-second billed Serverless functions, CI
 Vast.ai      Mixed (market)   Bid/on-demand     Cheapest H100, flexible
@@ -778,7 +794,8 @@ Vast.ai      Mixed (market)   Bid/on-demand     Cheapest H100, flexible
 
 Approximate spot prices for one H100 SXM5 80GB (May 2026, varies):
   AWS EC2 p5.xlarge:    $6.98/hr on-demand,  ~$2.50/hr spot
-  Lambda Labs H100:     $2.99/hr on-demand   (no spot)
+  Lambda H100 SXM:      $3.99/hr on-demand   (no spot)
+  Lambda B200 SXM6:     $6.69/hr on-demand   (no spot)
   RunPod H100 SXM:      $2.49/hr on-demand   (community cloud)
   Modal H100:           $4.63/hr (billed per second)
   Vast.ai H100 SXM:     $1.89–$3.20/hr       (marketplace bid)
@@ -906,54 +923,53 @@ aws ec2 describe-spot-price-history \
 
 ---
 
-### B.14.3 Lambda Labs
+### B.14.3 Lambda (lambda.ai)
 
-Lambda Labs offers GPU cloud instances with a simpler interface than AWS and competitive on-demand pricing. No spot instances, but no bidding complexity either. Ideal for researchers and individuals who want a clean Ubuntu environment with CUDA already configured.
+Lambda (formerly Lambda Labs; now at <https://lambda.ai>) offers on-demand GPU instances with a clean Ubuntu environment, Lambda Stack pre-installed (PyTorch + CUDA), and transparent pricing with no egress fees. No spot/preemptible instances — you pay only while the instance is running, and terminate when done. Billing is per-minute.
 
-**Available GPU instances (representative, check current availability):**
+**Available GPU instances (prices per GPU/hr, 8× config; check <https://lambda.ai/instances> for current availability):**
 
 ```
-Instance Name        GPU              VRAM     Price/hr
-──────────────────────────────────────────────────────
-gpu_1x_a10           A10 (1×)         24 GB    $0.60
-gpu_1x_a100_sxm4     A100 SXM4 (1×)  40 GB    $1.29
-gpu_1x_h100_sxm5     H100 SXM5 (1×)  80 GB    $2.99
-gpu_8x_h100_sxm5     H100 SXM5 (8×)  640 GB   $23.92
-gpu_1x_a100_80gb     A100 (1×)       80 GB    $1.99
+GPU                  VRAM     vCPUs  RAM        Price/GPU/hr
+─────────────────────────────────────────────────────────────
+NVIDIA B200 SXM6     180 GB   208    2900 GiB   $6.69
+NVIDIA H100 SXM      80 GB    208    1800 GiB   $3.99
+NVIDIA A100 SXM      80 GB    240    1800 GiB   $2.79
+NVIDIA A100 SXM      40 GB    124    1800 GiB   $1.99
+NVIDIA Tesla V100    16 GB    88     448 GiB    $0.79
 ```
+
+Multi-GPU options: 1×, 2×, 4×, 8× per node. For >8 GPUs, use
+Lambda 1-Click Clusters™ (16–2,000+ H100/B200 with NVLink/InfiniBand).
 
 **Step 1 — Create an instance via the Lambda Cloud API:**
 
 ```bash
-# Install Lambda CLI (or use the web console at cloud.lambdalabs.com)
-pip install lambda-cloud
-
-# Set API key (get from cloud.lambdalabs.com/api-keys)
+# Set API key (get from lambda.ai/login → API keys)
 export LAMBDA_API_KEY="your_api_key_here"
 
-# List available instance types
+# List available instance types and availability
 curl -u "${LAMBDA_API_KEY}:" \
   https://cloud.lambdalabs.com/api/v1/instance-types \
   | python3 -m json.tool
 
-# List available regions for H100
+# Check which GPU types have capacity available
 curl -u "${LAMBDA_API_KEY}:" \
   "https://cloud.lambdalabs.com/api/v1/instance-types" \
   | python3 -c "
 import sys, json
 data = json.load(sys.stdin)['data']
 for name, info in data.items():
-    if 'h100' in name:
-        regions = list(info.get('regions_with_capacity_available', {}).keys())
-        print(f'{name}: {regions}')
+    regions = info.get('regions_with_capacity_available', [])
+    if regions:
+        print(f'{name}: {[r[\"name\"] for r in regions]}')
 "
 
-# Add your SSH key first (one-time)
+# Add your SSH key (one-time)
 curl -u "${LAMBDA_API_KEY}:" \
   -X POST https://cloud.lambdalabs.com/api/v1/ssh-keys \
   -H "Content-Type: application/json" \
   -d "{\"name\": \"my-key\", \"public_key\": \"$(cat ~/.ssh/id_rsa.pub)\"}"
-# Returns: {"data": {"id": "abc123", "name": "my-key", ...}}
 
 # Launch an H100 instance
 curl -u "${LAMBDA_API_KEY}:" \
@@ -967,7 +983,6 @@ curl -u "${LAMBDA_API_KEY}:" \
     "quantity": 1,
     "name": "vllm-h100"
   }' | python3 -m json.tool
-# Returns instance id and IP
 
 # List running instances
 curl -u "${LAMBDA_API_KEY}:" \
@@ -978,12 +993,13 @@ curl -u "${LAMBDA_API_KEY}:" \
 **Step 2 — SSH and set up vLLM:**
 
 ```bash
-# Lambda instances use 'ubuntu' user, CUDA 12.x pre-installed
+# Lambda instances boot with ubuntu user; Lambda Stack includes CUDA 13.x,
+# PyTorch, and conda — no driver installs needed
 ssh ubuntu@<INSTANCE_IP>
 
-# Check environment — Lambda AMI has conda and CUDA ready
-nvidia-smi
-python3 --version   # typically 3.10 or 3.11
+# Verify environment
+nvidia-smi          # should show B200/H100 with CUDA 13.x
+python3 --version   # 3.11 or 3.12
 
 # Install vLLM
 pip install vllm
@@ -1004,7 +1020,7 @@ curl http://<INSTANCE_IP>:8000/v1/models
 **Step 3 — Terminate when done:**
 
 ```bash
-# Get instance ID from the list command above
+# Retrieve instance ID from the list command above
 curl -u "${LAMBDA_API_KEY}:" \
   -X POST https://cloud.lambdalabs.com/api/v1/instance-operations/terminate \
   -H "Content-Type: application/json" \
@@ -1013,10 +1029,11 @@ curl -u "${LAMBDA_API_KEY}:" \
 
 **Lambda-specific tips:**
 
-- Lambda instances have **no persistent storage by default** — attach a Lambda filesystem (NFS-backed, $0.20/GB/month) to preserve model weights between sessions.
-- Lambda does not charge for stopped instances — there is no "stop" state; you pay while running, nothing when terminated.
-- Port 8000 is **open by default** on Lambda instances (unlike AWS where you configure security groups). Anyone who knows the IP can reach your vLLM server — use `--api-key` authentication or an SSH tunnel for anything sensitive.
-- Lambda **availability is limited** — H100 instances sell out. Check the console or use the API to poll `regions_with_capacity_available` before building automation around specific instance types.
+- **No persistent storage by default** — attach a Lambda filesystem (NFS-backed, $0.20/GB/month) to preserve model weights and checkpoints between sessions.
+- **No stop state** — there is no "pause"; you pay while running and nothing after termination. Download checkpoints before terminating.
+- **Port 8000 is open by default** — unlike AWS where you configure security groups, any IP can reach your vLLM server. Always pass `--api-key` or use an SSH tunnel for anything beyond local testing.
+- **Availability is first-come** — H100 and B200 instances sell out. Poll `regions_with_capacity_available` before hardcoding a region in automation scripts.
+- **API reference**: <https://docs-api.lambda.ai/api/cloud>
 
 ---
 
@@ -1509,7 +1526,7 @@ Requirement                              Recommended Platform
 ─────────────────────────────────────────────────────────────────────
 Production, SLA, compliance              AWS EC2 (on-demand)
 Cost-sensitive production                AWS EC2 (Spot) or Lambda
-Simple setup, reliable H100              Lambda Labs
+Simple setup, reliable H100/B200          Lambda (lambda.ai)
 Cheapest H100 (dev/batch)                Vast.ai (community cloud)
 Short experiments, quick teardown        RunPod (per-minute billing)
 Serverless batch inference / CI          Modal
