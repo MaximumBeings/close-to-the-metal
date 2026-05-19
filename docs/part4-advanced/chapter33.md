@@ -506,7 +506,7 @@ MoE models (Mixtral, DeepSeek-MoE, Qwen-MoE) activate only a fraction of paramet
 
 - Memory required: 47B params, so 94 GB fp16
 - Compute per token: 13B params worth
-- KV cache: only the 2 active experts' layers
+- KV cache: same as a dense model with equivalent attention shape — MoE replaces the FFN layers, not the attention layers, so KV cache size is independent of which experts activate per token
 
 This creates a new regime: models that are memory-large (need large GPUs) but compute-small (fast decode speed). vLLM and SGLang have MoE-specific schedulers to handle the expert routing without blocking.
 

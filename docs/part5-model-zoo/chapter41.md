@@ -53,7 +53,7 @@ Llama 3 8B  (FP16): 2 × 8 × 128 × 2 = 4,096 bytes = 4 KB/token/layer
 Llama 3 70B (FP16): 2 × 8 × 128 × 2 = 4,096 bytes = 4 KB/token/layer
 ```
 
-Wait — the same 4 KB/token/layer for both? Yes. Because GQA fixes KV heads at
+Notice: both model sizes give the same 4 KB/token/layer. Because GQA fixes KV heads at
 8 regardless of model size, the KV cache per token is identical for 8B and 70B.
 The 70B model has more layers (80 vs 32), so:
 

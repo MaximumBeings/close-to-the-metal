@@ -18,7 +18,7 @@ hide:
         <div class="book-engines">LLM Inference from First Principles</div>
         <div class="book-cover-footer">
           <div class="book-authors">Oluwaseyi Awoga</div>
-          <div class="book-edition">52 Chapters · 28 Appendices · May 2026</div>
+          <div class="book-edition">52 Chapters · 29 Appendices · May 2026</div>
         </div>
       </div>
     </div>
@@ -29,7 +29,7 @@ hide:
     <p class="book-desc">A practitioner's deep guide to LLM inference — from GPU memory hierarchies, attention arithmetic, and transformer internals through production scheduling, multi-GPU serving, quantization, and cost engineering. Core concepts are grounded in two open-source engines — <strong>vLLM</strong> and <strong>llama.cpp</strong> — with dedicated chapters on <strong>SGLang</strong>, <strong>TensorRT-LLM</strong>, <strong>MLC-LLM</strong>, <strong>Ollama</strong>, <strong>MAX (Modular)</strong>, and <strong>Cerebras WSE-3</strong>. Most chapters include worked arithmetic, companion code, and production-ready configurations. Appendices cover kernel programming (CUDA, Triton, CUTLASS, Mojo, JAX), mathematical foundations (tensor contractions, backpropagation, Jacobians), and hardware platforms (AMD ROCm, Apple Silicon, NVIDIA Jetson).</p>
     <div class="book-metrics">
       <div class="book-metric"><span class="bm-n">52</span><span class="bm-l">chapters</span></div>
-      <div class="book-metric"><span class="bm-n">28</span><span class="bm-l">appendices</span></div>
+      <div class="book-metric"><span class="bm-n">29</span><span class="bm-l">appendices</span></div>
       <div class="book-metric"><span class="bm-n">48</span><span class="bm-l">code demos</span></div>
     </div>
     <div class="book-cta-row">
@@ -158,7 +158,7 @@ hide:
     <div class="toc-part">
       <div class="toc-part-header toc-pa">
         <span class="toc-part-label">App.</span>
-        <span class="toc-part-title">Appendices A – Z</span>
+        <span class="toc-part-title">Appendices A – AA</span>
         <span class="toc-part-range">Reference</span>
       </div>
       <div class="toc-entries">
@@ -190,6 +190,7 @@ hide:
         <a href="appendices/appendix-x.html" class="toc-entry"><span class="toc-num">X</span><span class="toc-etitle">References — 40+ Key Papers</span></a>
         <a href="appendices/appendix-y.html" class="toc-entry"><span class="toc-num">Y</span><span class="toc-etitle">Cerebras WSE-3 — Wafer-Scale Inference</span></a>
         <a href="appendices/appendix-z.html" class="toc-entry"><span class="toc-num">Z</span><span class="toc-etitle">JAX — XLA-Native Python for LLM Inference</span></a>
+        <a href="appendices/appendix-aa.html" class="toc-entry"><span class="toc-num">AA</span><span class="toc-etitle">Mixture of Experts — Architecture, Routing, and Inference Engineering</span></a>
       </div>
     </div>
 

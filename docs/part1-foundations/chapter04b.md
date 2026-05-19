@@ -62,7 +62,7 @@ Every worked example in this chapter uses the same `numpy.random.seed(42)` embed
 
 ## 1. The Token-Length Problem
 
-### 1.1 What Chapter 8 Left Unsolved
+### 1.1 What Chapter 4 Left Unsolved
 
 Chapter 4 cut the KV cache by compressing across *heads*. MQA reduced it to 1/4, GQA to 1/G, MLA to 1/13 — all at fixed sequence length N. The savings are real and large. But one factor survives untouched: the cache still grows linearly with N.
 

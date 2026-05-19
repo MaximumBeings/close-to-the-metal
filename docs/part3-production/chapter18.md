@@ -72,7 +72,7 @@ times the token count exceeds the ridge point, you're limited by FLOP/s.
 | Prefill | FLOP/s       | High tensor core throughput | H100 SXM 80GB     |
 | Decode  | Mem BW (GB/s)| Wide HBM bus, large SRAM   | H100 NVL 94GB     |
 
-The H100 SXM delivers 989 TFLOP/s BF16 and 3.35 TB/s. The H100 NVL pairs two chips with 7.8 TB/s
+The H100 SXM delivers 1,979 TFLOP/s BF16 dense (989 TFLOP/s TF32) and 3.35 TB/s. The H100 NVL pairs two chips with 7.8 TB/s
 aggregate bandwidth. If you had infinite budget you would route all prefill to SXM cards and all
 decode to NVL cards. Disaggregated serving does exactly this, in software, on any mix of hardware.
 

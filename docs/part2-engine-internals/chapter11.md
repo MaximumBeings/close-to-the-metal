@@ -482,8 +482,9 @@ llm = LLM(
 )
 ```
 
-Starting in vLLM 0.4.x, `enable_prefix_caching` is enabled by default when
-using the OpenAI-compatible server.  The Prometheus metric
+In vLLM V1 (the current default engine), prefix caching is **always on** and cannot
+be disabled — `--enable-prefix-caching` is now a no-op. The feature became the default
+in V0.4.x and was made unconditional in V1. The Prometheus metric
 `vllm:gpu_prefix_cache_hit_rate` measures real-time hit rate.
 
 ---
@@ -522,8 +523,8 @@ Chapter 18).
 
 - Hit rates of 78–91% have been reported in production RAG workloads.
 
-vLLM's disaggregated KV transfer (introduced in v0.6.x) provides the
-building blocks for this pattern, though a full cross-instance radix tree
+vLLM's disaggregated KV transfer (introduced in v0.6.x; now a standard V1 feature)
+provides the building blocks for this pattern, though a full cross-instance radix tree
 is currently a research/early-production feature.
 
 ### 11.5.3 Prefix caching vs. KV cache quantization

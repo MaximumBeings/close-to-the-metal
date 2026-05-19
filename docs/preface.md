@@ -72,7 +72,7 @@ Every technique described is in production somewhere. The tools are open source.
 
 ---
 
-**Appendices A–Z** (28 appendices) provide reference material designed for repeated use, grouped by theme.
+**Appendices A–AA** (29 appendices) provide reference material designed for repeated use, grouped by theme.
 
 *Foundations* — Mathematical foundations (A), tensor contractions with CUDA/Triton/CUTLASS/Mojo (A.2), the chain rule from scalars through transformer backpropagation (A.3), installation guide (B), and PyTorch for LLM inference (C).
 
@@ -86,9 +86,11 @@ Every technique described is in production somewhere. The tools are open source.
 
 *Production and Serving* — CI/CD pipelines (S), embedding and reranker serving (T), quantization calibration for AWQ/GPTQ/FP8/GGUF (U), and TurboQuant (V).
 
-*Reference* — Glossary of 85+ terms (W) and an annotated bibliography of 40+ papers (X).
+*Reference* — Glossary of 70+ terms (W) and an annotated bibliography of 40+ papers (X).
 
 *Accelerator Platforms* — Cerebras WSE-3 wafer-scale inference including MemoryX and SwarmX (Y), and JAX/XLA covering jit, vmap, grad, pmap, jax.sharding, and the Flax/MaxText/Equinox ecosystem (Z).
+
+*Model Architectures* — Mixture of Experts covering routing algorithms, load balancing, expert parallelism, and inference engineering for MoE models including DeepSeek-V3, Mixtral, and Qwen-MoE (AA).
 
 ---
 

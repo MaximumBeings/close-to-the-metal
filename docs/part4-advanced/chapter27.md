@@ -74,7 +74,7 @@ Despite the memory volume, decode remains bandwidth-bound at long context becaus
 decode step reads the entire KV cache sequentially (O(T) bandwidth) while performing
 only O(T·d) arithmetic.
 The arithmetic intensity of decode never rises above a few FLOPs/byte regardless of context
-length, so the H100 ridge point (≈ 295 FLOPs/byte) is never crossed during generation.
+length, so the H100 ridge point (≈ 591 FLOPs/byte, based on 1,979 TFLOPS BF16 dense ÷ 3.35 TB/s) is never crossed during generation.
 
 Prefill, however, saturates compute: the attention kernel tiles QK^T across the sequence
 and reuses data from shared cache.

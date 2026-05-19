@@ -647,7 +647,7 @@ Scheduler Process CPU Utilization (%)
 
 ### API-Level Changes
 
-The V1 engine is enabled with `--use-v2-block-manager` being the default (and the flag being deprecated in favor of automatic selection). The primary user-visible changes:
+The V1 engine is now the default. The `--use-v2-block-manager` flag was **removed** in vLLM ≥ 0.8 — it is not deprecated, it no longer exists. The primary user-visible changes:
 
 ```
 Flag Changes: V0 → V1
@@ -657,7 +657,7 @@ Flag Changes: V0 → V1
   ───────────────────────────────  ──────────────────    ──────────────────────
   --enable-prefix-caching          Always on             Cannot disable in V1
   --disable-sliding-window         Removed               V1 handles all attn types
-  --use-v2-block-manager           Default=True          Was opt-in in V0
+  --use-v2-block-manager           Removed               Flag removed in vLLM ≥ 0.8
   --num-gpu-blocks-override N      Kept                  Same semantics
   --swap-space N                   Kept                  CPU swap still available
   --max-num-seqs N                 Kept                  Same semantics

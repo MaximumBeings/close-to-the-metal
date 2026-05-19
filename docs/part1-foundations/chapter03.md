@@ -864,7 +864,7 @@ vLLM implements this in `vllm/core/scheduler.py`. The scheduler runs at every de
 
 ### 3.8.4 Chunked Prefill
 
-An extension of continuous batching, introduced in vLLM v0.4+: **chunked prefill** splits long prompts across multiple steps so that prefill and decode can interleave. This prevents a long-context prefill from monopolizing the GPU and starving decode requests.
+An extension of continuous batching, introduced in vLLM v0.4 and **on by default in V1**: **chunked prefill** splits long prompts across multiple steps so that prefill and decode can interleave. This prevents a long-context prefill from monopolizing the GPU and starving decode requests.
 
 ```
 Without chunked prefill:

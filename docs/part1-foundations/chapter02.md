@@ -276,7 +276,7 @@ Final answer:
   A100 40GB:   40 GB  ████████████████░░░░░░░░░░░░░░
   A100 80GB:   80 GB  ████████████████████████████████
   H100 80GB:   80 GB  ████████████████████████████████
-  H100 NVL:   188 GB  ═══════════════════════════════════
+  H100 NVL:    94 GB  ════════════════════════════════════  (188 GB per NVL pair)
 
   Rules of thumb:
   ● If weights > 80% of GPU VRAM → too tight (no room for KV cache)
