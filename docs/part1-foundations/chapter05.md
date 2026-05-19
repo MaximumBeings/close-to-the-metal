@@ -1118,27 +1118,39 @@ The running sum l is numerically stable because we always subtract the current m
 
 **The correct softmax** requires a *global* denominator:
 
-$$\text{softmax}(x_i) = \frac{e^{x_i}}{\sum_{j=1}^{N} e^{x_j}}$$
+```
+softmax(xᵢ) = exp(xᵢ) / Σⱼ exp(xⱼ)
+```
 
 **Naïve block-wise softmax** computes softmax *independently within each block*, then concatenates:
 
 **Example:** x = [1, 3, 2, 5, 4] split into Block 1 = [1, 3] and Block 2 = [2, 5, 4]
 
 **Block 1 local softmax:**
-$$\text{denom}_1 = e^1 + e^3 = 2.718 + 20.086 = 22.804$$
-$$p_1 = [2.718/22.804,\ 20.086/22.804] = [0.1192,\ 0.8808] \quad \text{sum} = 1.000$$
+
+```
+denom₁ = e¹ + e³ = 2.718 + 20.086 = 22.804
+p₁ = [2.718/22.804, 20.086/22.804] = [0.1192, 0.8808]   sum = 1.000 ✓
+```
 
 **Block 2 local softmax:**
-$$\text{denom}_2 = e^2 + e^5 + e^4 = 7.389 + 148.413 + 54.598 = 210.400$$
-$$p_2 = [0.0351,\ 0.7053,\ 0.2596] \quad \text{sum} = 1.000$$
+
+```
+denom₂ = e² + e⁵ + e⁴ = 7.389 + 148.413 + 54.598 = 210.400
+p₂ = [7.389/210.400, 148.413/210.400, 54.598/210.400] = [0.0351, 0.7053, 0.2596]   sum = 1.000 ✓
+```
 
 **Naïve concatenation:** [0.1192, 0.8808, 0.0351, 0.7053, 0.2596]
 
 **Sum = 2.000** — instead of 1.0!
 
-**Correct softmax** (global denominator = 1.5713 × e⁵ = 1.5713 × 148.413 = 233.107):
-$$[e^{-4}, e^{-2}, e^{-3}, e^{0}, e^{-1}] / 1.5713 = [0.0117, 0.0862, 0.0317, 0.6364, 0.2340]$$
-Sum = 1.000 ✓
+**Correct softmax** (global denominator = e¹ + e³ + e² + e⁵ + e⁴ = 233.107):
+
+```
+p = [2.718/233.107, 20.086/233.107, 7.389/233.107, 148.413/233.107, 54.598/233.107]
+  = [0.0117,        0.0862,         0.0317,         0.6364,          0.2340]
+                                                                    sum = 1.000 ✓
+```
 
 The naïve approach treats each block as an independent distribution. The block with the large value (e^5 = 148) dominates the true global denominator but is unknown to Block 1. Block 1's tokens receive inflated probabilities because they are normalized against a denominator that ignores the much larger values in Block 2.
 
