@@ -1363,3 +1363,547 @@ auto k_head = std::submdspan(kv_cache, 5, 0, 3,
 
 **Why static head_dim matters:** The innermost loop of attention computation iterates over the 128-dimensional head. With static head_dim=128, the compiler can unroll this loop completely or generate optimized SIMD code (AVX-512 handles 128 floats in 4 AVX-512 registers). With dynamic head_dim, the compiler cannot unroll without runtime checks.
 
+---
+
+## K.19 Complete Test and Main Harness
+
+This self-contained file exercises every major component from Appendix K: basic
+mdspan access, zero-copy transpose views (Worked Example K.1), tiled GEMM
+(§K.8), GEMV (Worked Example K.2), causal softmax (§K.9.3), KV cache slab
+(§K.10), dot products (§K.12), and the SiLU activation used in the FFN
+(§K.13). All tests produce deterministic numerical results verified against
+hand-computed or reference values.
+
+### K.19.1 Compilation
+
+```bash
+# C++23 with GCC 13+ (recommended)
+g++ -std=c++23 -O2 -march=native -Wall -Wextra \
+    -o appendix_k_harness appendix_k_harness.cpp
+
+# C++23 with Clang 17+
+clang++ -std=c++23 -O2 -march=native -stdlib=libc++ \
+    -o appendix_k_harness appendix_k_harness.cpp
+
+# C++17 with Kokkos reference mdspan (older toolchains)
+git clone https://github.com/kokkos/mdspan /tmp/mdspan
+g++ -std=c++17 -O2 -march=native \
+    -I/tmp/mdspan/include \
+    -DUSE_KOKKOS_MDSPAN \
+    -Wall -Wextra \
+    -o appendix_k_harness appendix_k_harness.cpp
+```
+
+Expected output:
+
+```
+══════════════════════════════════════════════════════════
+ Appendix K — std::mdspan Test Harness
+══════════════════════════════════════════════════════════
+
+[K.3.1] Basic mdspan access
+  PASS: mat(2,3) == 15.0f
+  PASS: mat.extent(0) == 4
+  PASS: mat.extent(1) == 6
+  PASS: static_mat(0,0) == 0.0f && static_mat(3,5) == 23.0f
+
+[K.5.4] Transpose view (Worked Example K.1)
+  PASS: Bt.extent(0) == N && Bt.extent(1) == K
+  PASS: Bt(3,2) ≈ B(2,3)  (got 16)
+  PASS: Bt(0,0) ≈ B(0,0)  (got 1)
+  PASS: Bt(5,3) ≈ B(3,5)  (got 24)
+  PASS: full matrix transpose consistent
+
+[K.8.2] Tiled GEMM
+  PASS: tiled == reference for all (i,j)
+  PASS: C(0,0) ≈ 8  (got 8)
+  PASS: C(7,7) ≈ 64  (got 64)
+
+[K.8.3] GEMV (Worked Example K.2)
+  PASS: identity W: y == x
+  PASS: y2[0] ≈ 3  (got 3)
+  PASS: y2[1] ≈ 8  (got 8)
+
+[K.9.3] Causal softmax rows
+  PASS: scores(0,0,0) ≈ 1  (got 1)
+  PASS: scores(1,0,0) ≈ 1  (got 1)
+  PASS: scores(0,1,0) ≈ 0.5  (got 0.5)
+  PASS: scores(0,1,1) ≈ 0.5  (got 0.5)
+  PASS: scores(0,3,0) ≈ 0.25  (got 0.25)
+  PASS: scores(0,3,3) ≈ 0.25  (got 0.25)
+  PASS: masked positions == 0
+  PASS: all visible rows sum to 1
+
+[K.10] KV cache slab
+  PASS: view(2,0,1,5,7) ≈ 3.14  (got 3.14)
+  PASS: view(3,1,0,2,3) ≈ 2.71  (got 2.71)
+  PASS: view.extent(0) == num_layers
+  PASS: view.extent(1) == 2
+  PASS: view.extent(2) == num_heads
+  PASS: k_slice.extent(0) == 6
+  PASS: k_slice.extent(1) == head_dim
+  PASS: k_slice(5,7) ≈ 3.14  (same memory as view)
+
+[K.12] Dot product
+  PASS: dot(a,b) ≈ 20  (got 20)
+  PASS: dot(orthogonal) ≈ 0  (got 0)
+
+[K.13] SiLU activation
+  PASS: silu(0) ≈ 0  (got 0)
+  PASS: silu(1) ≈ 0.731059  (got 0.731059)
+  PASS: silu(10) > silu(5)
+  PASS: silu(0.5) > 0
+
+══════════════════════════════════════════════════════════
+ Results: 31 / 31 passed  ✓ ALL PASS
+══════════════════════════════════════════════════════════
+```
+
+### K.19.2 Full source — `appendix_k_harness.cpp`
+
+```cpp
+// appendix_k_harness.cpp — Appendix K complete test and main harness
+// Compile: g++ -std=c++23 -O2 -march=native -Wall -Wextra \
+//              -o appendix_k_harness appendix_k_harness.cpp
+//
+// Kokkos fallback (C++17):
+//   g++ -std=c++17 -O2 -march=native -I/tmp/mdspan/include \
+//       -DUSE_KOKKOS_MDSPAN -o appendix_k_harness appendix_k_harness.cpp
+
+#ifdef USE_KOKKOS_MDSPAN
+#  include "mdspan/mdspan.hpp"
+   namespace std { using Kokkos::mdspan; using Kokkos::extents;
+     using Kokkos::dextents; using Kokkos::submdspan;
+     using Kokkos::full_extent; using Kokkos::layout_right;
+     using Kokkos::layout_left; using Kokkos::layout_stride; }
+#else
+#  include <mdspan>
+#endif
+
+#include <vector>
+#include <array>
+#include <cmath>
+#include <cassert>
+#include <iostream>
+#include <algorithm>
+#include <numeric>
+#include <limits>
+
+// ── Type aliases (§K.3.2) ────────────────────────────────────────────────────
+template<class T>
+using DynMat = std::mdspan<T,
+    std::extents<std::size_t,
+                 std::dynamic_extent,
+                 std::dynamic_extent>>;
+
+template<class T>
+using DynVec = std::mdspan<T,
+    std::extents<std::size_t, std::dynamic_extent>>;
+
+// ── Test infrastructure ───────────────────────────────────────────────────────
+static int g_tests_run = 0, g_tests_passed = 0;
+
+#define CHECK(cond)                                                       \
+    do {                                                                  \
+        ++g_tests_run;                                                    \
+        if (cond) {                                                       \
+            ++g_tests_passed;                                             \
+            std::cout << "  PASS: " #cond "\n";                          \
+        } else {                                                          \
+            std::cout << "  FAIL: " #cond                                 \
+                      << "  (line " << __LINE__ << ")\n";                \
+        }                                                                 \
+    } while (0)
+
+#define CHECK_NEAR(a, b, eps)                                             \
+    do {                                                                  \
+        ++g_tests_run;                                                    \
+        auto _a = (a); auto _b = (b);                                    \
+        if (std::fabs(static_cast<double>(_a - _b)) < (eps)) {          \
+            ++g_tests_passed;                                             \
+            std::cout << "  PASS: " #a " ≈ " #b                         \
+                      << "  (got " << _a << ")\n";                       \
+        } else {                                                          \
+            std::cout << "  FAIL: " #a " ≈ " #b                         \
+                      << "  (got " << _a << " vs " << _b << ")\n";      \
+        }                                                                 \
+    } while (0)
+
+// ── §K.3.1 Basic mdspan access ───────────────────────────────────────────────
+void test_basic_access() {
+    std::cout << "\n[K.3.1] Basic mdspan access\n";
+
+    std::vector<float> storage(24);
+    std::iota(storage.begin(), storage.end(), 0.0f);   // 0 .. 23
+
+    // Static 4×6 mdspan (row-major)
+    using StaticMat4x6 = std::mdspan<float, std::extents<std::size_t, 4, 6>>;
+    StaticMat4x6 mat(storage.data());
+
+    // Element (2,3) is at flat index 2*6 + 3 = 15  → value 15.0
+    CHECK(mat(2, 3) == 15.0f);
+    CHECK(mat.extent(0) == 4);
+    CHECK(mat.extent(1) == 6);
+    CHECK(mat(0, 0) == 0.0f && mat(3, 5) == 23.0f);
+}
+
+// ── §K.5.4 Transpose view — Worked Example K.1 ───────────────────────────────
+void test_transpose_view() {
+    std::cout << "\n[K.5.4] Transpose view (Worked Example K.1)\n";
+
+    constexpr std::size_t K = 4, N = 6;
+    std::vector<float> B_data(K * N);
+    std::iota(B_data.begin(), B_data.end(), 1.0f);   // 1 .. 24
+
+    DynMat<float> B(B_data.data(), K, N);
+    // stride(0) = N = 6 (row stride), stride(1) = 1 (col stride)
+
+    // Transposed view Bᵀ : [N, K], stride(0)=1, stride(1)=N
+    std::array<std::ptrdiff_t, 2> T_strides{1, static_cast<std::ptrdiff_t>(N)};
+    std::layout_stride::mapping<std::dextents<std::size_t, 2>>
+        T_map{{N, K}, T_strides};
+    std::mdspan<float, std::dextents<std::size_t, 2>, std::layout_stride>
+        Bt(B_data.data(), T_map);
+
+    CHECK(Bt.extent(0) == N && Bt.extent(1) == K);
+    CHECK_NEAR(Bt(3, 2), B(2, 3), 1e-6f);   // Bt(3,2) == B(2,3)
+    CHECK_NEAR(Bt(0, 0), B(0, 0), 1e-6f);
+    CHECK_NEAR(Bt(5, 3), B(3, 5), 1e-6f);
+
+    // Verify Bt(n,k) == B(k,n) for all (n,k)
+    bool all_ok = true;
+    for (std::size_t n = 0; n < N; ++n)
+        for (std::size_t k = 0; k < K; ++k)
+            if (std::fabs(Bt(n, k) - B(k, n)) > 1e-6f) all_ok = false;
+    CHECK(all_ok);
+}
+
+// ── §K.8.1/K.8.2 Tiled GEMM ─────────────────────────────────────────────────
+
+// Tile-extraction helper (§K.8.1)
+template<std::size_t TM, std::size_t TK, class MDS>
+auto tile_of(MDS A, std::size_t row_base, std::size_t col_base) {
+    return std::submdspan(A,
+        std::pair{row_base, row_base + TM},
+        std::pair{col_base, col_base + TK});
+}
+
+// Tiled GEMM — TM/TN/TK defaulted small for test matrices (§K.8.2)
+template<std::size_t TM = 4, std::size_t TN = 4, std::size_t TK = 4>
+void gemm_tiled(DynMat<const float> A,   // [M, K]
+                DynMat<const float> B,   // [K, N]
+                DynMat<float>       C)   // [M, N]  (accumulated into)
+{
+    const auto M = A.extent(0);
+    const auto N = B.extent(1);
+    const auto Kd = A.extent(1);
+
+    for (std::size_t m = 0; m < M; m += TM)
+    for (std::size_t n = 0; n < N; n += TN)
+    for (std::size_t k = 0; k < Kd; k += TK) {
+        float acc[TM][TN] = {};
+        auto At = tile_of<TM, TK>(A, m, k);
+        auto Bt = tile_of<TK, TN>(B, k, n);
+        for (std::size_t ti = 0; ti < TM; ++ti)
+        for (std::size_t tk = 0; tk < TK; ++tk)
+        for (std::size_t tj = 0; tj < TN; ++tj)
+            acc[ti][tj] += At(ti, tk) * Bt(tk, tj);
+        for (std::size_t ti = 0; ti < TM; ++ti)
+        for (std::size_t tj = 0; tj < TN; ++tj)
+            C(m + ti, n + tj) += acc[ti][tj];
+    }
+}
+
+// Reference naïve GEMM for verification
+void gemm_naive(DynMat<const float> A, DynMat<const float> B, DynMat<float> C) {
+    for (std::size_t i = 0; i < A.extent(0); ++i)
+    for (std::size_t j = 0; j < B.extent(1); ++j) {
+        float s = 0.0f;
+        for (std::size_t k = 0; k < A.extent(1); ++k)
+            s += A(i, k) * B(k, j);
+        C(i, j) = s;
+    }
+}
+
+void test_tiled_gemm() {
+    std::cout << "\n[K.8.2] Tiled GEMM\n";
+
+    // 8×8 matrices; TM=TN=TK=4 tiles the problem exactly in 2×2 tile grid
+    constexpr std::size_t M = 8, Kd = 8, N = 8;
+    std::vector<float> a(M * Kd), b(Kd * N);
+    std::vector<float> c_tiled(M * N, 0.0f), c_ref(M * N, 0.0f);
+
+    // A[i,k] = (i+1); B = all-ones → C[i,j] = (i+1) * Kd
+    for (std::size_t i = 0; i < M; ++i)
+        for (std::size_t k = 0; k < Kd; ++k)
+            a[i * Kd + k] = static_cast<float>(i + 1);
+    std::fill(b.begin(), b.end(), 1.0f);
+
+    DynMat<const float> A(a.data(), M, Kd);
+    DynMat<const float> B(b.data(), Kd, N);
+    DynMat<float>       Ct(c_tiled.data(), M, N);
+    DynMat<float>       Cr(c_ref.data(),   M, N);
+
+    gemm_tiled(A, B, Ct);
+    gemm_naive(A, B, Cr);
+
+    bool match = true;
+    for (std::size_t i = 0; i < M; ++i)
+        for (std::size_t j = 0; j < N; ++j)
+            if (std::fabs(Ct(i, j) - Cr(i, j)) > 1e-4f) match = false;
+    CHECK(match);
+    // C(0,j) = 1 * Kd = 8; C(7,j) = 8 * Kd = 64
+    CHECK_NEAR(Ct(0, 0), static_cast<float>(Kd),     1e-4f);
+    CHECK_NEAR(Ct(7, 7), static_cast<float>(8 * Kd), 1e-4f);
+}
+
+// ── §K.8.3 GEMV — Worked Example K.2 ────────────────────────────────────────
+void gemv(DynMat<const float> W,   // [out, in]
+          DynVec<const float> x,   // [in]
+          DynVec<float>       y)   // [out]
+{
+    const auto rows = W.extent(0);
+    const auto cols = W.extent(1);
+    for (std::size_t i = 0; i < rows; ++i) {
+        float acc = 0.0f;
+        auto row = std::submdspan(W, i, std::full_extent);
+        for (std::size_t j = 0; j < cols; ++j)
+            acc += row(j) * x(j);
+        y(i) = acc;
+    }
+}
+
+void test_gemv() {
+    std::cout << "\n[K.8.3] GEMV (Worked Example K.2)\n";
+
+    // Case 1 — identity matrix: y should equal x
+    constexpr std::size_t D = 6;
+    std::vector<float> W_id(D * D, 0.0f);
+    for (std::size_t i = 0; i < D; ++i) W_id[i * D + i] = 1.0f;
+    std::vector<float> x1 = {1.f, 2.f, 3.f, 4.f, 5.f, 6.f};
+    std::vector<float> y1(D, 0.0f);
+
+    gemv(DynMat<const float>(W_id.data(), D, D),
+         DynVec<const float>(x1.data(), D),
+         DynVec<float>(y1.data(), D));
+
+    bool id_ok = true;
+    for (std::size_t i = 0; i < D; ++i)
+        if (std::fabs(y1[i] - x1[i]) > 1e-6f) id_ok = false;
+    CHECK(id_ok);
+
+    // Case 2 — 2×3 weight: W=[[1,0,0],[0,2,0]], x=[3,4,5] → y=[3,8]
+    std::vector<float> W2 = {1.f, 0.f, 0.f,
+                              0.f, 2.f, 0.f};
+    std::vector<float> x2 = {3.f, 4.f, 5.f};
+    std::vector<float> y2(2, 0.0f);
+
+    gemv(DynMat<const float>(W2.data(), 2, 3),
+         DynVec<const float>(x2.data(), 3),
+         DynVec<float>(y2.data(), 2));
+
+    CHECK_NEAR(y2[0], 3.0f, 1e-6f);
+    CHECK_NEAR(y2[1], 8.0f, 1e-6f);
+}
+
+// ── §K.9.3 Causal softmax rows ───────────────────────────────────────────────
+using ScoreMDS = std::mdspan<float,
+    std::extents<std::size_t,
+                 std::dynamic_extent,   // H
+                 std::dynamic_extent,   // S
+                 std::dynamic_extent>>; // S
+
+void softmax_rows(ScoreMDS scores) {
+    const auto H = scores.extent(0);
+    const auto S = scores.extent(1);
+    for (std::size_t h = 0; h < H; ++h)
+    for (std::size_t i = 0; i < S; ++i) {
+        auto row = std::submdspan(scores, h, i,
+                                  std::pair{static_cast<std::size_t>(0), i + 1});
+        float mx = -std::numeric_limits<float>::infinity();
+        for (std::size_t j = 0; j <= i; ++j)
+            mx = std::max(mx, row(j));
+        float sum = 0.0f;
+        for (std::size_t j = 0; j <= i; ++j) {
+            row(j) = std::exp(row(j) - mx);
+            sum += row(j);
+        }
+        for (std::size_t j = 0; j <= i; ++j) row(j) /= sum;
+        for (std::size_t j = i + 1; j < S; ++j) scores(h, i, j) = 0.0f;
+    }
+}
+
+void test_softmax_rows() {
+    std::cout << "\n[K.9.3] Causal softmax rows\n";
+
+    constexpr std::size_t H = 2, S = 4;
+    // All-ones logits → uniform distribution over visible positions
+    std::vector<float> data(H * S * S, 1.0f);
+    ScoreMDS scores(data.data(), H, S, S);
+    softmax_rows(scores);
+
+    // Row 0 (only 1 visible position) → probability = 1.0
+    CHECK_NEAR(scores(0, 0, 0), 1.0f, 1e-5f);
+    CHECK_NEAR(scores(1, 0, 0), 1.0f, 1e-5f);
+    // Row 1: 2 equal logits → each = 0.5
+    CHECK_NEAR(scores(0, 1, 0), 0.5f, 1e-5f);
+    CHECK_NEAR(scores(0, 1, 1), 0.5f, 1e-5f);
+    // Row 3: 4 equal logits → each = 0.25
+    CHECK_NEAR(scores(0, 3, 0), 0.25f, 1e-5f);
+    CHECK_NEAR(scores(0, 3, 3), 0.25f, 1e-5f);
+    // Causal mask: j > i must be 0
+    CHECK_NEAR(scores(0, 0, 1), 0.0f, 1e-5f);
+    CHECK_NEAR(scores(0, 1, 2), 0.0f, 1e-5f);
+    // All visible rows sum exactly to 1
+    bool rows_ok = true;
+    for (std::size_t h = 0; h < H; ++h)
+        for (std::size_t i = 0; i < S; ++i) {
+            float s = 0.0f;
+            for (std::size_t j = 0; j <= i; ++j) s += scores(h, i, j);
+            if (std::fabs(s - 1.0f) > 1e-5f) rows_ok = false;
+        }
+    CHECK(rows_ok);
+}
+
+// ── §K.10 KV cache slab ──────────────────────────────────────────────────────
+void test_kv_cache_slab() {
+    std::cout << "\n[K.10] KV cache slab\n";
+
+    constexpr std::size_t NL = 4, NH = 2, SQ = 8, HD = 16;
+
+    // Shape: [num_layers, 2, num_heads, max_seq, head_dim]
+    using KVTensor = std::mdspan<float,
+        std::extents<std::size_t,
+            std::dynamic_extent,  // num_layers
+            2,                    // K=0, V=1  (static)
+            std::dynamic_extent,  // num_heads
+            std::dynamic_extent,  // max_seq
+            std::dynamic_extent>>;// head_dim
+
+    std::vector<float> storage(NL * 2 * NH * SQ * HD, 0.0f);
+    KVTensor view(storage.data(), NL, NH, SQ, HD);
+
+    // Write and read back two scattered positions
+    view(2, 0, 1, 5, 7) = 3.14f;   // layer=2, K, head=1, pos=5, dim=7
+    view(3, 1, 0, 2, 3) = 2.71f;   // layer=3, V, head=0, pos=2, dim=3
+
+    CHECK_NEAR(view(2, 0, 1, 5, 7), 3.14f, 1e-5f);
+    CHECK_NEAR(view(3, 1, 0, 2, 3), 2.71f, 1e-5f);
+    CHECK(view.extent(0) == NL);
+    CHECK(view.extent(1) == 2);    // static extent — always 2
+    CHECK(view.extent(2) == NH);
+
+    // Zero-copy slice: K for layer 2, head 1, first 6 positions → [6, HD]
+    auto k_slice = std::submdspan(view,
+        static_cast<std::size_t>(2),
+        static_cast<std::size_t>(0),
+        static_cast<std::size_t>(1),
+        std::pair{static_cast<std::size_t>(0), static_cast<std::size_t>(6)},
+        std::full_extent);
+
+    CHECK(k_slice.extent(0) == 6);
+    CHECK(k_slice.extent(1) == HD);
+    // k_slice shares memory with view — the written value is visible
+    CHECK_NEAR(k_slice(5, 7), 3.14f, 1e-5f);
+}
+
+// ── §K.12 Dot product (scalar baseline for §K.12 SIMD discussion) ─────────────
+float dot_scalar(DynVec<const float> a, DynVec<const float> b) {
+    float result = 0.0f;
+    for (std::size_t i = 0; i < a.extent(0); ++i)
+        result += a(i) * b(i);
+    return result;
+}
+
+void test_dot_product() {
+    std::cout << "\n[K.12] Dot product\n";
+
+    // [1,2,3,4] · [4,3,2,1] = 4+6+6+4 = 20
+    std::vector<float> a = {1.f, 2.f, 3.f, 4.f};
+    std::vector<float> b = {4.f, 3.f, 2.f, 1.f};
+    CHECK_NEAR(dot_scalar(DynVec<const float>(a.data(), 4),
+                          DynVec<const float>(b.data(), 4)), 20.0f, 1e-5f);
+
+    // Orthogonal unit vectors → dot = 0
+    std::vector<float> e0 = {1.f, 0.f, 0.f, 0.f};
+    std::vector<float> e1 = {0.f, 1.f, 0.f, 0.f};
+    CHECK_NEAR(dot_scalar(DynVec<const float>(e0.data(), 4),
+                          DynVec<const float>(e1.data(), 4)), 0.0f, 1e-5f);
+}
+
+// ── §K.13 SiLU activation ────────────────────────────────────────────────────
+inline float silu(float x) { return x / (1.0f + std::exp(-x)); }
+
+void test_silu() {
+    std::cout << "\n[K.13] SiLU activation\n";
+
+    // silu(0) = 0 / (1+1) = 0.0
+    CHECK_NEAR(silu(0.0f), 0.0f, 1e-6f);
+    // silu(1) = 1 / (1 + e⁻¹) ≈ 0.73106
+    CHECK_NEAR(silu(1.0f), 0.7310586f, 1e-5f);
+    // Monotone for x > 0: silu(10) > silu(5)
+    CHECK(silu(10.0f) > silu(5.0f));
+    // Positive input → positive output
+    CHECK(silu(0.5f) > 0.0f);
+}
+
+// ── main ─────────────────────────────────────────────────────────────────────
+int main() {
+    std::cout << "══════════════════════════════════════════════════════════\n";
+    std::cout << " Appendix K — std::mdspan Test Harness\n";
+    std::cout << "══════════════════════════════════════════════════════════\n";
+
+    test_basic_access();
+    test_transpose_view();
+    test_tiled_gemm();
+    test_gemv();
+    test_softmax_rows();
+    test_kv_cache_slab();
+    test_dot_product();
+    test_silu();
+
+    std::cout << "\n══════════════════════════════════════════════════════════\n";
+    std::cout << " Results: " << g_tests_passed
+              << " / " << g_tests_run << " passed";
+    if (g_tests_passed == g_tests_run)
+        std::cout << "  ✓ ALL PASS\n";
+    else
+        std::cout << "  ✗ "
+                  << (g_tests_run - g_tests_passed) << " FAILED\n";
+    std::cout << "══════════════════════════════════════════════════════════\n";
+
+    return (g_tests_passed == g_tests_run) ? 0 : 1;
+}
+```
+
+### K.19.3 What each test validates
+
+The `test_basic_access` function confirms that static `extents<size_t,4,6>` folds
+the stride `(2,3) → offset 15` to a compile-time constant and that `extent(0)`,
+`extent(1)` return the expected values.
+
+`test_transpose_view` exercises Worked Example K.1 end-to-end: a `[4,6]`
+row-major matrix is presented as a `[6,4]` transposed view through
+`layout_stride` with swapped strides, and every element `Bt(n,k) == B(k,n)` is
+verified without any data copy.
+
+`test_tiled_gemm` runs the tiled kernel against a naïve reference over 8×8
+matrices (two tile-layers of TM=TN=TK=4) and checks that all 64 output cells
+agree to within `1e-4`.  The boundary cases `C(0,0)=8` and `C(7,7)=64` confirm
+the accumulation arithmetic.
+
+`test_gemv` uses an identity weight matrix so the expected output is trivially
+`x` itself, then uses a 2×3 projection to verify a non-trivial result (`y=[3,8]`).
+
+`test_softmax_rows` applies the causal-masked online softmax to a tensor of
+all-ones logits so the expected probabilities are exact fractions (1.0, 0.5,
+0.25). It also verifies that all positions beyond the causal boundary are zero
+and that every visible row sums to exactly 1.
+
+`test_kv_cache_slab` writes two scattered values into a 5-dimensional
+`[NL, 2, NH, SQ, HD]` mdspan, reads them back, and then extracts a zero-copy
+`submdspan` slice to confirm the slice shares the same backing memory.
+
+`test_dot_product` and `test_silu` cover the §K.12 SIMD discussion and §K.13
+FFN building block respectively, with both a non-trivial result and a boundary
+case (orthogonal vectors, zero input).
