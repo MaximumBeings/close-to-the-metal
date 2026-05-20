@@ -911,4 +911,4 @@ Then there is a "pause" while the next 10-step batch executes on the GPU. The cl
 With `--num-scheduler-steps=1` (default behavior), each decode step returns 1 token and immediately triggers the next scheduling cycle. The SSE stream delivers tokens at a steady drip rate matching the decode step latency (~20 ms/token for a 70B model).
 
 **Developer trap:** Latency measurement code that measures "time to first token in each burst" will see artificially low ITL for the first token in each burst (it arrives with 9 others). Correct ITL measurement must account for the burst delivery: measure time from end of last token to end of current last token and divide by 10.
-
+*Companion code: [`docs/code/chapter_40.md`](../code/chapter_40.md)*

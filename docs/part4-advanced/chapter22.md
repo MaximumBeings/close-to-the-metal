@@ -1009,4 +1009,4 @@ Use hash-based routing: route = "candidate" if hash(user_id) % 100 < 10 else "st
 2. The 10% split is deterministic, not probabilistic.
 
 Verification: sample 10,000 synthetic user IDs, confirm 900-1100 (9-11%) route to candidate. Log adapter_id per request and alert if rolling ratio deviates >5% from target in production.
-
+*Companion code: [`docs/code/chapter_22.md`](../code/chapter_22.md)*

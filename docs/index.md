@@ -186,7 +186,7 @@ hide:
         <a href="appendices/appendix-t.html" class="toc-entry"><span class="toc-num">T</span><span class="toc-etitle">Embedding and Reranker Model Serving</span></a>
         <a href="appendices/appendix-u.html" class="toc-entry"><span class="toc-num">U</span><span class="toc-etitle">Quantization Calibration Workflow — AWQ, GPTQ, FP8, and GGUF</span></a>
         <a href="appendices/appendix-v.html" class="toc-entry"><span class="toc-num">V</span><span class="toc-etitle">TurboQuant — Online Vector Quantization for KV Cache</span></a>
-        <a href="appendices/appendix-w.html" class="toc-entry"><span class="toc-num">W</span><span class="toc-etitle">Glossary — 70+ Terms Defined</span></a>
+        <a href="appendices/appendix-w.html" class="toc-entry"><span class="toc-num">W</span><span class="toc-etitle">Glossary — 90+ Terms Defined</span></a>
         <a href="appendices/appendix-x.html" class="toc-entry"><span class="toc-num">X</span><span class="toc-etitle">References — 40+ Key Papers</span></a>
         <a href="appendices/appendix-y.html" class="toc-entry"><span class="toc-num">Y</span><span class="toc-etitle">Cerebras WSE-3 — Wafer-Scale Inference</span></a>
         <a href="appendices/appendix-z.html" class="toc-entry"><span class="toc-num">Z</span><span class="toc-etitle">JAX — XLA-Native Python for LLM Inference</span></a>

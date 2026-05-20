@@ -1235,4 +1235,4 @@ Deny all other outbound
 ```
 
 Use VPC endpoints for S3 and other AWS services to eliminate internet-facing egress entirely. After model download at pod startup, the `Allow 443 → HuggingFace` rule can be revoked via a post-startup sidecar.
-
+*Companion code: [`docs/code/chapter_21.md`](../code/chapter_21.md)*

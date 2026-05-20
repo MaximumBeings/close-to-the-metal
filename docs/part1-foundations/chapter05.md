@@ -1227,4 +1227,4 @@ $$= \frac{\sum_p l_p \exp(m_p - m_{\text{global}}) \cdot O_p}{\sum_p l_p \exp(m_
 This is mathematically identical to what online softmax would compute if it processed all P×(N/P) = N elements sequentially. Each (O_p, m_p, l_p) triple is a self-contained "macro-element" in the online softmax recurrence. The parallel reduction is the same mathematical operation as the sequential online merge — just applied to P groups simultaneously instead of one element at a time.
 
 **Performance gain:** FlashDecoding runs P=16 CUDA thread blocks in parallel on a single GPU. For long-context decode where N is large (e.g., 64K tokens), each block handles 4K tokens — all 16 blocks run simultaneously, then the 16 partial results are reduced in one fast kernel. Throughput scales with P × block parallelism rather than being bottlenecked by a single sequential pass over N.
-
+*Companion code: [`docs/code/chapter_05.md`](../code/chapter_05.md)*

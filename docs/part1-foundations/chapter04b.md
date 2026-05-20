@@ -2930,3 +2930,5 @@ This gives ~92% retrieval quality at ~10× less memory than full MHA.
 ---
 
 
+
+*Companion code: [`docs/code/chapter_04b.md`](../code/chapter_04b.md)*

@@ -2677,3 +2677,5 @@ Results: 11 passed, 0 failed
 
 The tiled GEMM is ~12× faster than the naive triple-loop — shared memory tiling at work. Both are far below cuBLAS (~200 TFLOPS for this size), which applies WMMA Tensor Core instructions that our scalar kernels do not. This gap is exactly what Appendix N (CUTLASS) and Appendix M (Triton) address.
 
+
+*Companion code: [`docs/code/appendix_l.md`](../code/appendix_l.md)*

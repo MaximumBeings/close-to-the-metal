@@ -724,4 +724,4 @@ monthly_cost = $237.60 × 30 = $7,128/month
 ```
 
 **Note:** This assumes the Q1 deployment (4× A100, 1,800 tok/s) can handle the peak load. Peak QPS = 120M tokens / (24 × 3,600 s) = 1,389 tok/s average, well within the 1,800 tok/s capacity at 70% utilization. However, real traffic has peaks — if the 50K DAU all use the app in a 4-hour window, peak throughput could be 3.5× the average (4,861 tok/s), requiring ~3 additional GPU nodes during peak hours. Use scheduled autoscaling to add capacity during peak hours.
-
+*Companion code: [`docs/code/chapter_20.md`](../code/chapter_20.md)*

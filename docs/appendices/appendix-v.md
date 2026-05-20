@@ -1644,3 +1644,5 @@ if __name__ == "__main__":
 ### V.14.4 Key Insights from the Tests
 
 The harness quantifies two core TurboQuant claims. The kurtosis test (Section 5) shows that the Hadamard rotation reduces excess kurtosis from ~18 to ~1 for a vector with 5% outliers — this is the rotation's primary function: it redistributes outlier energy across all dimensions so that INT4's per-group scale is not wasted on a handful of extreme values. The full-pipeline test (Section 4) shows the practical payoff: TurboQuant achieves 32.1 dB SNR versus 28.8 dB for naive INT4 on the same data — roughly a 3.3 dB improvement from the rotation alone, without any change to the INT4 bit-width or group size.
+
+*Companion code: [`docs/code/appendix_v.md`](../code/appendix_v.md)*

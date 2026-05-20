@@ -1798,4 +1798,4 @@ vLLM uses NCCL for tensor parallelism across multiple GPUs, enabling 405B model 
 - But: compilation time (hours per model variant), complex setup, no built-in OpenAI-compatible API without wrapping with Triton Inference Server.
 - Not the right tool for a startup that needs production in days, not weeks.
 - Time to first deployment: 1-2 weeks.
-
+*Companion code: [`docs/code/chapter_33.md`](../code/chapter_33.md)*

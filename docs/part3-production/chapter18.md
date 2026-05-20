@@ -727,4 +727,4 @@ fraction = 5.12 / 85.12 ≈ 6.0%
 The KV transfer adds a ~6% TTFT overhead for a 1,024-token prompt over 400 Gb/s InfiniBand. This is acceptable for typical use. However, for very short prompts (128 tokens → transfer ≈ 0.64 ms, prefill ≈ 10 ms → TTFT = 10.64 ms, transfer fraction = 6%), the overhead is proportionally similar.
 
 For very long prompts (32K tokens → transfer ≈ 160 ms, prefill ≈ 2,500 ms → TTFT = 2,660 ms, fraction ≈ 6%), the absolute delay grows but fraction stays constant. InfiniBand at 400 Gb/s scales linearly with context length, maintaining the ~6% overhead across most practical context lengths.
-
+*Companion code: [`docs/code/chapter_18.md`](../code/chapter_18.md)*

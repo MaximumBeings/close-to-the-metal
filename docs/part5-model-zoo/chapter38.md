@@ -695,4 +695,4 @@ additional_saving = 0.20 x $58K = $11,600/month
 New monthly cost: ~$46K -- below the $50K target.
 
 **Combined result:** Spot instances + speculative decoding could bring the deployment from $108K to approximately $46K/month, achieving the CFO's target with margin to spare.
-
+*Companion code: [`docs/code/chapter_38.md`](../code/chapter_38.md)*

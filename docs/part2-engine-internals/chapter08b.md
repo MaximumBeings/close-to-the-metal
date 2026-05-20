@@ -525,4 +525,4 @@ The prefill graph handles the combined step: C prefill tokens + up to `max_num_s
 **Step 3 — Memory cost.**
 
 Each additional graph retains its tensor memory. The prefill chunk graph for C=512 tokens with 32 sequences holds 512-token attention intermediates in memory. This adds 10–50 MB to the graph memory pool depending on model size.
-
+*Companion code: [`docs/code/chapter_08b.md`](../code/chapter_08b.md)*

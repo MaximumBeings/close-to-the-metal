@@ -2370,4 +2370,4 @@ Cons:
 
 **When to use the dedicated model:**
 Virtually always for production RAG. A dedicated embedding model (BGE-M3, E5-mistral-7b) outperforms LLM mean-pooling on MTEB benchmarks by 5-15 nDCG@10 points. The speed difference (1,000 embeddings/s on a GPU for BGE-base vs ~10 embeddings/s for LLaMA-3 70B) makes dedicated models the correct choice for any non-trivial retrieval workload.
-
+*Companion code: [`docs/code/chapter_28.md`](../code/chapter_28.md)*

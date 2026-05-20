@@ -138,6 +138,7 @@ nav:
     - "Code 03 — Tokens and Batches": code/chapter_03.md
     - "Code 3.5 — The Transformer Block": code/chapter_03b.md
     - "Code 04 — Attention Mechanics": code/chapter_04.md
+    - "Code 4.5 — Attention Alternatives": code/chapter_04b.md
     - "Code 05 — Flash Attention": code/chapter_05.md
     - "Code 06 — PagedAttention": code/chapter_06.md
     - "Code 07 — The Scheduler": code/chapter_07.md
@@ -148,7 +149,9 @@ nav:
     - "Code 10 — Quantization": code/chapter_10.md
     - "Code 11 — Prefill and Caching": code/chapter_11.md
     - "Code 11.5 — KV Cache Eviction": code/chapter_11b.md
+    - "Code 11.6 — RadixAttention and Prefix Caching": code/chapter_11c.md
     - "Code 12 — Sampling": code/chapter_12.md
+    - "Code 12.5 — Structured Generation": code/chapter_12b.md
     - "Code 13 — Streaming": code/chapter_13.md
     - "Code 14 — vLLM Knobs": code/chapter_14.md
     - "Code 15 — Multi-GPU": code/chapter_15.md
@@ -179,6 +182,8 @@ nav:
     - "Code 38 — Production Synthesis": code/chapter_38.md
     - "Code 39 — Evaluation Harness": code/chapter_39.md
     - "Code 40 — vLLM V1 Architecture": code/chapter_40.md
+    - "Code 41 — Meta Llama 3": code/chapter_41.md
+    - "Code 42 — Phi-4 and Gemma 3": code/chapter_42.md
     - "Code L — CUDA C++ Introduction": code/appendix_l.md
     - "Code V — TurboQuant": code/appendix_v.md
 

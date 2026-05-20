@@ -1587,4 +1587,4 @@ On first inference after server start, CUDA kernels that haven't been compiled a
 If vLLM uses CUDA graphs and layer 22 receives a tensor with a shape not captured in the graph pool (e.g., the attention mechanism has a conditional branch that activates only at layer 22), vLLM falls back to eager mode for that kernel -- which adds the Python/CUDA launch overhead (typically 100-300 ms for complex ops).
 
 **Diagnose:** Enable `CUDA_LAUNCH_BLOCKING=1` and check if layer 22's timing is consistently slow (capture miss) vs only on cold start (JIT). Also check `VLLM_TRACE_FUNCTION=1` logs for "fallback to eager" messages at layer 22. Fix: ensure all layer shapes are included in CUDA graph capture (adjust `--max-num-batched-tokens` to cover the layer 22 shape).
-
+*Companion code: [`docs/code/chapter_32.md`](../code/chapter_32.md)*

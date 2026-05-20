@@ -658,4 +658,4 @@ Preferable when:
 2. **Large document collections.** 1M tokens = one long document. A corpus of 10,000 documents would require 1 PB of KV storage for Moon-Cache. RAG uses a compact vector index (~4 GB for 10,000 documents).
 3. **Latency constraints.** Moon-Cache with 128 GB of KV needs 640 ms to load from CPU DRAM at 200 GB/s. RAG retrieval completes in <100 ms.
 4. **Dynamic document updates.** Adding new documents to RAG is a simple index update. Moon-Cache requires re-prefilling the entire updated document.
-
+*Companion code: [`docs/code/chapter_36.md`](../code/chapter_36.md)*

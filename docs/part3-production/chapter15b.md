@@ -398,4 +398,4 @@ reduction = 500 KB / 16 KB = 31.25×
 ```
 
 Instead of materializing 500 KB for the softmax normalization pass, each partition works with only 16 KB — a 31× reduction in working memory. This is what allows Flash Decoding to parallelize across 32 thread-blocks without requiring each block to see the full attention distribution. The partitions each maintain only their local running softmax statistics (m, l scalars) plus the partial output vector.
-
+*Companion code: [`docs/code/chapter_15b.md`](../code/chapter_15b.md)*

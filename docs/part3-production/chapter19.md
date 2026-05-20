@@ -1068,4 +1068,4 @@ sum by (namespace) (
   rate(vllm:gpu_seconds_total[730h]) * 3.20 / 3600
 )
 ```
-
+*Companion code: [`docs/code/chapter_19.md`](../code/chapter_19.md)*

@@ -660,4 +660,4 @@ req/s_256 = 32 / 0.352 = 90.9 req/s (compute-bound estimate)
 ```
 
 At shorter sequences, the model becomes more memory-bandwidth-bound (fewer FLOPs per weight byte loaded). The bandwidth ceiling at seq=256: 340B x 1 byte (FP8) / 3,350 GB/s x 8 GPUs = 340/26,800 = 12.7 ms per batch -> 32/0.0127 = 2,520 req/s. Real-world throughput at seq=256 will be between the bandwidth ceiling (2,520 req/s) and compute ceiling (91 req/s), settling near the compute-bound estimate of ~44 req/s empirically.
-
+*Companion code: [`docs/code/chapter_37.md`](../code/chapter_37.md)*

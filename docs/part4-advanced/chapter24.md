@@ -954,4 +954,4 @@ The 7B standard model has ~37,000x lower TTFT. Reasoning models are unsuitable f
 
 **Cost per correct answer:**
 If reasoning model is 10x more accurate on hard math/coding tasks, and costs 287x more GPU time, cost-per-correct-answer is 287/10 = 28.7x higher. But if standard model achieves <5% accuracy on hard tasks (vs reasoning model's 50%), the reasoning model's cost-per-correct-answer is actually lower for those tasks (cost 28.7x, correctness 10x better: 2.87x cost per correct answer, not 28.7x). The choice depends entirely on task difficulty and accuracy requirements.
-
+*Companion code: [`docs/code/chapter_24.md`](../code/chapter_24.md)*

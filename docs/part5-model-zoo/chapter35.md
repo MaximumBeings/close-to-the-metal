@@ -658,4 +658,4 @@ Wait, 72B dense reads all 144 GB every step, taking 43 ms. Qwen3-235B-A22B reads
 - Qwen3-235B-A22B: 6x H100-80GB (470 GB weights) -- but 6 GPUs with NVLink required for all-to-all MoE routing
 
 **Summary:** MoE enables serving a higher-quality 235B model at lower per-token latency than the dense 72B, at the cost of 3x more GPU memory and NVLink requirement.
-
+*Companion code: [`docs/code/chapter_35.md`](../code/chapter_35.md)*

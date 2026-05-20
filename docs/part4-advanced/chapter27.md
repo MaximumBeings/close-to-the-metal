@@ -1983,4 +1983,4 @@ The GPU holds the most recently accessed KV blocks (those needed for the current
 **Eviction policy:** LRU (Least Recently Used) within each tier. For long-context decoding with sliding window attention, only the last W tokens' blocks are needed at each step -- blocks outside the window are evicted to CPU, then SSD, as the generation progresses.
 
 **Prefetch strategy:** Moon-Cache uses predictive prefetching -- the system analyzes the attention pattern (landmarks at every L tokens) to predict which SSD blocks will be needed K decode steps ahead, and initiates prefetch K steps early. This hides the 500 ms SSD latency behind concurrent decode computation.
-
+*Companion code: [`docs/code/chapter_27.md`](../code/chapter_27.md)*

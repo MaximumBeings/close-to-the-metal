@@ -970,3 +970,5 @@ Phi-4's performance advantage (if confirmed) likely holds on reasoning benchmark
 
 **Production recommendation:** A/B test Phi-4 vs Llama 70B on your specific task distribution before migrating. If the benchmark advantage (higher MMLU, coding scores) translates to your production traffic, the 75% cost reduction makes migration highly compelling.
 
+
+*Companion code: [`docs/code/chapter_42.md`](../code/chapter_42.md)*

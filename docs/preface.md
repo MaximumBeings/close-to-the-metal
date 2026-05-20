@@ -86,7 +86,7 @@ Every technique described is in production somewhere. The tools are open source.
 
 *Production and Serving* — CI/CD pipelines (S), embedding and reranker serving (T), quantization calibration for AWQ/GPTQ/FP8/GGUF (U), and TurboQuant (V).
 
-*Reference* — Glossary of 70+ terms (W) and an annotated bibliography of 40+ papers (X).
+*Reference* — Glossary of 90+ terms (W) and an annotated bibliography of 40+ papers (X).
 
 *Accelerator Platforms* — Cerebras WSE-3 wafer-scale inference including MemoryX and SwarmX (Y), and JAX/XLA covering jit, vmap, grad, pmap, jax.sharding, and the Flax/MaxText/Equinox ecosystem (Z).
 

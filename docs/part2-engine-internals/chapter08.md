@@ -1366,4 +1366,4 @@ Without a warm-up pass, vLLM would allocate the full KV block pool based on a *g
 - GPU OOM error → server crash
 
 With warm-up, the measured activation peak is subtracted from available HBM *before* the block pool is sized, guaranteeing no OOM from activation memory at any batch size up to the configured maximum.
-
+*Companion code: [`docs/code/chapter_08.md`](../code/chapter_08.md)*

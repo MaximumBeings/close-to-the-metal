@@ -1207,3 +1207,5 @@ For a new user's first turn (650 tokens): 500/650 = 76.9%. For subsequent turns,
 
 **Conclusion:** Within-session reuse is highly effective (76–91% hit rate across turns). Cross-session reuse is more limited — only the system prompt is shared, so the benefit is proportional to the system prompt fraction of total context.
 
+
+*Companion code: [`docs/code/chapter_11c.md`](../code/chapter_11c.md)*

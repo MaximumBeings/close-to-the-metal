@@ -1724,4 +1724,4 @@ $$\text{Row-read reduction} = \frac{N}{S} = \frac{8{,}192}{1{,}024} = 8\times$$
 **Step 3 — The catch.**
 
 Sparse attention only works when the sparsity pattern is known in advance or can be computed cheaply. Sliding window attention (fixed local pattern) is the most common production variant. Content-based sparse attention (which positions to attend to depends on the query) requires either a separate cheap selection step or approximation methods.
-
+*Companion code: [`docs/code/chapter_04.md`](../code/chapter_04.md)*

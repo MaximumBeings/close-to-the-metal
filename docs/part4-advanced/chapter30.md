@@ -1751,4 +1751,4 @@ if is_time_sensitive(query):
 - Factual static (capital cities): TTL = 30 days
 - Semi-static (company info): TTL = 24 hours
 - Time-sensitive (news, prices): TTL = 0 (never cache) or TTL = 1 hour
-
+*Companion code: [`docs/code/chapter_30.md`](../code/chapter_30.md)*

@@ -1033,3 +1033,5 @@ A draft token is rejected if either:
 
 Without speculative decoding: 1 token per forward pass. With K=4 speculation: average 2–3 tokens accepted per verifier pass. Constraint violations slightly reduce acceptance rate (the draft model may not always respect the grammar), but the net speedup is still 1.5–2.5× for typical JSON generation tasks.
 
+
+*Companion code: [`docs/code/chapter_12b.md`](../code/chapter_12b.md)*

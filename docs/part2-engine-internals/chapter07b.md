@@ -592,4 +592,4 @@ Try these in order:
 3. **Enable chunked prefill**: Prevents large prefills from starving decode sequences, improving steady-state throughput.
 
 4. **Profile with `--disable-log-stats false`**: Check `num_preemptions_total` and `gpu_cache_usage_perc` to confirm block exhaustion is the cause.
-
+*Companion code: [`docs/code/chapter_07b.md`](../code/chapter_07b.md)*

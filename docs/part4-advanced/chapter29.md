@@ -1811,4 +1811,4 @@ Same ViT on a GPU (e.g., A100 at 312 TFLOPS FP16):
 
 **Why projector is CPU-resident by default in llama.cpp:**
 llama.cpp targets edge/laptop deployment where a discrete GPU with large VRAM is unavailable or where the GPU is entirely used for the LLM weights. On Apple Silicon with unified memory, the "GPU" and "CPU" share memory anyway, so the CLIP forward pass can run on the ANE (Apple Neural Engine) or GPU metal backend. For CPU-only machines, the projector must run on CPU -- there is no alternative. The llama.cpp design prioritizes portability over peak throughput, accepting CPU-resident image encoding as the baseline for compatibility with devices that have no GPU.
-
+*Companion code: [`docs/code/chapter_29.md`](../code/chapter_29.md)*

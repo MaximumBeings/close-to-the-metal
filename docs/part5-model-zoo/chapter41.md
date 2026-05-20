@@ -989,3 +989,5 @@ The 405B model provides **zero quality advantage** while costing 405/70 = 5.8x m
 
 **Additional benefits:** The 70B model's lower latency (70 ms vs 405 ms/token) means it also delivers better user experience (lower TTFT, lower ITL) in addition to lower cost. For most production use cases, Llama 3.3 70B is strictly dominant over 405B.
 
+
+*Companion code: [`docs/code/chapter_41.md`](../code/chapter_41.md)*
