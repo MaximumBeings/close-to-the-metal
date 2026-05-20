@@ -725,7 +725,7 @@ on different nodes. The KV cache is per-stage:
 
 ## 34.12 Companion Code
 
-The companion Python demo (`deepseek_demo.py`) simulates MLA KV compression, MoE routing with load-balancing analysis, FP8 scaling, and hardware budget calculations. The C++ demo (`deepseek_demo.cpp`) implements the same models.
+The [Chapter 34 companion code](../code/chapter_34.md) simulates MLA KV compression, MoE routing with load-balancing analysis, FP8 scaling, and hardware budget calculations.
 
 ---
 
@@ -756,7 +756,7 @@ Chapter 35 covers Qwen — the multilingual model family from Alibaba that spans
 ## Chapter Summary
 
 - **Multi-head Latent Attention (MLA)**: DeepSeek's KV cache compression technique; compresses the KV cache by projecting keys and values through a low-rank bottleneck, reducing KV memory by 5–13× vs full MHA.
-- **Mixture of Experts (MoE)**: DeepSeek-V3 uses 256 experts with top-8 routing; only 8 experts are active per token, keeping FLOPs-per-token comparable to a dense 7B model despite having 671B total parameters.
+- **Mixture of Experts (MoE)**: DeepSeek-V3 uses 256 experts with top-8 routing; only 8 experts are active per token, keeping FLOPs-per-token comparable to a dense ~37B model despite having 671B total parameters.
 - **FP8 training and inference**: DeepSeek-V3 was trained and is served in FP8; combined with H800 Tensor Core support, this achieves ~2× throughput versus BF16.
 - **Expert parallelism at scale**: DeepSeek distributes 256 experts across 64 GPUs; all-to-all communication for expert routing is the dominant communication bottleneck.
 - **KV cache savings from MLA**: at sequence length 4 096, MLA reduces per-token KV memory from 512 KB (full MHA at 128 heads) to ~40 KB — a 13× reduction, enabling much larger batch sizes.
@@ -800,7 +800,7 @@ The full 671B parameters must be stored in memory even though only 37B are activ
 ```
 memory = 671B x 1 byte = 671 GB minimum
 ```
-This requires at least 9 x H100-80GB (720 GB total, giving 49 GB headroom) or 8 x H200-141GB (1,128 GB, with ample headroom for KV cache).
+Raw capacity minimum: 9× H100-80GB (720 GB total, barely fitting the 671 GB weights with ~49 GB headroom). However, a deployable topology using TP=8, PP=2 requires 16× H100-80GB (1,280 GB). The simplest single-node option is 8× H200-141GB (1,128 GB), which fits comfortably with ample headroom for KV cache — this is DeepSeek's reference deployment.
 
 **(b) Throughput at batch=1:**
 At batch=1, each decode step activates only 37B parameters (top-8 of 256 experts). The memory bandwidth bottleneck is loading active weights:
@@ -851,10 +851,11 @@ Add activations and overhead: ~50 GB.
 Total: ~721 GB.
 
 **Minimum configuration:**
-- 8x H100-SXM5 (80 GB each = 640 GB): **insufficient** (671 GB weights alone exceed 640 GB).
-- 10x H100-SXM5 (800 GB): sufficient for weights, minimal KV budget.
-- **8x H200 (141 GB each = 1,128 GB)**: sufficient with ample KV cache headroom. This is DeepSeek's recommended configuration.
-- Alternatively: 16x A100-80GB (1,280 GB) with TP=16 and EP=8 -- works but high communication overhead.
+- 8× H100-SXM5 (80 GB each = 640 GB): **insufficient** (671 GB weights alone exceed 640 GB).
+- 9× H100-SXM5 (720 GB): theoretical raw-capacity minimum; ~49 GB headroom for weights only, no KV budget, no supported TP/PP topology.
+- **16× H100-SXM5 (1,280 GB)**: practical deployable minimum using TP=8, PP=2 — matches the vLLM serving config in §34.4.
+- **8× H200-141GB (1,128 GB)**: single-node option with ample KV cache headroom. This is DeepSeek's recommended reference configuration.
+- Alternatively: 16× A100-80GB (1,280 GB) with TP=16 and EP=8 — works but high cross-node communication overhead.
 
-**Practical minimum: 8x H200-141GB** connected via NVLink -- matching DeepSeek's reference deployment.
+**Practical minimum: 16× H100-80GB** (TP=8, PP=2) or **8× H200-141GB** (single-node NVLink) — matching DeepSeek's reference deployment.
 

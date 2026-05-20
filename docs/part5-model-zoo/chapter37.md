@@ -542,21 +542,21 @@ However, answering the question as posed (theoretical minimum from compute):
 
 **FP8:**
 ```
-t_FP8 = 1.4e14 FLOPs / 1.979e12 FLOPS = 70.7 ms
+t_FP8 = 1.4e14 FLOPs / 1.979e15 FLOPS = 70.7 ms
 ```
 
 **BF16:**
 ```
-t_BF16 = 1.4e14 FLOPs / 9.89e11 FLOPS = 141.6 ms
+t_BF16 = 1.4e14 FLOPs / 9.89e14 FLOPS = 141.6 ms
 ```
 
-**Reality check (bandwidth-bound):**
-Nemotron-70B at FP8 = 70 GB model. A100 HBM = 2 TB/s:
+**Reality check (roofline):**
+Nemotron-70B at FP8 = 70 GB model. H100 HBM3 = 3.35 TB/s:
 ```
-t_bandwidth = 70 GB / 2,000 GB/s = 35 ms
+t_bandwidth = 70 GB / 3,350 GB/s ≈ 20.9 ms
 ```
 
-The bandwidth-bound time (35 ms) is less than the compute-bound time (70.7 ms for FP8), confirming that batch=1 decode is memory-bandwidth-bound. The theoretical minimum from compute (70.7 ms) is NOT the actual bottleneck -- the actual minimum is 35 ms from HBM bandwidth.
+Since t_bandwidth (20.9 ms) < t_compute (70.7 ms for FP8), the compute constraint is the slower path — this forward pass is compute-bound at this FLOPs count. Note: for a standard single-token batch=1 decode where FLOPs ≈ 2 × 70B = 1.4e11, the arithmetic intensity drops to ~2 FLOPs/byte, far below the H100 ridge point of ~591 FLOPs/byte, making typical decode firmly memory-bandwidth-bound. The 1.4e14 figure here reflects a long-context forward pass where attention FLOPs push the operation above the ridge point.
 
 For batch sizes where arithmetic intensity exceeds the ridge point (~591 FLOPs/byte), FP8's 2x compute advantage becomes relevant.
 

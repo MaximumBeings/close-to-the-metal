@@ -848,18 +848,14 @@ Final answer: next token = "mat"
 
 ## 12.12 Code Listing  `[FOUNDATIONAL]`
 
-See `code/chapter_12/sampling_demo.py` for:
+See the [Chapter 12 companion code](../code/chapter_12.md) for:
 
 - Full logit pipeline visualiser: apply each stage and print the
   distribution after every transformation
-
 - Temperature, top-k, top-p, and min-p implemented from scratch
 - Repetition, frequency, and presence penalty simulation
 - Structured output token mask demo (JSON schema enforcement)
 - Beam search trace with log-probability tracking
-
-See `code/chapter_12/sampling_demo.cpp` for:
-
 - llama.cpp sampler chain construction and inspection
 - Manual temperature + top-k + top-p + penalties pipeline in C++
 - GBNF grammar snippet for JSON object enforcement

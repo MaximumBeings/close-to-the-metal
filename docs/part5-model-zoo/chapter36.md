@@ -80,7 +80,7 @@ Moon-Cache is Kimi's production KV caching infrastructure, described in their te
 
 ### 36.2.1 Block Granularity
 
-Moon-Cache uses 64-token KV blocks (matching vLLM's default block size). For a 70B model:
+Moon-Cache uses 64-token KV blocks. For a 70B model:
 
 ```
 Block size:  64 tokens × 327,680 bytes/token = 20 MB per block (BF16)
@@ -124,7 +124,7 @@ Processing a 128K token prompt naively would require computing attention over 12
   Chunks: 128,000 / 2,048 = 62.5 → 63 chunks
   
   Per chunk:
-    Prefill FLOPS:  2 × 70B × 2,048 = 286 × 10⁹ FLOPs
+    Prefill FLOPS:  2 × 70B × 2,048 = 286 × 10¹² FLOPs
     Time at 1 PFLOPS: 286 ms
   
   Total prefill time: 63 × 286 ms ≈ 18 seconds

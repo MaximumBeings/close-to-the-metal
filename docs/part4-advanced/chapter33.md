@@ -1749,7 +1749,7 @@ Graphs are captured for a set of discrete batch sizes (1, 2, 4, 8, 16, ...) at s
 **MLC-LLM compiled to WebGPU. Three largest performance gaps vs vLLM on server GPU:**
 
 **Gap 1 -- Raw compute throughput.**
-WebGPU is a browser-safe abstraction over the GPU. It cannot access CUDA-specific features (Tensor Cores, NVLink, BF16 hardware acceleration, FlashAttention kernels). A server H100 delivers ~1,979 TFLOPS BF16; a browser WebGPU context on the same H100 might deliver 200-400 GFLOPS due to driver overhead, shader compilation, and missing hardware intrinsics. Performance gap: ~5-10x.
+WebGPU is a browser-safe abstraction over the GPU. It cannot access CUDA-specific features (Tensor Cores, NVLink, BF16 hardware acceleration, FlashAttention kernels). A server H100 delivers ~1,979 TFLOPS BF16; a browser WebGPU context on the same H100 might deliver 200–400 GFLOPS due to driver overhead, shader compilation, and missing hardware intrinsics. Performance gap: ~5,000–10,000x (1,979 TFLOPS vs. 0.2–0.4 TFLOPS).
 
 **Gap 2 -- Memory bandwidth.**
 vLLM runs in the CUDA runtime with direct HBM access via cuBLAS/cuDNN. WebGPU must marshal data through the browser's GPU command queue with synchronization barriers between JavaScript and GPU threads. KV cache access -- the primary memory bottleneck -- suffers additional latency from browser-imposed memory safety checks. Gap: 2-5x on bandwidth-bound decode.

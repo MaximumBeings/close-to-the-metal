@@ -626,7 +626,7 @@ vLLM is the execution layer where policy decisions become GPU computation. llama
 
 ## Companion Code
 
-`code/chapter_24/serving_policy_demo.py` implements:
+`code/chapter_25/serving_policy_demo.py` implements:
 
 - `EpsilonGreedyBandit`, `UCBBandit`, `ThompsonSamplingBandit` — core bandit algorithms
 - `ContextualBandit` — linear contextual bandit with feature bucketing
@@ -635,7 +635,7 @@ vLLM is the execution layer where policy decisions become GPU computation. llama
 - `reward_function` — composite reward with latency and safety constraints
 - `RewardHackingDetector` — monitors for divergence between reward metric and proxy metrics
 
-`code/chapter_24/serving_policy_demo.cpp` implements the same algorithms in C++, with numerical examples demonstrating Thompson Sampling convergence and IPS variance reduction.
+`code/chapter_25/serving_policy_demo.cpp` implements the same algorithms in C++, with numerical examples demonstrating Thompson Sampling convergence and IPS variance reduction.
 
 ---
 

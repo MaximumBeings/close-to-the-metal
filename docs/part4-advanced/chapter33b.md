@@ -410,7 +410,7 @@ This is a recompile, not a reconfigure. Reserve a 4-hour maintenance window, bui
 
 ## 33b.8  Running the Benchmark Yourself
 
-The companion code (`engine_comparison_demo.py` / `.cpp`) implements:
+The [Chapter 33.5 companion code](../code/chapter_33b.md) implements:
 
 1. The 5-axis scoring model for any configuration
 2. RadixAttention savings calculator

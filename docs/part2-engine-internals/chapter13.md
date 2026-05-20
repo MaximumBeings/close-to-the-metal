@@ -849,16 +849,13 @@ HTTP/2 requires:
 
 ## 13.10 Code Listing  `[FOUNDATIONAL]`
 
-See `code/chapter_13/streaming_demo.py` for:
+See the [Chapter 13 companion code](../code/chapter_13.md) for:
 
 - UTF-8 boundary detector and streaming detokenizer
 - SSE frame parser (handles multi-line events, [DONE] sentinel)
 - TTFT and ITL measurement harness
 - Simulated vLLM streaming response with realistic timing
 - Backpressure simulation: slow consumer vs. fast producer
-
-See `code/chapter_13/streaming_demo.cpp` for:
-
 - UTF-8 boundary check (utf8_continuation_bytes)
 - Token-by-token streaming loop (annotated llama.cpp pattern)
 - SSE frame builder: JSON encode + "data: ...\n\n" wrapper

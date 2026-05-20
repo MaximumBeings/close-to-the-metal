@@ -570,7 +570,7 @@ jobs:
 
 ## 39.11 Code: Evaluation Harness
 
-See `code/chapter_39/eval_harness.py`.
+See the [Chapter 39 companion code](../code/chapter_39.md) for the full eval harness.
 
 ```python
 # eval_harness.py

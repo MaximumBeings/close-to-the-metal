@@ -309,20 +309,26 @@ The diagnostic question: **is the bottleneck memory or compute?**
 ```
 Arithmetic Intensity = FLOPs / bytes_transferred
 
-For a matrix multiply:
+For a matrix multiply [M, K] × [K, N]:
   FLOPs = 2 × M × N × K
   Bytes  = (M × K + K × N) × dtype_bytes
-  AI     = 2 × M × N × K / ((M × K + K × N) × bytes)
+  AI     = 2 × M × N × K / ((M × K + K × N) × dtype_bytes)
 
   At batch_size=1, M=1:
-  AI = 2 × K / (dtype_bytes × (1 + N/K))  ≈ 2 × K / dtype_bytes  for K≈N
+  AI = 2 × 1 × N × K / ((1 × K + K × N) × dtype_bytes)
+     = 2NK / (K × (1 + N) × dtype_bytes)
+     = 2N / ((1 + N) × dtype_bytes)
+     ≈ 2 / dtype_bytes          (for large N, i.e., N >> 1)
 
-  For K=4096, fp16 (2 bytes): AI ≈ 4096 operations per byte
-  GPU compute roof ÷ memory roof:
-    H100: 1979 TFLOPS / 3.35 TB/s = 591 FLOPS/byte
-    Since AI=4096 > 591, we are compute-bound at batch_size=1 for large K.
-    
-  Reality check: actual batch-size-1 inference is memory-bound because K<591 for small layers.
+  For fp16 (dtype_bytes = 2): AI ≈ 2 / 2 = 1 FLOP/byte
+  GPU ridge point (H100):
+    1,979 TFLOPS / 3.35 TB/s ≈ 591 FLOPS/byte
+    Since AI ≈ 1 << 591, batch_size=1 decode is firmly memory-bandwidth-bound.
+
+  Intuition: with M=1 the input activation row is tiny (K values), but the
+  weight matrix is K×N — you must read almost as many bytes as if you were
+  doing a full-matrix read, yet you compute only one output row. Bytes
+  dominate FLOPs by a factor of N/2.
 ```
 
 **Practical rule:** if `batch_size × hidden_dim / dtype_bytes > GPU_compute_TFLOPs / GPU_BW_TBs × 1000`, you are compute-bound. Below this threshold, you are memory-bandwidth-bound and increasing batch size is the primary lever.

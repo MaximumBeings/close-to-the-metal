@@ -599,7 +599,7 @@ at the cost of increased scheduler complexity.
 
 ---
 
-## 41.9 The Llama Ecosystem
+## 41.12 The Llama Ecosystem
 
 The Llama family has spawned the broadest fine-tuning and derivative ecosystem
 of any open model:
@@ -625,7 +625,7 @@ of any open model:
 
 ---
 
-## 41.12 Llama Guard: Batching and Latency Guidance
+## 41.13 Llama Guard: Batching and Latency Guidance
 
 Llama Guard adds safety classification overhead. For high-throughput deployments
 running Llama Guard on every request, this overhead must be planned explicitly.

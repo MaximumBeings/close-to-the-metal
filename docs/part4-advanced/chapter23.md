@@ -1521,11 +1521,11 @@ int main() {
 
 ---
 
-## 23.X  Speculative Decoding Variants
+## §23.11  Speculative Decoding Variants
 
 The draft-model approach in §23.1–23.6 requires a separate smaller model. Three widely-deployed variants eliminate or restructure this requirement.
 
-### 23.X.1  Medusa — Multiple Draft Heads
+### §23.11.1  Medusa — Multiple Draft Heads
 
 Medusa (Cai et al., 2024) replaces the separate draft model with **multiple lightweight prediction heads** attached directly to the base model's final hidden state:
 
@@ -1571,7 +1571,7 @@ Latency per accepted token:
 ──────────────────────────────────────────────────
 ```
 
-### 23.X.2  EAGLE — Feature-Space Drafting
+### §23.11.2  EAGLE — Feature-Space Drafting
 
 EAGLE (Li et al., 2024) drafts from the base model's **feature space** rather than its output logits. The key observation: next-token prediction is easier from hidden features than from the previous output token alone.
 
@@ -1600,7 +1600,7 @@ Medusa heads predict positions t+1..t+K independently from a single hidden state
 
 **EAGLE-2** (2024) further adds adaptive speculation depth: it stops drafting when the predicted acceptance probability drops below a threshold, preventing low-quality drafts from wasting verification passes.
 
-### 23.X.3  Tree-Based Speculation (SpecTr)
+### §23.11.3  Tree-Based Speculation (SpecTr)
 
 Both Medusa and standard draft models produce a **linear sequence** of draft tokens. SpecTr and similar tree approaches produce a **tree** of candidates, allowing multiple hypotheses to be verified in parallel:
 
@@ -1647,10 +1647,10 @@ llm = LLM(
 )
 ```
 
-**WORKED EXAMPLE 23.X — Tree attention mask construction:**
+**WORKED EXAMPLE 23.11 — Tree attention mask construction:**
 
 ```
-WORKED EXAMPLE 23.X — Tree attention mask construction
+WORKED EXAMPLE 23.11 — Tree attention mask construction
 ──────────────────────────────────────────────────────────────────────────
 
 TREE STRUCTURE
@@ -1811,7 +1811,7 @@ SUMMARY
 ──────────────────────────────────────────────────────────────────────────
 ```
 
-### 23.X.4  Choosing a Variant
+### §23.11.4  Choosing a Variant
 
 ```
 Decision guide:
@@ -1837,7 +1837,7 @@ High-throughput batch serving (batch > 8):
 
 ---
 
-## §23.11  Summary
+## §23.12  Summary
 
 - Autoregressive decoding is bounded by the weight-read cost: H100 reads ~16 GB of weights per token at batch=1. Speculative decoding amortizes that weight-read over multiple accepted tokens.
 - The rejection sampling algorithm is **lossless**: accepted tokens are exactly distributed as if sampled from the target model, regardless of draft quality. Draft quality only affects speed.

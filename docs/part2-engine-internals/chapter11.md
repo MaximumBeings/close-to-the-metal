@@ -225,8 +225,11 @@ Step 16:
 
 The 32 existing decode users receive a new token every step throughout the
 16-step prefill.  Their ITL is unaffected.  The long-context user's TTFT
-increases (they wait 16 steps instead of 1 before generating their first
-token), but the rest of the batch is protected.
+increases relative to an isolated single-step run (they wait 16 scheduler
+steps instead of 1), but in a loaded engine the alternative is a monolithic
+prefill that blocks the entire batch for hundreds of milliseconds — making
+chunked prefill a substantial wall-clock TTFT improvement in practice, as
+the worked example in §11.3.4 demonstrates (13× faster TTFT).
 
 ### 11.3.2 Decode tokens go first
 
@@ -798,15 +801,12 @@ TTFT: 30 ms (13× faster)  |  Existing users: uninterrupted ✓
 
 ## 11.10 Code Listing  `[FOUNDATIONAL]`
 
-See `code/chapter_11/chunked_prefill_demo.py` for:
+See the [Chapter 11 companion code](../code/chapter_11.md) for:
 
 - TTFT benchmarks comparing unchunked vs. chunked prefill across prompt lengths
 - Radix prefix cache hit rate simulator with configurable workload distributions
 - Token budget allocation visualiser showing decode vs. prefill split per step
 - vLLM prefix cache metric scraper using the Prometheus endpoint
-
-See `code/chapter_11/chunked_prefill_demo.cpp` for:
-
 - llama.cpp micro-batch (ubatch) simulation — split large prompt into N chunks
 - KV cache reuse tracker comparing `--cache-prompt` hit/miss across sessions
 - Prefill vs. decode compute intensity analysis matching §11.2.2
