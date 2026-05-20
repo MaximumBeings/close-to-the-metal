@@ -1,0 +1,6958 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Practitioner's Deep Guide to LLM Inference">
+      
+      
+        <meta name="author" content="Oluwaseyi Awoga, written with AI assistance">
+      
+      
+      
+        <link rel="prev" href="chapter11.html">
+      
+      
+        <link rel="next" href="chapter11c.html">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Ch 11.5: KV Cache Eviction — Attention Sinks, H2O, and SnapKV - Close to the Metal: LLM Inference from First Principles</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#chapter-115-kv-cache-eviction-and-compression-when-the-cache-is-full" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../index.html" title="Close to the Metal: LLM Inference from First Principles" class="md-header__button md-logo" aria-label="Close to the Metal: LLM Inference from First Principles" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Close to the Metal: LLM Inference from First Principles
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Ch 11.5: KV Cache Eviction — Attention Sinks, H2O, and SnapKV
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../index.html" title="Close to the Metal: LLM Inference from First Principles" class="md-nav__button md-logo" aria-label="Close to the Metal: LLM Inference from First Principles" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Close to the Metal: LLM Inference from First Principles
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../preface.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Preface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part I — Foundations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part I — Foundations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter01.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 1: Two Engines, One Problem
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter02.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 2: The GPU and CPU Memory Landscapes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter02b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 2.5: GPU Memory Architecture — Registers, Shared Memory, Caches, and Global Memory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter03.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 3: Tokens, Sequences, and the Batch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter03b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 3.5: The Transformer Block
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter04.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 4: Attention Mechanics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter04b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 4.5: Attention Alternatives — Sliding Window, Linear Attention, SSMs, and Mamba
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter05.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 5: Flash Attention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part II — Engine Internals
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part II — Engine Internals
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="chapter06.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 6: PagedAttention and the Block Manager
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="chapter07.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 7: The Scheduler and Request Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="chapter07b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 7.5: Continuous Batching — The Iteration-Level Scheduling Loop
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="chapter08.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 8: Startup and Initialization
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="chapter08b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 8.5: CUDA Graphs — Capture, Replay, and Production Latency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="chapter09.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 9: The Forward Pass — CUDA vs. GGML
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="chapter10.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 10: Quantization Internals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="chapter11.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 11: Prefill, Chunked Prefill, and Prompt Caching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 11.5: KV Cache Eviction — Attention Sinks, H2O, and SnapKV
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="chapter11b.html" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 11.5: KV Cache Eviction — Attention Sinks, H2O, and SnapKV
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+  
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-you-will-understand" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What You Will Understand
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-you-need-first" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What You Need First
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11b1-the-full-cache-problem-foundational" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.1 The Full-Cache Problem [FOUNDATIONAL]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11b.1 The Full-Cache Problem [FOUNDATIONAL]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11b11-what-full-means-in-practice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.1.1 What "full" means in practice
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b12-why-naive-truncation-is-dangerous" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.1.2 Why naive truncation is dangerous
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b13-the-eviction-problem-statement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.1.3 The eviction problem statement
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11b2-attention-sinks-deep-dive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.2 Attention Sinks [DEEP DIVE]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11b.2 Attention Sinks [DEEP DIVE]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11b21-the-streamingllm-observation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.2.1 The StreamingLLM observation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b22-why-sinks-form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.2.2 Why sinks form
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b23-the-eviction-implication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.2.3 The eviction implication
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11b3-h2o-heavy-hitter-oracle-deep-dive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.3 H2O — Heavy Hitter Oracle [DEEP DIVE]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11b.3 H2O — Heavy Hitter Oracle [DEEP DIVE]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11b31-the-core-idea" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.3.1 The core idea
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b32-worked-example-with-8-tokens-keeping-top-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.3.2 Worked example with 8 tokens, keeping top-4
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b33-cumulative-score-vs-per-step-score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.3.3 Cumulative score vs. per-step score
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11b4-snapkv-key-clustering-and-pooling-deep-dive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.4 SnapKV — Key Clustering and Pooling [DEEP DIVE]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11b.4 SnapKV — Key Clustering and Pooling [DEEP DIVE]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11b41-motivation-the-prompt-bottleneck" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.4.1 Motivation: the prompt bottleneck
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b42-the-pooling-window-approach" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.4.2 The pooling window approach
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b43-worked-example-compressing-32-tokens-to-8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.4.3 Worked example: compressing 32 tokens to 8
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b44-cosine-similarity-as-a-quality-proxy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.4.4 Cosine similarity as a quality proxy
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11b5-token-merging-and-cam-deep-dive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.5 Token Merging and CaM [DEEP DIVE]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11b.5 Token Merging and CaM [DEEP DIVE]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11b51-merge-at-write-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.5.1 Merge at write time
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b52-the-threshold-tradeoff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.5.2 The threshold tradeoff
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b53-comparison-eviction-vs-compression-vs-merge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.5.3 Comparison: eviction vs. compression vs. merge
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11b6-the-accuracy-memory-tradeoff-curve-deep-dive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.6 The Accuracy-Memory Tradeoff Curve [DEEP DIVE]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11b.6 The Accuracy-Memory Tradeoff Curve [DEEP DIVE]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11b61-what-we-want-to-know" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.6.1 What we want to know
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b62-empirical-findings-from-the-literature" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.6.2 Empirical findings from the literature
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b63-task-dependency" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.6.3 Task-dependency
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b64-memory-savings-at-scale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.6.4 Memory savings at scale
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11b7-vllm-integration-points-deep-dive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.7 vLLM Integration Points [DEEP DIVE]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11b.7 vLLM Integration Points [DEEP DIVE]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11b71-where-eviction-fits-in-the-block-manager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.7.1 Where eviction fits in the block manager
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b72-the-block-granularity-constraint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.7.2 The block granularity constraint
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b73-attaching-an-eviction-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.7.3 Attaching an eviction policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11b8-llamacpps-kv-cache-shifting-deep-dive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.8 llama.cpp's KV Cache Shifting [DEEP DIVE]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11b.8 llama.cpp&#39;s KV Cache Shifting [DEEP DIVE]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11b81-the-llama_kv_cache_seq_rm-approach" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.8.1 The llama_kv_cache_seq_rm approach
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b82-the-sliding-window-pattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.8.2 The sliding window pattern
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b83-performance-implications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.8.3 Performance implications
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b84-llamacpp-configuration-flags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.8.4 llama.cpp configuration flags
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#chapter-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chapter Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#self-check-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Self-Check Questions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worked-solutions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worked Solutions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Worked Solutions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#solution-1-100k-token-document-kv-cache-full-at-64k-slots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Solution 1 — 100K-token document, KV cache full at 64K slots
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#solution-2-why-first-4-tokens-survive-eviction-despite-low-attention-scores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Solution 2 — Why first 4 tokens survive eviction despite low attention scores
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#solution-3-h2o-total-accumulated-score-vs-recency-weighted-score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Solution 3 — H2O: total accumulated score vs recency-weighted score
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#solution-4-snapkv-why-the-observation-window-works-and-what-breaks-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Solution 4 — SnapKV: why the observation window works, and what breaks it
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#solution-5-which-2-of-8-blocks-to-evict-h2o-blocks-357-are-lowest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Solution 5 — Which 2 of 8 blocks to evict (H2O, blocks 3/5/7 are lowest)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="chapter11c.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 11.6: RadixAttention and Prefix Caching Deep Dive
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="chapter12.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 12: Sampling — From Logits to Tokens
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="chapter12b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 12.5: Structured Generation and Constrained Decoding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="chapter13.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 13: Token Streaming — The Last Mile
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part III — Production
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part III — Production
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part3-production/chapter14.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 14: The Eight vLLM Knobs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part3-production/chapter15.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 15: Multi-GPU Serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part3-production/chapter15b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 15.5: Flash Decoding and Context Parallelism
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part3-production/chapter16.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 16: Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part3-production/chapter17.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 17: Benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part3-production/chapter18.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 18: Disaggregated Prefill and Decode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part3-production/chapter19.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 19: Kubernetes and KubeRay
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part3-production/chapter20.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 20: Cost Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part3-production/chapter21.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 21: Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part IV — Advanced Topics
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part IV — Advanced Topics
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter22.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 22: LoRA Serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter23.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 23: Speculative Decoding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter24.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 24: Reasoning Model Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter25.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 25: RL and Serving Policies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter26.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 26: CS336 Alignment Field Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter27.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 27: Long-Context Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter28.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 28: llama.cpp as a Platform
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter29.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 29: Multimodal Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter30.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 30: Semantic Caching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter31.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 31: Model Routing and Cascading
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter32.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 32: Debugging Inference Systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter33.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 33: The Full Engine Landscape — 2026
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter33b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 33.5: Choosing Your Engine — SGLang, TRT-LLM, MLC-LLM, Ollama
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part V — Model Zoo
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part V — Model Zoo
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter34.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 34: DeepSeek — MLA, MoE, FP8
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter35.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 35: Qwen — Multilingual and Long-Context
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter36.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 36: Kimi — Long-Context and Moon-Cache
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter37.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 37: Nemotron and TensorRT-LLM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter38.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 38: The Production Synthesis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter39.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 39: Evaluation and Regression Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter40.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 40: The vLLM V1 Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter41.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 41: Meta Llama 3 — Architecture, Ecosystem, and Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter42.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 42: Phi-4 and Gemma 3 — Small Models, Large Impact
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ⌨ Companion Code
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    ⌨ Companion Code
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_01.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 01 — Two Engines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_02.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 02 — Memory Landscapes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_02b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 2.5 — GPU Memory Architecture (Tiled GEMM Harness)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_03.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 03 — Tokens and Batches
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_03b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 3.5 — The Transformer Block
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_04.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 04 — Attention Mechanics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_04b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 4.5 — Attention Alternatives
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_05.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 05 — Flash Attention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_06.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 06 — PagedAttention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_07.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 07 — The Scheduler
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_07b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 7.5 — Continuous Batching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_08.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 08 — Startup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_08b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 8.5 — CUDA Graphs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_09.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 09 — Forward Pass
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_10.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 10 — Quantization
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_11.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 11 — Prefill and Caching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_11b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 11.5 — KV Cache Eviction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_11c.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 11.6 — RadixAttention and Prefix Caching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_12.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 12 — Sampling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_12b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 12.5 — Structured Generation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_13.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 13 — Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_14.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 14 — vLLM Knobs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_15.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 15 — Multi-GPU
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_15b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 15.5 — Flash Decoding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_16.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 16 — Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_17.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 17 — Benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_18.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 18 — Disaggregated Serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_19.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 19 — Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_20.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 20 — Cost Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_21.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 21 — Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_22.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 22 — LoRA Serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_23.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 23 — Speculative Decoding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_24.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 24 — Reasoning Models
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_25.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 25 — RL Serving Policies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_26.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 26 — Alignment Field Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_27.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 27 — Long-Context
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_28.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 28 — llama.cpp Platform
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_29.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 29 — Multimodal
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_30.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 30 — Semantic Caching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_31.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 31 — Model Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_32.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 32 — Debugging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_33.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 33 — Engine Landscape
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_33b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 33.5 — Engine Selection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_34.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 34 — DeepSeek
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_35.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 35 — Qwen
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_36.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 36 — Kimi
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_37.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 37 — Nemotron
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_38.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 38 — Production Synthesis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_39.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 39 — Evaluation Harness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_40.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 40 — vLLM V1 Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_41.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 41 — Meta Llama 3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_42.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 42 — Phi-4 and Gemma 3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/appendix_l.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code L — CUDA C++ Introduction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/appendix_v.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code V — TurboQuant
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Appendices
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Appendices
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-a.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    A — Mathematical Foundations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-a2.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    A.2 — Tensor Contractions: 2D/3D/5D/ND with CUDA, Triton, CUTLASS, Mojo
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-a3.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    A.3 — The Chain Rule: From Scalars to Transformer Backpropagation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    B — Installation Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-c.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    C — PyTorch for LLM Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-d.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    D — vLLM EngineArgs Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-e.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    E — llama.cpp CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-f.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    F — Production Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-g.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    G — Benchmarking Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-h.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    H — Operational Decision Tree
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-i.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I — C++ Build Patterns
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-j.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    J — libtorch: The C++ API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-k.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    K — std::mdspan for CPU Inference: Multidimensional Views in C++23
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-l.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    L — CUDA C++ Introduction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-m.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    M — Introduction to Triton: Python-Embedded GPU Kernel Programming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-n.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    N — CUTLASS and Tensor Cores: The Compiled Performance Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-o.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    O — Introduction to Mojo: Systems Performance in Python Syntax
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-p.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    P — ROCm and AMD GPU Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-q.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Q — Mobile and Edge Deployment: Android and Apple Silicon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-r.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    R — Edge Inference on Linux SBCs: Raspberry Pi and NVIDIA Jetson
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-s.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    S — CI/CD Pipelines for LLM Inference Systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-t.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    T — Embedding and Reranker Model Serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-u.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    U — Quantization Calibration Workflow: AWQ, GPTQ, FP8, and GGUF
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-v.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    V — TurboQuant
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-w.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    W — Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-x.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    X — References
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-y.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Y — Cerebras WSE-3: Wafer-Scale Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-z.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Z — JAX: XLA-Native Python for LLM Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-aa.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AA — Mixture of Experts (MoE): Conditional Computation from First Principles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+  
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-you-will-understand" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What You Will Understand
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-you-need-first" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What You Need First
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11b1-the-full-cache-problem-foundational" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.1 The Full-Cache Problem [FOUNDATIONAL]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11b.1 The Full-Cache Problem [FOUNDATIONAL]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11b11-what-full-means-in-practice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.1.1 What "full" means in practice
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b12-why-naive-truncation-is-dangerous" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.1.2 Why naive truncation is dangerous
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b13-the-eviction-problem-statement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.1.3 The eviction problem statement
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11b2-attention-sinks-deep-dive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.2 Attention Sinks [DEEP DIVE]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11b.2 Attention Sinks [DEEP DIVE]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11b21-the-streamingllm-observation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.2.1 The StreamingLLM observation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b22-why-sinks-form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.2.2 Why sinks form
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b23-the-eviction-implication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.2.3 The eviction implication
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11b3-h2o-heavy-hitter-oracle-deep-dive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.3 H2O — Heavy Hitter Oracle [DEEP DIVE]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11b.3 H2O — Heavy Hitter Oracle [DEEP DIVE]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11b31-the-core-idea" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.3.1 The core idea
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b32-worked-example-with-8-tokens-keeping-top-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.3.2 Worked example with 8 tokens, keeping top-4
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b33-cumulative-score-vs-per-step-score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.3.3 Cumulative score vs. per-step score
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11b4-snapkv-key-clustering-and-pooling-deep-dive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.4 SnapKV — Key Clustering and Pooling [DEEP DIVE]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11b.4 SnapKV — Key Clustering and Pooling [DEEP DIVE]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11b41-motivation-the-prompt-bottleneck" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.4.1 Motivation: the prompt bottleneck
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b42-the-pooling-window-approach" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.4.2 The pooling window approach
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b43-worked-example-compressing-32-tokens-to-8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.4.3 Worked example: compressing 32 tokens to 8
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b44-cosine-similarity-as-a-quality-proxy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.4.4 Cosine similarity as a quality proxy
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11b5-token-merging-and-cam-deep-dive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.5 Token Merging and CaM [DEEP DIVE]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11b.5 Token Merging and CaM [DEEP DIVE]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11b51-merge-at-write-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.5.1 Merge at write time
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b52-the-threshold-tradeoff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.5.2 The threshold tradeoff
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b53-comparison-eviction-vs-compression-vs-merge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.5.3 Comparison: eviction vs. compression vs. merge
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11b6-the-accuracy-memory-tradeoff-curve-deep-dive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.6 The Accuracy-Memory Tradeoff Curve [DEEP DIVE]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11b.6 The Accuracy-Memory Tradeoff Curve [DEEP DIVE]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11b61-what-we-want-to-know" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.6.1 What we want to know
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b62-empirical-findings-from-the-literature" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.6.2 Empirical findings from the literature
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b63-task-dependency" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.6.3 Task-dependency
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b64-memory-savings-at-scale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.6.4 Memory savings at scale
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11b7-vllm-integration-points-deep-dive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.7 vLLM Integration Points [DEEP DIVE]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11b.7 vLLM Integration Points [DEEP DIVE]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11b71-where-eviction-fits-in-the-block-manager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.7.1 Where eviction fits in the block manager
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b72-the-block-granularity-constraint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.7.2 The block granularity constraint
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b73-attaching-an-eviction-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.7.3 Attaching an eviction policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11b8-llamacpps-kv-cache-shifting-deep-dive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.8 llama.cpp's KV Cache Shifting [DEEP DIVE]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11b.8 llama.cpp&#39;s KV Cache Shifting [DEEP DIVE]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11b81-the-llama_kv_cache_seq_rm-approach" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.8.1 The llama_kv_cache_seq_rm approach
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b82-the-sliding-window-pattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.8.2 The sliding window pattern
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b83-performance-implications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.8.3 Performance implications
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11b84-llamacpp-configuration-flags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11b.8.4 llama.cpp configuration flags
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#chapter-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chapter Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#self-check-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Self-Check Questions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worked-solutions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worked Solutions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Worked Solutions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#solution-1-100k-token-document-kv-cache-full-at-64k-slots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Solution 1 — 100K-token document, KV cache full at 64K slots
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#solution-2-why-first-4-tokens-survive-eviction-despite-low-attention-scores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Solution 2 — Why first 4 tokens survive eviction despite low attention scores
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#solution-3-h2o-total-accumulated-score-vs-recency-weighted-score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Solution 3 — H2O: total accumulated score vs recency-weighted score
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#solution-4-snapkv-why-the-observation-window-works-and-what-breaks-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Solution 4 — SnapKV: why the observation window works, and what breaks it
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#solution-5-which-2-of-8-blocks-to-evict-h2o-blocks-357-are-lowest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Solution 5 — Which 2 of 8 blocks to evict (H2O, blocks 3/5/7 are lowest)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="chapter-115-kv-cache-eviction-and-compression-when-the-cache-is-full">Chapter 11.5: KV Cache Eviction and Compression — When the Cache Is Full<a class="headerlink" href="#chapter-115-kv-cache-eviction-and-compression-when-the-cache-is-full" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p><em>"You cannot remember everything forever. The question is not whether to forget —
+it is which memories to keep, and which to let go without losing the thread."</em></p>
+</blockquote>
+<hr />
+<h2 id="what-you-will-understand">What You Will Understand<a class="headerlink" href="#what-you-will-understand" title="Permanent link">&para;</a></h2>
+<ul>
+<li>
+<p>Why a full KV cache is not a theoretical edge case but the default state
+  at 128K+ context windows.</p>
+</li>
+<li>
+<p>The <strong>attention sink</strong> phenomenon: why the first few tokens receive
+  disproportionate attention mass and must never be evicted.</p>
+</li>
+<li>
+<p><strong>H2O (Heavy Hitter Oracle)</strong>: accumulate attention scores, keep the
+  tokens that matter, silently drop the rest.</p>
+</li>
+<li>
+<p><strong>SnapKV</strong>: compress a prompt's KV cache by clustering similar keys into
+  pooled representatives.</p>
+</li>
+<li>
+<p><strong>Token merging / CaM</strong>: merge near-duplicate KV pairs before they
+  enter the cache, reducing the cache footprint at write time.</p>
+</li>
+<li>
+<p>The accuracy-memory tradeoff curve: how much budget is actually needed
+  to stay within 1 % perplexity degradation.</p>
+</li>
+<li>
+<p>Where eviction hooks into vLLM's <code>BlockSpaceManager</code> and how llama.cpp's
+  <code>llama_kv_cache_seq_rm</code> implements sliding-window eviction.</p>
+</li>
+</ul>
+<h2 id="what-you-need-first">What You Need First<a class="headerlink" href="#what-you-need-first" title="Permanent link">&para;</a></h2>
+<ul>
+<li>
+<p><strong>Chapter 6</strong> — PagedAttention and the block manager (the physical KV
+  cache layout, block table, eviction vocabulary).</p>
+</li>
+<li>
+<p><strong>Chapter 11</strong> — Prefill and chunked prefill (how the cache gets filled
+  in the first place, and why 128 K context requests fill it quickly).</p>
+</li>
+</ul>
+<hr />
+<h2 id="11b1-the-full-cache-problem-foundational">11b.1 The Full-Cache Problem  <code>[FOUNDATIONAL]</code><a class="headerlink" href="#11b1-the-full-cache-problem-foundational" title="Permanent link">&para;</a></h2>
+<h3 id="11b11-what-full-means-in-practice">11b.1.1 What "full" means in practice<a class="headerlink" href="#11b11-what-full-means-in-practice" title="Permanent link">&para;</a></h3>
+<p>Every KV cache has a fixed capacity measured in <strong>token slots</strong>: the product
+of the number of physical blocks and the block size.  In vLLM with a 70 B
+model on two A100 80 GB GPUs, that capacity is roughly 40 000–60 000 slots
+at BF16 precision (exact value depends on <code>gpu_memory_utilization</code> and
+quantization).</p>
+<p>A 128 000-token context window fills that budget more than twice over.
+Modern long-context workloads — RAG over large documents, code review of
+entire repositories, multi-turn conversations — routinely hit this ceiling.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>WHAT HAPPENS WHEN THE KV CACHE IS FULL
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>────────────────────────────────────────────────────────────────────────
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a> KV cache capacity:      C = 65 536 token slots
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a> Request context length: L = 128 000 tokens
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a> Naive approach:         block on admission until another request finishes
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>                         → TTFT = infinity for the waiting request
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a> Alternative 1: REJECT — return HTTP 503, context too long
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a> Alternative 2: TRUNCATE — silently drop the oldest tokens (dangerous)
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a> Alternative 3: EVICT    — choose which tokens to remove intelligently
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a> Alternative 4: COMPRESS — merge tokens to reduce their slot footprint
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a> ┌─────────────────────────────────────────────────────────────────┐
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a> │  Token budget at position 128 000:                              │
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a> │                                                                 │
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a> │  [■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■] │
+</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a> │  ←────────────────  128 000 tokens  ───────────────────────────→│
+</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a> │                                                                 │
+</span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a> │  Cache capacity: ██████████████████████████████░░░░░░░░░░░░░░░  │
+</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a> │                  ←──── 65 536 ─────────────────→               │
+</span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a> │                                                                 │
+</span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a> │  Overflow: 62 464 tokens must either be evicted or compressed   │
+</span><span id="__span-0-25"><a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a> └─────────────────────────────────────────────────────────────────┘
+</span></code></pre></div>
+<h3 id="11b12-why-naive-truncation-is-dangerous">11b.1.2 Why naive truncation is dangerous<a class="headerlink" href="#11b12-why-naive-truncation-is-dangerous" title="Permanent link">&para;</a></h3>
+<p>If you simply drop the oldest tokens (positions 0 to overflow), you lose
+the <strong>system prompt</strong>, the <strong>question</strong>, and any critical context established
+at the beginning of the conversation.  The model has no knowledge that tokens
+were removed; it will continue generating as though those positions still exist
+in the attention window, producing hallucinations or contradictions.</p>
+<p><code>[COMMON TRAP]</code> The correct framing is not "which tokens to remove" but
+"which tokens can be removed with the least degradation to the model's
+ability to continue the generation coherently."</p>
+<h3 id="11b13-the-eviction-problem-statement">11b.1.3 The eviction problem statement<a class="headerlink" href="#11b13-the-eviction-problem-statement" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Given:
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  • A sequence of N tokens, each with a stored (K, V) pair per layer.
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  • A cache budget B &lt; N (we must reduce N slots to B slots).
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>  • A forward pass at position N+1 that will attend over the retained slots.
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>Goal:
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>  • Choose the B slots to retain such that the attention output at N+1
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    is as close as possible to the full-attention output over all N slots.
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>Constraint:
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>  • The decision must be made online (we have seen only positions 0..N).
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>  • The decision must be made fast (it runs on the decode critical path).
+</span></code></pre></div>
+<p>Three families of solution have emerged:</p>
+<table>
+<thead>
+<tr>
+<th>Family</th>
+<th>Representative</th>
+<th>Key idea</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Score-based eviction</td>
+<td>H2O</td>
+<td>Keep tokens with highest accumulated attention</td>
+</tr>
+<tr>
+<td>Compression / clustering</td>
+<td>SnapKV</td>
+<td>Merge similar keys into representatives</td>
+</tr>
+<tr>
+<td>Merge at write time</td>
+<td>CaM</td>
+<td>Merge before writing; never store duplicates</td>
+</tr>
+</tbody>
+</table>
+<p>We cover each in turn.</p>
+<hr />
+<h2 id="11b2-attention-sinks-deep-dive">11b.2 Attention Sinks  <code>[DEEP DIVE]</code><a class="headerlink" href="#11b2-attention-sinks-deep-dive" title="Permanent link">&para;</a></h2>
+<h3 id="11b21-the-streamingllm-observation">11b.2.1 The StreamingLLM observation<a class="headerlink" href="#11b21-the-streamingllm-observation" title="Permanent link">&para;</a></h3>
+<p>In 2023, Xiao et al. (<em>Efficient Streaming Language Models with Attention Sinks</em>,
+arXiv 2309.17453) made a striking empirical observation: when processing very
+long sequences, attention weights are <strong>not</strong> distributed uniformly over the
+context.  Instead:</p>
+<ol>
+<li>The <strong>first few tokens</strong> (positions 0–3) receive disproportionately large
+   attention weights, even when those tokens carry no semantic relevance to
+   the current query.</li>
+<li>The <strong>most recently generated tokens</strong> also receive large attention weights
+   (recency bias).</li>
+<li>Tokens in the <strong>middle of the context</strong> receive relatively little attention.</li>
+</ol>
+<p>The first-token phenomenon is called the <strong>attention sink</strong>.  These tokens act
+as a "drain" that absorbs attention probability mass that the softmax must
+allocate somewhere — even when no token in the context is a natural strong
+match for the query.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>ATTENTION SINK ILLUSTRATION
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>─────────────────────────────────────────────────────────────────────────────
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a> Query: token at position 512 (in a 512-token sequence)
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a> Attention weights (conceptual, averaged across heads and layers):
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>  weight
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>  0.15 │  ■■                                              ■
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>  0.12 │  ■■                                          ■■■ ■
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>  0.09 │  ■■                                        ■■■■■ ■
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>  0.06 │  ■■ ■        ■        ■              ■  ■■■■■■■■ ■
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>  0.03 │  ■■ ■■ ■ ■ ■■ ■ ■ ■ ■ ■■■ ■ ■ ■  ■ ■■■■■■■■■■ ■
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>  0.00 └──┬──────────────────────────────────────────────┬──→ position
+</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>          0   (sink)                               510 511  (recent)
+</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>
+</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a> Observations:
+</span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>  • Positions 0-3:  ~15-20% of total attention mass  ← SINKS
+</span><span id="__span-2-19"><a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>  • Positions 4-480: scattered ~0.02% per token       ← &quot;MIDDLE&quot;
+</span><span id="__span-2-20"><a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>  • Positions 481-511: rising curve, ~30% total       ← RECENCY
+</span></code></pre></div>
+<h3 id="11b22-why-sinks-form">11b.2.2 Why sinks form<a class="headerlink" href="#11b22-why-sinks-form" title="Permanent link">&para;</a></h3>
+<p>The softmax function requires that all attention weights sum to 1.0.  During
+training, the model learns to route "idle" attention probability mass to the
+first tokens — which are always present, always available, and do not carry
+specific semantic content (they are often <code>&lt;bos&gt;</code>, punctuation, or a
+system-prompt header like <code>"You are a helpful assistant."</code>).</p>
+<p>This is a <strong>learned behavior</strong> that emerges from the training distribution,
+not an architectural feature.  The model effectively says: "When no other
+token is highly relevant, dump the probability mass here."</p>
+<h3 id="11b23-the-eviction-implication">11b.2.3 The eviction implication<a class="headerlink" href="#11b23-the-eviction-implication" title="Permanent link">&para;</a></h3>
+<p><code>[COMMON TRAP]</code> If you evict token 0 based on a simple LRU or low-attention
+policy, you corrupt the model's internal routing mechanism.  Perplexity spikes
+catastrophically — not because position 0 contained important content, but
+because the model's softmax no longer has a valid "idle drain."</p>
+<p><strong>The StreamingLLM rule</strong>: Always keep the first <code>A</code> tokens (typically A=4)
+regardless of their attention scores.  These are <em>structural</em> tokens, not
+<em>semantic</em> ones.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>SINK-AWARE EVICTION POLICY
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>────────────────────────────────────────────────────────────────────
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a> Token budget: B = 20
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a> Full sequence: N = 60 tokens
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a> Sink tokens to always keep: A = 4  (positions 0-3)
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a> Available eviction candidates: positions 4 .. 59  (56 tokens)
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a> Tokens to evict: 60 - 20 = 40
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a> Evictable budget: 56 tokens → evict 40, keep 16 from middle+recent
+</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>
+</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a> Retained set:
+</span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>   [0 1 2 3]               ← sinks (never evict)
+</span><span id="__span-3-14"><a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>   [selected 12 tokens from middle/recent based on scores]
+</span><span id="__span-3-15"><a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>   [last 4 tokens]         ← recency window (always keep most recent)
+</span><span id="__span-3-16"><a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>
+</span><span id="__span-3-17"><a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a> ─────────────────────────────────────────────────────────────────
+</span><span id="__span-3-18"><a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>  Total retained: 4 + 12 + 4 = 20 = B  ✓
+</span></code></pre></div>
+<hr />
+<h2 id="11b3-h2o-heavy-hitter-oracle-deep-dive">11b.3 H2O — Heavy Hitter Oracle  <code>[DEEP DIVE]</code><a class="headerlink" href="#11b3-h2o-heavy-hitter-oracle-deep-dive" title="Permanent link">&para;</a></h2>
+<h3 id="11b31-the-core-idea">11b.3.1 The core idea<a class="headerlink" href="#11b31-the-core-idea" title="Permanent link">&para;</a></h3>
+<p>H2O (<em>H2O: Heavy-Hitter Oracle for Efficient Generative Inference of Large
+Language Models</em>, Zhang et al., arXiv 2306.14048) observes that attention
+scores are highly <strong>skewed</strong>: a small fraction of tokens (the "heavy hitters")
+accumulate the vast majority of attention mass across all decode steps.</p>
+<p>The H2O algorithm:</p>
+<ol>
+<li>During decode, accumulate the attention weights each token receives
+   across all steps into a running score vector <code>s[i]</code>.</li>
+<li>When the cache is full, evict the tokens with the <strong>lowest</strong> accumulated
+   score, subject to always preserving sink tokens.</li>
+<li>Continue decode; the evicted positions are gone, but the heavy hitters
+   remain.</li>
+</ol>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>H2O ALGORITHM (per layer, single head simplified)
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>──────────────────────────────────────────────────────────────────────
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a> State:
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>   • cache_keys[0..n-1], cache_values[0..n-1]   — stored KV pairs
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>   • score[0..n-1]                               — accumulated attention
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>   • B                                           — max budget
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a> On each decode step t:
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>   1. Compute attention weights w[i] = softmax(Q_t · K[i] / √d)[i]
+</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>   2. Update:  score[i] += w[i]   for all i in cache
+</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>   3. Write new K_t, V_t with score[t] = w[t]  (its first contribution)
+</span><span id="__span-4-13"><a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>   4. If len(cache) &gt; B:
+</span><span id="__span-4-14"><a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>        candidates = {i : i &gt;= A}   (exclude first A sink tokens)
+</span><span id="__span-4-15"><a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>        victim = argmin score[candidates]
+</span><span id="__span-4-16"><a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>        evict(victim)
+</span></code></pre></div>
+<h3 id="11b32-worked-example-with-8-tokens-keeping-top-4">11b.3.2 Worked example with 8 tokens, keeping top-4<a class="headerlink" href="#11b32-worked-example-with-8-tokens-keeping-top-4" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>WORKED EXAMPLE 11b.1 — H2O Eviction
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>──────────────────────────────────────────────────────────────────────
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>Setup:
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>  Sequence length N = 8 tokens (positions 0..7)
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>  Cache budget    B = 4
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>  Sink tokens     A = 2 (positions 0 and 1 always kept)
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>Accumulated attention scores (after processing all 8 tokens):
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>  Position:  0     1     2     3     4     5     6     7
+</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>  Score:    0.42  0.38  0.12  0.28  0.05  0.31  0.09  0.19
+</span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>             ↑     ↑                             
+</span><span id="__span-5-14"><a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>            sink  sink  (eviction candidates: 2..7)
+</span><span id="__span-5-15"><a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>
+</span><span id="__span-5-16"><a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>Step 1 — Identify candidates (non-sink positions):
+</span><span id="__span-5-17"><a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>  Candidates: {2: 0.12, 3: 0.28, 4: 0.05, 5: 0.31, 6: 0.09, 7: 0.19}
+</span><span id="__span-5-18"><a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a>
+</span><span id="__span-5-19"><a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a>Step 2 — Budget accounting:
+</span><span id="__span-5-20"><a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a>  Already keeping: 0, 1  (sinks, 2 slots)
+</span><span id="__span-5-21"><a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a>  Remaining budget: B - A = 4 - 2 = 2 slots for non-sink tokens
+</span><span id="__span-5-22"><a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a>
+</span><span id="__span-5-23"><a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a>Step 3 — Rank candidates by score (descending):
+</span><span id="__span-5-24"><a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a>  5: 0.31  ← keep
+</span><span id="__span-5-25"><a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a>  3: 0.28  ← keep
+</span><span id="__span-5-26"><a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a>  7: 0.19
+</span><span id="__span-5-27"><a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a>  2: 0.12
+</span><span id="__span-5-28"><a id="__codelineno-5-28" name="__codelineno-5-28" href="#__codelineno-5-28"></a>  6: 0.09
+</span><span id="__span-5-29"><a id="__codelineno-5-29" name="__codelineno-5-29" href="#__codelineno-5-29"></a>  4: 0.05
+</span><span id="__span-5-30"><a id="__codelineno-5-30" name="__codelineno-5-30" href="#__codelineno-5-30"></a>
+</span><span id="__span-5-31"><a id="__codelineno-5-31" name="__codelineno-5-31" href="#__codelineno-5-31"></a>Step 4 — Keep top-2 non-sink candidates: {5, 3}
+</span><span id="__span-5-32"><a id="__codelineno-5-32" name="__codelineno-5-32" href="#__codelineno-5-32"></a>  Evict: {2, 4, 6, 7}
+</span><span id="__span-5-33"><a id="__codelineno-5-33" name="__codelineno-5-33" href="#__codelineno-5-33"></a>
+</span><span id="__span-5-34"><a id="__codelineno-5-34" name="__codelineno-5-34" href="#__codelineno-5-34"></a>Final cache: [0, 1, 3, 5]  — 4 tokens, within budget ✓
+</span><span id="__span-5-35"><a id="__codelineno-5-35" name="__codelineno-5-35" href="#__codelineno-5-35"></a>
+</span><span id="__span-5-36"><a id="__codelineno-5-36" name="__codelineno-5-36" href="#__codelineno-5-36"></a>Attention quality check (next decode step):
+</span><span id="__span-5-37"><a id="__codelineno-5-37" name="__codelineno-5-37" href="#__codelineno-5-37"></a>  Full attention over [0..7]:  Q·K scores span all 8 tokens
+</span><span id="__span-5-38"><a id="__codelineno-5-38" name="__codelineno-5-38" href="#__codelineno-5-38"></a>  Evicted attention over [0,1,3,5]: misses positions 2,4,6,7
+</span><span id="__span-5-39"><a id="__codelineno-5-39" name="__codelineno-5-39" href="#__codelineno-5-39"></a>
+</span><span id="__span-5-40"><a id="__codelineno-5-40" name="__codelineno-5-40" href="#__codelineno-5-40"></a>  Expected degradation: positions 2,4,6 had low scores (0.12, 0.05, 0.09)
+</span><span id="__span-5-41"><a id="__codelineno-5-41" name="__codelineno-5-41" href="#__codelineno-5-41"></a>  → total missed mass ≈ 0.12+0.05+0.09 = 0.26
+</span><span id="__span-5-42"><a id="__codelineno-5-42" name="__codelineno-5-42" href="#__codelineno-5-42"></a>
+</span><span id="__span-5-43"><a id="__codelineno-5-43" name="__codelineno-5-43" href="#__codelineno-5-43"></a>  Position 7 (score 0.19) was evicted — this is the largest loss.
+</span><span id="__span-5-44"><a id="__codelineno-5-44" name="__codelineno-5-44" href="#__codelineno-5-44"></a>  A recency window would have kept it.
+</span><span id="__span-5-45"><a id="__codelineno-5-45" name="__codelineno-5-45" href="#__codelineno-5-45"></a>
+</span><span id="__span-5-46"><a id="__codelineno-5-46" name="__codelineno-5-46" href="#__codelineno-5-46"></a>ENHANCED H2O with recency window R=1:
+</span><span id="__span-5-47"><a id="__codelineno-5-47" name="__codelineno-5-47" href="#__codelineno-5-47"></a>  Always keep last R tokens regardless of score.
+</span><span id="__span-5-48"><a id="__codelineno-5-48" name="__codelineno-5-48" href="#__codelineno-5-48"></a>  Revised candidates: {2,3,4,5,6}  (7 excluded as recent)
+</span><span id="__span-5-49"><a id="__codelineno-5-49" name="__codelineno-5-49" href="#__codelineno-5-49"></a>  Keep sinks {0,1}, recent {7}, top-1 candidate: {5}
+</span><span id="__span-5-50"><a id="__codelineno-5-50" name="__codelineno-5-50" href="#__codelineno-5-50"></a>  Final cache: [0, 1, 5, 7]
+</span><span id="__span-5-51"><a id="__codelineno-5-51" name="__codelineno-5-51" href="#__codelineno-5-51"></a>  Missed mass: 0.12+0.28+0.05+0.09 = 0.54 — worse on average but
+</span><span id="__span-5-52"><a id="__codelineno-5-52" name="__codelineno-5-52" href="#__codelineno-5-52"></a>  recency-correct for next-step coherence.
+</span></code></pre></div>
+<h3 id="11b33-cumulative-score-vs-per-step-score">11b.3.3 Cumulative score vs. per-step score<a class="headerlink" href="#11b33-cumulative-score-vs-per-step-score" title="Permanent link">&para;</a></h3>
+<p>A subtlety: should you use the <strong>total</strong> accumulated score or the <strong>recent</strong>
+accumulated score (e.g., exponentially decaying sum)?</p>
+<ul>
+<li>
+<p><strong>Total</strong> accumulated score: biased toward early tokens that have been
+  "in play" for many decode steps.  Often dominated by sink tokens.</p>
+</li>
+<li>
+<p><strong>Decayed</strong> accumulated score: more responsive to recent attention patterns;
+  better for tasks where the model's focus shifts across the sequence.</p>
+</li>
+</ul>
+<p>In practice, H2O uses the simple cumulative sum because it is O(1) to update
+and already captures sinks implicitly (sinks accumulate the most mass).</p>
+<hr />
+<h2 id="11b4-snapkv-key-clustering-and-pooling-deep-dive">11b.4 SnapKV — Key Clustering and Pooling  <code>[DEEP DIVE]</code><a class="headerlink" href="#11b4-snapkv-key-clustering-and-pooling-deep-dive" title="Permanent link">&para;</a></h2>
+<h3 id="11b41-motivation-the-prompt-bottleneck">11b.4.1 Motivation: the prompt bottleneck<a class="headerlink" href="#11b41-motivation-the-prompt-bottleneck" title="Permanent link">&para;</a></h3>
+<p>H2O works well for decode-phase tokens, but long prompts present a different
+problem: all N prompt tokens are written to the KV cache during prefill in a
+single pass.  By the time the first decode token arrives, the cache is already
+at capacity — there is no "gradual accumulation" of attention scores.</p>
+<p>SnapKV (<em>SnapKV: LLM Knows What You are Looking for Before Generation</em>,
+Li et al., arXiv 2404.14469) addresses this: <strong>compress the prompt KV cache
+before decode begins</strong>.</p>
+<h3 id="11b42-the-pooling-window-approach">11b.4.2 The pooling window approach<a class="headerlink" href="#11b42-the-pooling-window-approach" title="Permanent link">&para;</a></h3>
+<p>SnapKV's key insight: within a prompt, many consecutive keys are semantically
+similar.  Nearby sentences in a document, bullet points in a list, rows in a
+data table — all produce keys that cluster together in embedding space.</p>
+<p>The algorithm:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>SNAPKV ALGORITHM
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>──────────────────────────────────────────────────────────────────────
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a> Input:
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>   • Prompt of N tokens: K[0..N-1], V[0..N-1]  (one layer, one head)
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>   • Window size W (default 16)
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>   • Compression budget B &lt; N
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>
+</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a> Step 1 — Observation window
+</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>   Use the last W prompt tokens as &quot;observation queries&quot; to compute
+</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>   attention over the full prompt:
+</span><span id="__span-6-12"><a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>
+</span><span id="__span-6-13"><a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>       A_obs[w, i] = softmax(K[N-W+w] · K[i]^T / √d)  for w in [0,W)
+</span><span id="__span-6-14"><a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>
+</span><span id="__span-6-15"><a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>   Aggregate: importance[i] = mean_{w} A_obs[w, i]
+</span><span id="__span-6-16"><a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>
+</span><span id="__span-6-17"><a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a> Step 2 — Select important positions
+</span><span id="__span-6-18"><a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>   Sort by importance[i], keep top-(B - sink_count) positions
+</span><span id="__span-6-19"><a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>   (always prepend the A sink positions)
+</span><span id="__span-6-20"><a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a>
+</span><span id="__span-6-21"><a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a> Step 3 — Pool within each selected cluster
+</span><span id="__span-6-22"><a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a>   For each selected position i, pool its K and V with the nearest
+</span><span id="__span-6-23"><a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a>   W_pool neighbors:
+</span><span id="__span-6-24"><a id="__codelineno-6-24" name="__codelineno-6-24" href="#__codelineno-6-24"></a>
+</span><span id="__span-6-25"><a id="__codelineno-6-25" name="__codelineno-6-25" href="#__codelineno-6-25"></a>       K_compressed[i] = avg(K[i-W_pool//2 : i+W_pool//2])
+</span><span id="__span-6-26"><a id="__codelineno-6-26" name="__codelineno-6-26" href="#__codelineno-6-26"></a>       V_compressed[i] = avg(V[i-W_pool//2 : i+W_pool//2])
+</span><span id="__span-6-27"><a id="__codelineno-6-27" name="__codelineno-6-27" href="#__codelineno-6-27"></a>
+</span><span id="__span-6-28"><a id="__codelineno-6-28" name="__codelineno-6-28" href="#__codelineno-6-28"></a> Step 4 — Replace prompt KV with compressed KV
+</span><span id="__span-6-29"><a id="__codelineno-6-29" name="__codelineno-6-29" href="#__codelineno-6-29"></a>   The cache now holds B entries instead of N entries.
+</span><span id="__span-6-30"><a id="__codelineno-6-30" name="__codelineno-6-30" href="#__codelineno-6-30"></a>   Decode proceeds as normal against the compressed cache.
+</span></code></pre></div>
+<h3 id="11b43-worked-example-compressing-32-tokens-to-8">11b.4.3 Worked example: compressing 32 tokens to 8<a class="headerlink" href="#11b43-worked-example-compressing-32-tokens-to-8" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>WORKED EXAMPLE 11b.2 — SnapKV Compression
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>──────────────────────────────────────────────────────────────────────
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>Setup:
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>  Prompt length:   N = 32 tokens
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>  Budget:          B = 8
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>  Window size:     W = 4  (last 4 tokens used as observation queries)
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>  Pool window:    W_pool = 2
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>  Sink tokens:     A = 2
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>
+</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>Observation window: positions 28, 29, 30, 31
+</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>
+</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>Importance scores (aggregated attention from observation window):
+</span><span id="__span-7-14"><a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>  pos: 0    1    2    3    4    5    6    7    8    9   10   11   ...
+</span><span id="__span-7-15"><a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>  imp: 0.09 0.11 0.03 0.02 0.15 0.18 0.04 0.12 0.02 0.01 0.14 0.16 ...
+</span><span id="__span-7-16"><a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>
+</span><span id="__span-7-17"><a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>After selecting top-(B-A) = 6 from non-sink positions:
+</span><span id="__span-7-18"><a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a>  Selected: {5, 4, 7, 10, 11, 19}  (plus sinks 0, 1)
+</span><span id="__span-7-19"><a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a>
+</span><span id="__span-7-20"><a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a>Pooling at selected position 5 (W_pool=2):
+</span><span id="__span-7-21"><a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a>  K_compressed[5] = avg(K[4], K[5])   (left neighbor only if near boundary)
+</span><span id="__span-7-22"><a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a>  V_compressed[5] = avg(V[4], V[5])
+</span><span id="__span-7-23"><a id="__codelineno-7-23" name="__codelineno-7-23" href="#__codelineno-7-23"></a>
+</span><span id="__span-7-24"><a id="__codelineno-7-24" name="__codelineno-7-24" href="#__codelineno-7-24"></a>Final compressed cache: 8 entries (2 sinks + 6 selected+pooled)
+</span><span id="__span-7-25"><a id="__codelineno-7-25" name="__codelineno-7-25" href="#__codelineno-7-25"></a>
+</span><span id="__span-7-26"><a id="__codelineno-7-26" name="__codelineno-7-26" href="#__codelineno-7-26"></a>Compression ratio: 32 → 8 = 4× reduction
+</span></code></pre></div>
+<h3 id="11b44-cosine-similarity-as-a-quality-proxy">11b.4.4 Cosine similarity as a quality proxy<a class="headerlink" href="#11b44-cosine-similarity-as-a-quality-proxy" title="Permanent link">&para;</a></h3>
+<p>After compression, you can estimate quality loss by computing the cosine
+similarity between the original and compressed keys:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Quality proxy = (1/B) Σ_i cos_sim(K_original[i], K_compressed[i])
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>Perfect retention:  quality = 1.0
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>Typical SnapKV:     quality ≈ 0.85 - 0.95 at 4× compression
+</span></code></pre></div>
+<hr />
+<h2 id="11b5-token-merging-and-cam-deep-dive">11b.5 Token Merging and CaM  <code>[DEEP DIVE]</code><a class="headerlink" href="#11b5-token-merging-and-cam-deep-dive" title="Permanent link">&para;</a></h2>
+<h3 id="11b51-merge-at-write-time">11b.5.1 Merge at write time<a class="headerlink" href="#11b51-merge-at-write-time" title="Permanent link">&para;</a></h3>
+<p>Both H2O and SnapKV operate on an already-full cache (evicting or clustering
+after the fact).  A third family of approaches <strong>merges tokens before they are
+written</strong>, keeping the cache permanently smaller.</p>
+<p><strong>CaM</strong> (<em>CaM: Cache Merging for Memory-Efficient LLMs in the Wild</em>,
+arXiv 2402.05262) is the representative algorithm:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>CAM ALGORITHM (simplified)
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>──────────────────────────────────────────────────────────────────────
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a> On each token write (position t):
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>   1. Compute K[t] for the new token.
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>   2. Find the most similar existing key in the cache:
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>        j* = argmax_{j in cache} cos_sim(K[t], K[j])
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>   3. If cos_sim(K[t], K[j*]) &gt; threshold τ:
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>        Merge: K[j*] = (K[j*] + K[t]) / 2   (running mean)
+</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>               V[j*] = (V[j*] + V[t]) / 2
+</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>        Do NOT write a new entry.
+</span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>      Else:
+</span><span id="__span-9-13"><a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>        Write K[t], V[t] as a new entry.
+</span></code></pre></div>
+<p>The cache size grows only when genuinely new information arrives.  For
+repetitive contexts (repeated phrases, similar sentences in a document),
+the cache may grow at a fraction of the naive rate.</p>
+<h3 id="11b52-the-threshold-tradeoff">11b.5.2 The threshold tradeoff<a class="headerlink" href="#11b52-the-threshold-tradeoff" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Threshold τ</th>
+<th>Cache growth</th>
+<th>Quality risk</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0.99 (very strict)</td>
+<td>Near 100% of naive</td>
+<td>Almost none</td>
+</tr>
+<tr>
+<td>0.95</td>
+<td>~80% of naive</td>
+<td>Small</td>
+</tr>
+<tr>
+<td>0.90</td>
+<td>~60% of naive</td>
+<td>Moderate</td>
+</tr>
+<tr>
+<td>0.80</td>
+<td>~40% of naive</td>
+<td>High</td>
+</tr>
+</tbody>
+</table>
+<p><code>[COMMON TRAP]</code> Setting τ too low merges semantically distinct tokens.
+The model cannot distinguish them in subsequent attention computations,
+causing coherence failures on tasks requiring precise token identity
+(e.g., copying verbatim quotes, exact arithmetic).</p>
+<h3 id="11b53-comparison-eviction-vs-compression-vs-merge">11b.5.3 Comparison: eviction vs. compression vs. merge<a class="headerlink" href="#11b53-comparison-eviction-vs-compression-vs-merge" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>APPROACH COMPARISON
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>──────────────────────────────────────────────────────────────────────
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>                    H2O          SnapKV         CaM
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>─────────────────────────────────────────────────────────────────────
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a> When applied?      Decode       Post-prefill   At write time
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a> Granularity        Token slot   Token cluster  Token slot
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a> Cache size after   B (hard cap) B (hard cap)   Variable (&lt; N)
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a> Attention quality  High hitters Important keys Similar merged
+</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a> Implementation     Simple       Moderate       Requires lookup
+</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a> Overhead           O(B)         O(N·W)         O(B) per token
+</span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a> Sink handling      Explicit     Explicit       Implicit (sinks
+</span><span id="__span-10-13"><a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>                                                rarely similar
+</span><span id="__span-10-14"><a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>                                                to new tokens)
+</span><span id="__span-10-15"><a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a>─────────────────────────────────────────────────────────────────────
+</span></code></pre></div>
+<hr />
+<h2 id="11b6-the-accuracy-memory-tradeoff-curve-deep-dive">11b.6 The Accuracy-Memory Tradeoff Curve  <code>[DEEP DIVE]</code><a class="headerlink" href="#11b6-the-accuracy-memory-tradeoff-curve-deep-dive" title="Permanent link">&para;</a></h2>
+<h3 id="11b61-what-we-want-to-know">11b.6.1 What we want to know<a class="headerlink" href="#11b61-what-we-want-to-know" title="Permanent link">&para;</a></h3>
+<p>The key practical question for a serving engineer is: <strong>how much KV budget
+do I actually need to maintain acceptable quality?</strong></p>
+<p>"Acceptable quality" is typically defined as perplexity within 1% of the
+full-attention baseline (no eviction).  The companion code sweeps the
+budget from 10% to 100% and measures a perplexity proxy (the attention
+output cosine similarity to ground truth).</p>
+<h3 id="11b62-empirical-findings-from-the-literature">11b.6.2 Empirical findings from the literature<a class="headerlink" href="#11b62-empirical-findings-from-the-literature" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>BUDGET VS. PERPLEXITY (typical LLaMA 3 8B, 4K context, H2O eviction)
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>──────────────────────────────────────────────────────────────────────
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a> KV budget   Perplexity    Degradation vs. full
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a> ──────────────────────────────────────────────
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>  100%         8.12           baseline (no eviction)
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>   80%         8.15           +0.4%    ← nearly free
+</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>   60%         8.22           +1.2%    ← marginal
+</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>   40%         8.41           +3.6%    ← noticeable
+</span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>   20%         9.04          +11.3%    ← significant
+</span><span id="__span-11-11"><a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>   10%        10.87          +33.9%    ← severe
+</span><span id="__span-11-12"><a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>
+</span><span id="__span-11-13"><a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a> &quot;1% degradation target&quot; → budget ≈ 55-65% is sufficient
+</span><span id="__span-11-14"><a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>
+</span><span id="__span-11-15"><a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a> With SnapKV (clustered, not random eviction):
+</span><span id="__span-11-16"><a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a>   60%         8.18           +0.7%    ← better than H2O at 60%
+</span><span id="__span-11-17"><a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>   40%         8.27           +1.8%    ← better than H2O at 40%
+</span></code></pre></div>
+<h3 id="11b63-task-dependency">11b.6.3 Task-dependency<a class="headerlink" href="#11b63-task-dependency" title="Permanent link">&para;</a></h3>
+<p>The budget required varies substantially by task:</p>
+<table>
+<thead>
+<tr>
+<th>Task</th>
+<th>Required budget (1% PPL target)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Open-ended generation</td>
+<td>~55%</td>
+</tr>
+<tr>
+<td>Multi-hop QA</td>
+<td>~70%</td>
+</tr>
+<tr>
+<td>summarization</td>
+<td>~50%</td>
+</tr>
+<tr>
+<td>Retrieval / needle-in-haystack</td>
+<td>~80%</td>
+</tr>
+<tr>
+<td>Code generation</td>
+<td>~65%</td>
+</tr>
+</tbody>
+</table>
+<p>Retrieval tasks are sensitive because any evicted token might be <strong>the</strong>
+needle.  SnapKV's observation-window approach helps here: the last few
+tokens of the prompt (which often contain the query) guide which earlier
+tokens survive.</p>
+<h3 id="11b64-memory-savings-at-scale">11b.6.4 Memory savings at scale<a class="headerlink" href="#11b64-memory-savings-at-scale" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>WORKED EXAMPLE 11b.3 — Memory Savings at 60% Budget
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>──────────────────────────────────────────────────────────────────────
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>Given:
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>  Model:          LLaMA 3 70B (GQA, 8 KV heads, d_head=128, 80 layers)
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>  Precision:      BF16 (2 bytes per element)
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>  Context length: 32 768 tokens
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>  GPU:            H100 SXM5 80 GB
+</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>
+</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>Full KV cache size:
+</span><span id="__span-12-11"><a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>  2 × 80 × 32768 × 8 × 128 × 2 bytes
+</span><span id="__span-12-12"><a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>  = 2 × 80 × 32768 × 8 × 128 × 2
+</span><span id="__span-12-13"><a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a>  = 10 737 418 240 bytes ≈ 10.0 GB
+</span><span id="__span-12-14"><a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a>
+</span><span id="__span-12-15"><a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a>At 60% budget:
+</span><span id="__span-12-16"><a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a>  10.0 GB × 0.60 = 6.0 GB
+</span><span id="__span-12-17"><a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a>
+</span><span id="__span-12-18"><a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a>Saving per sequence: 4.0 GB
+</span><span id="__span-12-19"><a id="__codelineno-12-19" name="__codelineno-12-19" href="#__codelineno-12-19"></a>On 4 concurrent long-context requests: 16.0 GB saved
+</span><span id="__span-12-20"><a id="__codelineno-12-20" name="__codelineno-12-20" href="#__codelineno-12-20"></a>→ Room for 2–3 additional concurrent requests on the same GPU
+</span></code></pre></div>
+<hr />
+<h2 id="11b7-vllm-integration-points-deep-dive">11b.7 vLLM Integration Points  <code>[DEEP DIVE]</code><a class="headerlink" href="#11b7-vllm-integration-points-deep-dive" title="Permanent link">&para;</a></h2>
+<h3 id="11b71-where-eviction-fits-in-the-block-manager">11b.7.1 Where eviction fits in the block manager<a class="headerlink" href="#11b71-where-eviction-fits-in-the-block-manager" title="Permanent link">&para;</a></h3>
+<p>vLLM's <code>BlockSpaceManager</code> (vllm/core/block_manager.py) manages the physical
+block table.  Eviction hooks into this at two points:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>VLLM EVICTION INTEGRATION POINTS
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>──────────────────────────────────────────────────────────────────────
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>  ┌─────────────────────────────────────────────────────────────────┐
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>  │                    LLMEngine.step()                             │
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>  │                          │                                      │
+</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>  │              ┌───────────▼───────────┐                         │
+</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>  │              │     Scheduler         │                         │
+</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>  │              │  .schedule()          │                         │
+</span><span id="__span-13-10"><a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>  │              └───────────┬───────────┘                         │
+</span><span id="__span-13-11"><a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>  │                          │ SequenceGroupMetadata                │
+</span><span id="__span-13-12"><a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>  │              ┌───────────▼───────────┐                         │
+</span><span id="__span-13-13"><a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a>  │              │  BlockSpaceManager    │  ← EVICTION HOOK 1:     │
+</span><span id="__span-13-14"><a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a>  │              │  .allocate()          │    before allocation,   │
+</span><span id="__span-13-15"><a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a>  │              │  .can_allocate()      │    check if eviction    │
+</span><span id="__span-13-16"><a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a>  │              │  .free()              │    needed               │
+</span><span id="__span-13-17"><a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a>  │              └───────────┬───────────┘                         │
+</span><span id="__span-13-18"><a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a>  │                          │ block_tables                         │
+</span><span id="__span-13-19"><a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a>  │              ┌───────────▼───────────┐                         │
+</span><span id="__span-13-20"><a id="__codelineno-13-20" name="__codelineno-13-20" href="#__codelineno-13-20"></a>  │              │   Worker / GPU        │  ← EVICTION HOOK 2:     │
+</span><span id="__span-13-21"><a id="__codelineno-13-21" name="__codelineno-13-21" href="#__codelineno-13-21"></a>  │              │   execute_model()     │    attention layer can   │
+</span><span id="__span-13-22"><a id="__codelineno-13-22" name="__codelineno-13-22" href="#__codelineno-13-22"></a>  │              │   paged_attn_kernel   │    skip evicted block    │
+</span><span id="__span-13-23"><a id="__codelineno-13-23" name="__codelineno-13-23" href="#__codelineno-13-23"></a>  │              └───────────────────────┘    indices              │
+</span><span id="__span-13-24"><a id="__codelineno-13-24" name="__codelineno-13-24" href="#__codelineno-13-24"></a>  └─────────────────────────────────────────────────────────────────┘
+</span></code></pre></div>
+<p><strong>Hook 1 — Block-level eviction (coarse)</strong>:
+Before allocating a new block, if no free blocks remain, evict the entire
+block with the lowest average accumulated attention score.  This operates
+at block granularity (default 16 tokens per block).</p>
+<p><strong>Hook 2 — Token-level eviction (fine, requires kernel support)</strong>:
+The PagedAttention CUDA kernel can be modified to skip specific
+block-offset positions, effectively nullifying them for the attention
+computation without physically freeing the memory.</p>
+<h3 id="11b72-the-block-granularity-constraint">11b.7.2 The block granularity constraint<a class="headerlink" href="#11b72-the-block-granularity-constraint" title="Permanent link">&para;</a></h3>
+<p><code>[COMMON TRAP]</code> vLLM's physical blocks are atomic units of allocation.
+You cannot evict half a block.  If block size = 16 and only 2 tokens in
+a block are "low value," you must either evict all 16 or none.  This means
+H2O-style token-level eviction requires either:</p>
+<ol>
+<li>A modified kernel that masks individual positions within a block
+   (high implementation complexity).</li>
+<li>Operating at block granularity with a block-level importance score
+   (average or max of token scores within the block).</li>
+</ol>
+<p>vLLM's <code>prefix_caching</code> (radix attention) already uses block-level
+hashing; block-level eviction is a natural extension.</p>
+<h3 id="11b73-attaching-an-eviction-policy">11b.7.3 Attaching an eviction policy<a class="headerlink" href="#11b73-attaching-an-eviction-policy" title="Permanent link">&para;</a></h3>
+<p>A minimal eviction hook looks like:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">H2OBlockManager</span><span class="p">(</span><span class="n">BlockSpaceManager</span><span class="p">):</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;BlockSpaceManager subclass with H2O eviction.&quot;&quot;&quot;</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>        <span class="c1"># Map from physical block_id → accumulated attention score</span>
+</span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">block_scores</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+</span><span id="__span-14-8"><a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a>
+</span><span id="__span-14-9"><a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">update_scores</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">seq_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">attn_weights</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="__span-14-10"><a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Called after each decode step with per-token attention weights.&quot;&quot;&quot;</span>
+</span><span id="__span-14-11"><a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a>        <span class="n">block_table</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_block_table</span><span class="p">(</span><span class="n">seq_id</span><span class="p">)</span>
+</span><span id="__span-14-12"><a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a>        <span class="k">for</span> <span class="n">block_idx</span><span class="p">,</span> <span class="n">block_id</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">block_table</span><span class="p">):</span>
+</span><span id="__span-14-13"><a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a>            <span class="n">start</span> <span class="o">=</span> <span class="n">block_idx</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">block_size</span>
+</span><span id="__span-14-14"><a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a>            <span class="n">end</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">start</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">block_size</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">attn_weights</span><span class="p">))</span>
+</span><span id="__span-14-15"><a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a>            <span class="n">block_score</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">attn_weights</span><span class="p">[</span><span class="n">start</span><span class="p">:</span><span class="n">end</span><span class="p">])</span>
+</span><span id="__span-14-16"><a id="__codelineno-14-16" name="__codelineno-14-16" href="#__codelineno-14-16"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">block_scores</span><span class="p">[</span><span class="n">block_id</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+</span><span id="__span-14-17"><a id="__codelineno-14-17" name="__codelineno-14-17" href="#__codelineno-14-17"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">block_scores</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">block_id</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span> <span class="o">+</span> <span class="n">block_score</span>
+</span><span id="__span-14-18"><a id="__codelineno-14-18" name="__codelineno-14-18" href="#__codelineno-14-18"></a>            <span class="p">)</span>
+</span><span id="__span-14-19"><a id="__codelineno-14-19" name="__codelineno-14-19" href="#__codelineno-14-19"></a>
+</span><span id="__span-14-20"><a id="__codelineno-14-20" name="__codelineno-14-20" href="#__codelineno-14-20"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">evict_one_block</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">protect_n_sink_blocks</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+</span><span id="__span-14-21"><a id="__codelineno-14-21" name="__codelineno-14-21" href="#__codelineno-14-21"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Evict the lowest-scoring non-sink block. Return its ID.&quot;&quot;&quot;</span>
+</span><span id="__span-14-22"><a id="__codelineno-14-22" name="__codelineno-14-22" href="#__codelineno-14-22"></a>        <span class="n">candidates</span> <span class="o">=</span> <span class="p">{</span>
+</span><span id="__span-14-23"><a id="__codelineno-14-23" name="__codelineno-14-23" href="#__codelineno-14-23"></a>            <span class="n">bid</span><span class="p">:</span> <span class="n">score</span>
+</span><span id="__span-14-24"><a id="__codelineno-14-24" name="__codelineno-14-24" href="#__codelineno-14-24"></a>            <span class="k">for</span> <span class="n">bid</span><span class="p">,</span> <span class="n">score</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">block_scores</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+</span><span id="__span-14-25"><a id="__codelineno-14-25" name="__codelineno-14-25" href="#__codelineno-14-25"></a>            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_block_rank</span><span class="p">(</span><span class="n">bid</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="n">protect_n_sink_blocks</span>
+</span><span id="__span-14-26"><a id="__codelineno-14-26" name="__codelineno-14-26" href="#__codelineno-14-26"></a>        <span class="p">}</span>
+</span><span id="__span-14-27"><a id="__codelineno-14-27" name="__codelineno-14-27" href="#__codelineno-14-27"></a>        <span class="n">victim</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">candidates</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">candidates</span><span class="o">.</span><span class="n">get</span><span class="p">)</span>
+</span><span id="__span-14-28"><a id="__codelineno-14-28" name="__codelineno-14-28" href="#__codelineno-14-28"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">free_block</span><span class="p">(</span><span class="n">victim</span><span class="p">)</span>
+</span><span id="__span-14-29"><a id="__codelineno-14-29" name="__codelineno-14-29" href="#__codelineno-14-29"></a>        <span class="k">del</span> <span class="bp">self</span><span class="o">.</span><span class="n">block_scores</span><span class="p">[</span><span class="n">victim</span><span class="p">]</span>
+</span><span id="__span-14-30"><a id="__codelineno-14-30" name="__codelineno-14-30" href="#__codelineno-14-30"></a>        <span class="k">return</span> <span class="n">victim</span>
+</span></code></pre></div>
+<p>This is illustrative pseudocode; a production implementation must also
+handle CoW (copy-on-write) blocks and prefix-cached blocks that should
+never be evicted.</p>
+<hr />
+<h2 id="11b8-llamacpps-kv-cache-shifting-deep-dive">11b.8 llama.cpp's KV Cache Shifting  <code>[DEEP DIVE]</code><a class="headerlink" href="#11b8-llamacpps-kv-cache-shifting-deep-dive" title="Permanent link">&para;</a></h2>
+<h3 id="11b81-the-llama_kv_cache_seq_rm-approach">11b.8.1 The <code>llama_kv_cache_seq_rm</code> approach<a class="headerlink" href="#11b81-the-llama_kv_cache_seq_rm-approach" title="Permanent link">&para;</a></h3>
+<p>llama.cpp takes a simpler, CPU-friendly approach to KV cache management.
+The core function is <code>llama_kv_cache_seq_rm</code> (llama.cpp source:
+<code>src/llama.cpp</code>, function <code>llama_kv_cache_seq_rm</code>):</p>
+<div class="language-c highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1">// Remove tokens in the range [p0, p1) from sequence seq_id&#39;s KV cache.</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="c1">// If p0 == -1, remove from beginning.</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="c1">// If p1 == -1, remove to end.</span>
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="kt">bool</span><span class="w"> </span><span class="nf">llama_kv_cache_seq_rm</span><span class="p">(</span>
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="w">        </span><span class="k">struct</span><span class="w"> </span><span class="nc">llama_context</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">ctx</span><span class="p">,</span>
+</span><span id="__span-15-6"><a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="w">                   </span><span class="n">llama_seq_id</span><span class="w">   </span><span class="n">seq_id</span><span class="p">,</span>
+</span><span id="__span-15-7"><a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="w">                   </span><span class="n">llama_pos</span><span class="w">      </span><span class="n">p0</span><span class="p">,</span>
+</span><span id="__span-15-8"><a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="w">                   </span><span class="n">llama_pos</span><span class="w">      </span><span class="n">p1</span><span class="p">);</span>
+</span></code></pre></div>
+<p>After removal, the positions are physically compacted by <code>llama_kv_cache_seq_add</code>:</p>
+<div class="language-c highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1">// Shift all positions in [p0, p1) by delta.</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="c1">// Used after seq_rm to close the gap left by removed tokens.</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="kt">bool</span><span class="w"> </span><span class="nf">llama_kv_cache_seq_add</span><span class="p">(</span>
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">        </span><span class="k">struct</span><span class="w"> </span><span class="nc">llama_context</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">ctx</span><span class="p">,</span>
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="w">                   </span><span class="n">llama_seq_id</span><span class="w">   </span><span class="n">seq_id</span><span class="p">,</span>
+</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="w">                   </span><span class="n">llama_pos</span><span class="w">      </span><span class="n">p0</span><span class="p">,</span>
+</span><span id="__span-16-7"><a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="w">                   </span><span class="n">llama_pos</span><span class="w">      </span><span class="n">p1</span><span class="p">,</span>
+</span><span id="__span-16-8"><a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="w">                   </span><span class="n">llama_pos</span><span class="w">      </span><span class="n">delta</span><span class="p">);</span>
+</span></code></pre></div>
+<h3 id="11b82-the-sliding-window-pattern">11b.8.2 The sliding window pattern<a class="headerlink" href="#11b82-the-sliding-window-pattern" title="Permanent link">&para;</a></h3>
+<p>The most common pattern in llama.cpp long-context handling is a <strong>sliding
+window</strong> that keeps the first A tokens (sinks) and the last W tokens (recent):</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>LLAMA.CPP SLIDING WINDOW KV EVICTION
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>──────────────────────────────────────────────────────────────────────
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>
+</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a> Context length:  n_ctx = 2048  (hard limit)
+</span><span id="__span-17-5"><a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a> Sink window:     n_keep = 4    (always kept)
+</span><span id="__span-17-6"><a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a> Full context:    current_length = 2048  (at capacity)
+</span><span id="__span-17-7"><a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a> New token to add: position 2048
+</span><span id="__span-17-8"><a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a>
+</span><span id="__span-17-9"><a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a> Problem: cannot write KV at position 2048 (out of bounds)
+</span><span id="__span-17-10"><a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a>
+</span><span id="__span-17-11"><a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a> Solution (the &quot;context shift&quot;):
+</span><span id="__span-17-12"><a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a>
+</span><span id="__span-17-13"><a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a> Step 1 — Remove the &quot;middle&quot; tokens:
+</span><span id="__span-17-14"><a id="__codelineno-17-14" name="__codelineno-17-14" href="#__codelineno-17-14"></a>   llama_kv_cache_seq_rm(ctx, 0, n_keep, n_keep + n_discard)
+</span><span id="__span-17-15"><a id="__codelineno-17-15" name="__codelineno-17-15" href="#__codelineno-17-15"></a>   where n_discard = n_ctx / 2  (discard oldest half of non-sink tokens)
+</span><span id="__span-17-16"><a id="__codelineno-17-16" name="__codelineno-17-16" href="#__codelineno-17-16"></a>
+</span><span id="__span-17-17"><a id="__codelineno-17-17" name="__codelineno-17-17" href="#__codelineno-17-17"></a> Step 2 — Shift remaining tokens left:
+</span><span id="__span-17-18"><a id="__codelineno-17-18" name="__codelineno-17-18" href="#__codelineno-17-18"></a>   llama_kv_cache_seq_add(ctx, 0, n_keep + n_discard, -1, -n_discard)
+</span><span id="__span-17-19"><a id="__codelineno-17-19" name="__codelineno-17-19" href="#__codelineno-17-19"></a>   (move positions [n_keep+n_discard .. end] left by n_discard steps)
+</span><span id="__span-17-20"><a id="__codelineno-17-20" name="__codelineno-17-20" href="#__codelineno-17-20"></a>
+</span><span id="__span-17-21"><a id="__codelineno-17-21" name="__codelineno-17-21" href="#__codelineno-17-21"></a> Before shift:
+</span><span id="__span-17-22"><a id="__codelineno-17-22" name="__codelineno-17-22" href="#__codelineno-17-22"></a>   [0 1 2 3][4 5 6 7 ... 1027][1028 1029 ... 2047]
+</span><span id="__span-17-23"><a id="__codelineno-17-23" name="__codelineno-17-23" href="#__codelineno-17-23"></a>    ↑sinks↑   ← discarded →    ←   kept recent   →
+</span><span id="__span-17-24"><a id="__codelineno-17-24" name="__codelineno-17-24" href="#__codelineno-17-24"></a>
+</span><span id="__span-17-25"><a id="__codelineno-17-25" name="__codelineno-17-25" href="#__codelineno-17-25"></a> After shift:
+</span><span id="__span-17-26"><a id="__codelineno-17-26" name="__codelineno-17-26" href="#__codelineno-17-26"></a>   [0 1 2 3][1028 1029 ... 2047]
+</span><span id="__span-17-27"><a id="__codelineno-17-27" name="__codelineno-17-27" href="#__codelineno-17-27"></a>    ↑sinks↑   ← compacted ────→
+</span><span id="__span-17-28"><a id="__codelineno-17-28" name="__codelineno-17-28" href="#__codelineno-17-28"></a>
+</span><span id="__span-17-29"><a id="__codelineno-17-29" name="__codelineno-17-29" href="#__codelineno-17-29"></a> New position available: 1028 (room for n_discard new tokens)
+</span></code></pre></div>
+<h3 id="11b83-performance-implications">11b.8.3 Performance implications<a class="headerlink" href="#11b83-performance-implications" title="Permanent link">&para;</a></h3>
+<p>The <code>seq_rm</code> + <code>seq_add</code> sequence involves:</p>
+<ol>
+<li>Zeroing out removed positions in the KV cache tensors.</li>
+<li>Copying remaining KV data forward in memory (or updating position
+   embeddings via <code>seq_add</code>).</li>
+</ol>
+<p>For RoPE-based models, <code>seq_add</code> modifies the stored positions to reflect
+the shift, and the attention kernel uses these updated positions for RoPE
+computation.  This is O(N · d_head) memory bandwidth — cheap relative to
+a forward pass, but non-trivial at N = 128K.</p>
+<p><code>[COMMON TRAP]</code> The model was never trained on sequences where the "first"
+token after a context shift has a different position index than it was
+originally assigned.  Position embeddings encode absolute position;
+after a shift, position 1028 is now at cache slot 4, which the model
+perceives as "close to position 4."  Quality can degrade on
+position-sensitive tasks (e.g., "what was the 500th word you mentioned?").</p>
+<h3 id="11b84-llamacpp-configuration-flags">11b.8.4 llama.cpp configuration flags<a class="headerlink" href="#11b84-llamacpp-configuration-flags" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>LLAMA.CPP FLAGS FOR KV MANAGEMENT
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>──────────────────────────────────────────────────────────────────────
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>
+</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>Flag                    Effect
+</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>──────────────────────────────────────────────────────────────────────
+</span><span id="__span-18-6"><a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>--ctx-size N            Sets n_ctx (KV cache capacity in tokens)
+</span><span id="__span-18-7"><a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a>-n N / --n-predict N    Stops before overflow without explicit eviction
+</span><span id="__span-18-8"><a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a>--keep N                In llama-server/main, keep first N tokens
+</span><span id="__span-18-9"><a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a>                        as sinks before context shift
+</span><span id="__span-18-10"><a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a>--cache-type-k TYPE     KV key precision: f16, q8_0, q4_0, q4_1
+</span><span id="__span-18-11"><a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a>--cache-type-v TYPE     KV value precision (same options)
+</span><span id="__span-18-12"><a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a>--defrag-thold F        Trigger KV defragmentation when fragmentation
+</span><span id="__span-18-13"><a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a>                        exceeds fraction F (default 0.1)
+</span><span id="__span-18-14"><a id="__codelineno-18-14" name="__codelineno-18-14" href="#__codelineno-18-14"></a>──────────────────────────────────────────────────────────────────────
+</span><span id="__span-18-15"><a id="__codelineno-18-15" name="__codelineno-18-15" href="#__codelineno-18-15"></a>
+</span><span id="__span-18-16"><a id="__codelineno-18-16" name="__codelineno-18-16" href="#__codelineno-18-16"></a>Quantizing the KV cache (--cache-type-k q8_0 --cache-type-v q8_0)
+</span><span id="__span-18-17"><a id="__codelineno-18-17" name="__codelineno-18-17" href="#__codelineno-18-17"></a>reduces memory by ~2× at the cost of a small quality penalty.
+</span><span id="__span-18-18"><a id="__codelineno-18-18" name="__codelineno-18-18" href="#__codelineno-18-18"></a>Combined with H2O-style eviction, this is the recommended approach
+</span><span id="__span-18-19"><a id="__codelineno-18-19" name="__codelineno-18-19" href="#__codelineno-18-19"></a>for long-context deployment on memory-constrained hardware.
+</span></code></pre></div>
+<hr />
+<h2 id="chapter-summary">Chapter Summary<a class="headerlink" href="#chapter-summary" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Concept</th>
+<th>Key Takeaway</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Full cache problem</td>
+<td>At 128K+ context, cache overflow is the default, not an edge case</td>
+</tr>
+<tr>
+<td>Attention sinks</td>
+<td>First 4 tokens absorb disproportionate attention; evicting them breaks the model</td>
+</tr>
+<tr>
+<td>H2O eviction</td>
+<td>Accumulate attention scores; evict lowest-scoring non-sink tokens</td>
+</tr>
+<tr>
+<td>SnapKV compression</td>
+<td>Use observation-window attention to identify important prompt tokens; pool nearby keys</td>
+</tr>
+<tr>
+<td>CaM merge-at-write</td>
+<td>Merge new tokens with similar cached keys, keeping the cache permanently smaller</td>
+</tr>
+<tr>
+<td>Accuracy-memory curve</td>
+<td>~60% KV budget retains quality within 1% perplexity on most tasks</td>
+</tr>
+<tr>
+<td>vLLM integration</td>
+<td>Eviction hooks into <code>BlockSpaceManager</code> at block granularity; token-level requires kernel support</td>
+</tr>
+<tr>
+<td>llama.cpp shifting</td>
+<td><code>seq_rm</code> + <code>seq_add</code> implements sliding-window eviction; cheap but position-embedding aware</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="self-check-questions">Self-Check Questions<a class="headerlink" href="#self-check-questions" title="Permanent link">&para;</a></h2>
+<p><strong>Q1 [FOUNDATIONAL]</strong> — A model is processing a 100 K-token document and the
+KV cache is full at 64 K slots.  Without any eviction, what happens when the
+scheduler tries to decode the next token?  Name two safe strategies and one
+unsafe strategy the serving system might use.</p>
+<p><strong>Q2 [FOUNDATIONAL]</strong> — Explain in one paragraph why the first 4 tokens of a
+sequence should almost always be retained during eviction, even if their
+accumulated attention score is low.  What property of the softmax function
+is responsible?</p>
+<p><strong>Q3 [DEEP DIVE]</strong> — In H2O, should you use total accumulated attention score
+or a recency-weighted (exponentially decayed) score?  Describe a task where
+each choice is clearly better.</p>
+<p><strong>Q4 [DEEP DIVE]</strong> — SnapKV uses the last W tokens of the prompt as an
+"observation window" to determine which earlier tokens to keep.  Why is this
+choice better than using a random window?  What type of task would break this
+assumption?</p>
+<p><strong>Q5 [DEEP DIVE]</strong> — A vLLM deployment has block_size=16 and wants to
+implement H2O.  A sequence has 8 blocks.  Blocks 3, 5, and 7 have the
+three lowest block-level importance scores.  If the scheduler must free
+exactly 2 blocks to accommodate a new sequence, which blocks should it
+evict, and what must it do about the block table to maintain a valid
+attention computation for the surviving sequence?</p>
+<hr />
+<p><em>End of Chapter 11.5</em></p>
+<hr />
+<h2 id="worked-solutions">Worked Solutions<a class="headerlink" href="#worked-solutions" title="Permanent link">&para;</a></h2>
+<hr />
+<h3 id="solution-1-100k-token-document-kv-cache-full-at-64k-slots">Solution 1 — 100K-token document, KV cache full at 64K slots<a class="headerlink" href="#solution-1-100k-token-document-kv-cache-full-at-64k-slots" title="Permanent link">&para;</a></h3>
+<p><strong>What we need:</strong> What happens at the 64K limit, two safe strategies, one unsafe.</p>
+<p><strong>What happens:</strong></p>
+<p>The scheduler attempts to allocate a new KV block for the next decode token but finds the block pool exhausted. The model cannot proceed without evicting something.</p>
+<p><strong>Safe Strategy 1 — Sliding window eviction (StreamingLLM / attention sink).</strong></p>
+<p>Keep the first 4 tokens (attention sinks) permanently. Evict the oldest non-sink tokens (e.g., tokens 5 through 4,097) to make room for new tokens. The model always has access to:</p>
+<ul>
+<li>The attention sinks (first 4 tokens)</li>
+<li>The most recent W tokens (configurable window size)</li>
+</ul>
+<p>This is safe because: LLMs can generate coherent text using local context + attention sinks. The evicted middle tokens are "forgotten" — the model cannot refer back to them, but the output remains locally coherent.</p>
+<p><strong>Safe Strategy 2 — Importance-based eviction (H2O/SnapKV).</strong></p>
+<p>Compute accumulated attention scores for each token across all recent steps. Evict the tokens with the lowest scores — these are the tokens the model rarely attends to and likely isn't using.</p>
+<p>This is safe because: the retained tokens are exactly those the model has been drawing information from, making the eviction minimally harmful to output quality.</p>
+<p><strong>Unsafe Strategy — Random eviction.</strong></p>
+<p>Randomly select tokens to evict regardless of their attention scores or position.</p>
+<p>This is unsafe because: critical factual context (a number, name, or clause introduced 20,000 tokens ago) might be the randomly evicted token. The model's output could become factually wrong in ways that are hard to detect.</p>
+<hr />
+<h3 id="solution-2-why-first-4-tokens-survive-eviction-despite-low-attention-scores">Solution 2 — Why first 4 tokens survive eviction despite low attention scores<a class="headerlink" href="#solution-2-why-first-4-tokens-survive-eviction-despite-low-attention-scores" title="Permanent link">&para;</a></h3>
+<p><strong>The attention sink phenomenon:</strong></p>
+<p>During softmax computation, the denominator must be nonzero. If all the "meaningful" tokens have very low logit scores (e.g., they are all irrelevant to the current generation step), the softmax still must sum to 1. Probability mass flows to <em>somewhere</em> — and the model learns to park this "nowhere to go" probability mass on early tokens that are syntactically simple and abundant (articles, punctuation, BOS tokens).</p>
+<p><strong>The softmax property responsible:</strong></p>
+<p>Softmax is a "soft argmax" — it produces a proper probability distribution that sums to 1 regardless of the input values. There is no "abstain" option. When no attended token is genuinely relevant, the model distributes probability across all positions, but the learned attention patterns often concentrate this default probability on early tokens (especially the first token or BOS).</p>
+<p><strong>Mathematical consequence:</strong></p>
+<p>If you evict these early tokens, the accumulated denominator in the online softmax update becomes wrong — partial sums that were computed with the early tokens' contributions are now invalid. Re-running attention without those tokens produces numerically different (and usually worse) outputs even for positions that never semantically needed those early tokens.</p>
+<hr />
+<h3 id="solution-3-h2o-total-accumulated-score-vs-recency-weighted-score">Solution 3 — H2O: total accumulated score vs recency-weighted score<a class="headerlink" href="#solution-3-h2o-total-accumulated-score-vs-recency-weighted-score" title="Permanent link">&para;</a></h3>
+<p><strong>Total accumulated score — better for:</strong></p>
+<p><strong>Factual document QA.</strong> A user asks "What was the revenue in Q1?" about a 100K-token annual report. The Q1 revenue figure appears at token 500 and is heavily attended when generating the answer — regardless of when the question is asked. Its total accumulated score is high, so it's retained. Recency weighting would decay this old-but-critical fact away.</p>
+<p><strong>Recency-weighted score — better for:</strong></p>
+<p><strong>Multi-turn conversational chat.</strong> A user's emotional state in turn 2 (tokens 50–200) is largely irrelevant 30 turns later. Recency weighting correctly deprioritizes this stale context. Total accumulated score would retain it (it received high attention in early turns) even when it's no longer useful.</p>
+<p><strong>Design principle:</strong></p>
+<p>Use total accumulated score for <strong>reference-heavy workloads</strong> (code review, document QA, contract analysis) and recency-weighted score for <strong>conversational workloads</strong> (chatbots, assistants, interactive tutors).</p>
+<hr />
+<h3 id="solution-4-snapkv-why-the-observation-window-works-and-what-breaks-it">Solution 4 — SnapKV: why the observation window works, and what breaks it<a class="headerlink" href="#solution-4-snapkv-why-the-observation-window-works-and-what-breaks-it" title="Permanent link">&para;</a></h3>
+<p><strong>Why the observation window is effective:</strong></p>
+<p>The last W tokens of the prompt are what the model "has in mind" just before generating output. The tokens they attend to from the earlier context are exactly the tokens needed for the next generation step. Using these W tokens as the observation window captures the model's current information needs.</p>
+<p>Compared to a random window (tokens 1,000–2,000 from a 50,000-token prompt), the last W tokens are:</p>
+<ol>
+<li><strong>Semantically relevant:</strong> they contain the question, instruction, or continuation cue</li>
+<li><strong>Causally connected:</strong> they causally depend on whatever context they attended to</li>
+<li><strong>Forward-looking:</strong> their attention weights predict what future decode steps will need</li>
+</ol>
+<p><strong>Task that breaks this assumption:</strong></p>
+<p><strong>Document summarization where the key information is in the beginning or middle.</strong> If the user asks "summarize this document" and appends the document, the last W tokens of the prompt are the end of the document — which may be less important than the beginning (executive summary, abstract, key findings). SnapKV's window would incorrectly deprioritize the most information-dense early sections.</p>
+<p>Similarly, <strong>retrieval-augmented generation (RAG)</strong> with multiple retrieved chunks: if the most relevant chunk is in the middle of the prompt, the end-of-prompt window misses it.</p>
+<hr />
+<h3 id="solution-5-which-2-of-8-blocks-to-evict-h2o-blocks-357-are-lowest">Solution 5 — Which 2 of 8 blocks to evict (H2O, blocks 3/5/7 are lowest)<a class="headerlink" href="#solution-5-which-2-of-8-blocks-to-evict-h2o-blocks-357-are-lowest" title="Permanent link">&para;</a></h3>
+<p><strong>Setup:</strong> 8 blocks total, blocks 3, 5, and 7 have the three lowest importance scores. Must free exactly 2 blocks.</p>
+<p><strong>Step 1 — Rank all blocks by importance.</strong></p>
+<p>Given: blocks 3, 5, 7 are the three least important. The two absolute least important are blocks 3 and 5 (the bottom 2 of the bottom 3, assuming 3 &lt; 5 &lt; 7 by rank).</p>
+<p><strong>Step 2 — Evict blocks 3 and 5.</strong></p>
+<p>Evicting the two lowest-scoring blocks minimizes expected quality degradation. Block 7 (the third-lowest) is retained, providing a small safety margin.</p>
+<p><strong>Step 3 — Caveats.</strong></p>
+<ul>
+<li>
+<p>Check <strong>block contiguity:</strong> if blocks 3 and 5 are adjacent in the block table, their eviction might orphan block 4 from the active generation path (depending on the attention implementation). If block-level contiguity is required, the scheduler should prefer evicting contiguous low-importance blocks.</p>
+</li>
+<li>
+<p>Check <strong>attention sink protection:</strong> if block 0 contains the first 16 tokens (attention sinks), it must never be evicted regardless of its importance score. In this case, block 0 is excluded from the candidate pool entirely.</p>
+</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="chapter11.html" class="md-footer__link md-footer__link--prev" aria-label="Previous: Ch 11: Prefill, Chunked Prefill, and Prompt Caching">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Ch 11: Prefill, Chunked Prefill, and Prompt Caching
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="chapter11c.html" class="md-footer__link md-footer__link--next" aria-label="Next: Ch 11.6: RadixAttention and Prefix Caching Deep Dive">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Ch 11.6: RadixAttention and Prefix Caching Deep Dive
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "navigation.footer", "navigation.indexes", "navigation.prune", "search.highlight", "search.suggest", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="../javascripts/mathjax.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>

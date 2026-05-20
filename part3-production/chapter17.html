@@ -1,0 +1,6767 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Practitioner's Deep Guide to LLM Inference">
+      
+      
+        <meta name="author" content="Oluwaseyi Awoga, written with AI assistance">
+      
+      
+      
+        <link rel="prev" href="chapter16.html">
+      
+      
+        <link rel="next" href="chapter18.html">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Ch 17: Benchmarking - Close to the Metal: LLM Inference from First Principles</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#chapter-17-benchmarking-fair-comparisons-between-engines" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../index.html" title="Close to the Metal: LLM Inference from First Principles" class="md-header__button md-logo" aria-label="Close to the Metal: LLM Inference from First Principles" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Close to the Metal: LLM Inference from First Principles
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Ch 17: Benchmarking
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../index.html" title="Close to the Metal: LLM Inference from First Principles" class="md-nav__button md-logo" aria-label="Close to the Metal: LLM Inference from First Principles" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Close to the Metal: LLM Inference from First Principles
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../preface.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Preface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part I — Foundations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part I — Foundations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter01.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 1: Two Engines, One Problem
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter02.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 2: The GPU and CPU Memory Landscapes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter02b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 2.5: GPU Memory Architecture — Registers, Shared Memory, Caches, and Global Memory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter03.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 3: Tokens, Sequences, and the Batch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter03b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 3.5: The Transformer Block
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter04.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 4: Attention Mechanics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter04b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 4.5: Attention Alternatives — Sliding Window, Linear Attention, SSMs, and Mamba
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter05.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 5: Flash Attention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part II — Engine Internals
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part II — Engine Internals
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter06.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 6: PagedAttention and the Block Manager
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter07.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 7: The Scheduler and Request Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter07b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 7.5: Continuous Batching — The Iteration-Level Scheduling Loop
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter08.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 8: Startup and Initialization
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter08b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 8.5: CUDA Graphs — Capture, Replay, and Production Latency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter09.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 9: The Forward Pass — CUDA vs. GGML
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter10.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 10: Quantization Internals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter11.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 11: Prefill, Chunked Prefill, and Prompt Caching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter11b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 11.5: KV Cache Eviction — Attention Sinks, H2O, and SnapKV
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter11c.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 11.6: RadixAttention and Prefix Caching Deep Dive
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter12.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 12: Sampling — From Logits to Tokens
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter12b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 12.5: Structured Generation and Constrained Decoding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter13.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 13: Token Streaming — The Last Mile
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part III — Production
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part III — Production
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="chapter14.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 14: The Eight vLLM Knobs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="chapter15.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 15: Multi-GPU Serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="chapter15b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 15.5: Flash Decoding and Context Parallelism
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="chapter16.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 16: Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 17: Benchmarking
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="chapter17.html" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 17: Benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+  
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-chapter-covers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What This Chapter Covers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#171-what-to-measure-and-what-not-to" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.1 What to Measure — and What Not to
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="17.1 What to Measure — and What Not to">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-five-dimensions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The five dimensions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-not-to-measure-or-report-alone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What not to measure (or report alone)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#172-vllm-benchmark-suite" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.2 vLLM Benchmark Suite
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="17.2 vLLM Benchmark Suite">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#benchmark_throughputpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        benchmark_throughput.py
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#benchmark_latencypy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        benchmark_latency.py
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#running-the-throughput-benchmark-against-a-live-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running the throughput benchmark against a live server
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#173-llama-bench" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.3 llama-bench
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="17.3 llama-bench">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#basic-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Basic usage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#all-flags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        All flags
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reading-llama-bench-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading llama-bench output
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sweeping-batch-sizes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sweeping batch sizes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#174-controlled-comparison-methodology" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.4 Controlled Comparison Methodology
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="17.4 Controlled Comparison Methodology">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-three-rules-of-fair-comparison" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The three rules of fair comparison
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#warmup-requirement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Warmup requirement
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#statistical-rigor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Statistical rigor
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#175-the-performance-crossover-when-each-engine-wins" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.5 The Performance Crossover: When Each Engine Wins
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="17.5 The Performance Crossover: When Each Engine Wins">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#crossover-1-batch-size" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Crossover 1: Batch size
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#crossover-2-apple-silicon" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Crossover 2: Apple Silicon
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#crossover-3-cpu-only-inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Crossover 3: CPU-only inference
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#crossover-4-memory-constrained-devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Crossover 4: Memory-constrained devices
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#summary-crossover-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary crossover table
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#176-ascii-diagram-performance-crossover" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.6 ASCII Diagram: Performance Crossover
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#177-full-results-table-7b-q4-on-rtx-4090" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.7 Full Results Table: 7B Q4 on RTX 4090
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="17.7 Full Results Table: 7B Q4 on RTX 4090">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#methodology" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Methodology
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Results
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cost-efficiency-at-scale-rtx-4090-450-w-tgp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cost efficiency at scale (RTX 4090, 450 W TGP)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#178-benchmarking-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.8 Benchmarking Checklist
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#179-interpreting-your-own-benchmark-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.9 Interpreting Your Own Benchmark Results
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="17.9 Interpreting Your Own Benchmark Results">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-your-numbers-look-better-than-the-table-above" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When your numbers look better than the table above
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-your-numbers-look-worse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When your numbers look worse
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1710-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.10 Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#chapter-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chapter Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#self-check-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Self-Check Questions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worked-solutions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worked Solutions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Worked Solutions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#question-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#question-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#question-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 3
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#question-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 4
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#question-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 5
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="chapter18.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 18: Disaggregated Prefill and Decode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="chapter19.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 19: Kubernetes and KubeRay
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="chapter20.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 20: Cost Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="chapter21.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 21: Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part IV — Advanced Topics
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part IV — Advanced Topics
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter22.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 22: LoRA Serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter23.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 23: Speculative Decoding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter24.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 24: Reasoning Model Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter25.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 25: RL and Serving Policies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter26.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 26: CS336 Alignment Field Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter27.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 27: Long-Context Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter28.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 28: llama.cpp as a Platform
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter29.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 29: Multimodal Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter30.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 30: Semantic Caching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter31.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 31: Model Routing and Cascading
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter32.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 32: Debugging Inference Systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter33.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 33: The Full Engine Landscape — 2026
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter33b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 33.5: Choosing Your Engine — SGLang, TRT-LLM, MLC-LLM, Ollama
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part V — Model Zoo
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part V — Model Zoo
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter34.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 34: DeepSeek — MLA, MoE, FP8
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter35.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 35: Qwen — Multilingual and Long-Context
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter36.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 36: Kimi — Long-Context and Moon-Cache
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter37.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 37: Nemotron and TensorRT-LLM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter38.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 38: The Production Synthesis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter39.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 39: Evaluation and Regression Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter40.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 40: The vLLM V1 Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter41.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 41: Meta Llama 3 — Architecture, Ecosystem, and Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter42.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 42: Phi-4 and Gemma 3 — Small Models, Large Impact
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ⌨ Companion Code
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    ⌨ Companion Code
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_01.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 01 — Two Engines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_02.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 02 — Memory Landscapes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_02b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 2.5 — GPU Memory Architecture (Tiled GEMM Harness)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_03.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 03 — Tokens and Batches
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_03b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 3.5 — The Transformer Block
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_04.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 04 — Attention Mechanics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_04b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 4.5 — Attention Alternatives
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_05.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 05 — Flash Attention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_06.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 06 — PagedAttention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_07.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 07 — The Scheduler
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_07b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 7.5 — Continuous Batching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_08.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 08 — Startup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_08b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 8.5 — CUDA Graphs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_09.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 09 — Forward Pass
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_10.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 10 — Quantization
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_11.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 11 — Prefill and Caching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_11b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 11.5 — KV Cache Eviction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_11c.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 11.6 — RadixAttention and Prefix Caching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_12.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 12 — Sampling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_12b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 12.5 — Structured Generation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_13.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 13 — Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_14.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 14 — vLLM Knobs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_15.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 15 — Multi-GPU
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_15b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 15.5 — Flash Decoding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_16.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 16 — Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_17.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 17 — Benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_18.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 18 — Disaggregated Serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_19.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 19 — Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_20.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 20 — Cost Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_21.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 21 — Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_22.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 22 — LoRA Serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_23.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 23 — Speculative Decoding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_24.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 24 — Reasoning Models
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_25.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 25 — RL Serving Policies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_26.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 26 — Alignment Field Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_27.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 27 — Long-Context
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_28.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 28 — llama.cpp Platform
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_29.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 29 — Multimodal
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_30.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 30 — Semantic Caching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_31.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 31 — Model Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_32.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 32 — Debugging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_33.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 33 — Engine Landscape
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_33b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 33.5 — Engine Selection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_34.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 34 — DeepSeek
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_35.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 35 — Qwen
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_36.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 36 — Kimi
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_37.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 37 — Nemotron
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_38.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 38 — Production Synthesis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_39.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 39 — Evaluation Harness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_40.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 40 — vLLM V1 Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_41.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 41 — Meta Llama 3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_42.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 42 — Phi-4 and Gemma 3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/appendix_l.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code L — CUDA C++ Introduction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/appendix_v.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code V — TurboQuant
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Appendices
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Appendices
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-a.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    A — Mathematical Foundations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-a2.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    A.2 — Tensor Contractions: 2D/3D/5D/ND with CUDA, Triton, CUTLASS, Mojo
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-a3.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    A.3 — The Chain Rule: From Scalars to Transformer Backpropagation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    B — Installation Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-c.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    C — PyTorch for LLM Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-d.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    D — vLLM EngineArgs Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-e.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    E — llama.cpp CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-f.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    F — Production Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-g.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    G — Benchmarking Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-h.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    H — Operational Decision Tree
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-i.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I — C++ Build Patterns
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-j.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    J — libtorch: The C++ API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-k.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    K — std::mdspan for CPU Inference: Multidimensional Views in C++23
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-l.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    L — CUDA C++ Introduction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-m.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    M — Introduction to Triton: Python-Embedded GPU Kernel Programming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-n.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    N — CUTLASS and Tensor Cores: The Compiled Performance Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-o.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    O — Introduction to Mojo: Systems Performance in Python Syntax
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-p.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    P — ROCm and AMD GPU Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-q.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Q — Mobile and Edge Deployment: Android and Apple Silicon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-r.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    R — Edge Inference on Linux SBCs: Raspberry Pi and NVIDIA Jetson
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-s.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    S — CI/CD Pipelines for LLM Inference Systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-t.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    T — Embedding and Reranker Model Serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-u.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    U — Quantization Calibration Workflow: AWQ, GPTQ, FP8, and GGUF
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-v.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    V — TurboQuant
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-w.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    W — Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-x.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    X — References
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-y.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Y — Cerebras WSE-3: Wafer-Scale Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-z.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Z — JAX: XLA-Native Python for LLM Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../appendices/appendix-aa.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AA — Mixture of Experts (MoE): Conditional Computation from First Principles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+  
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-chapter-covers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What This Chapter Covers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#171-what-to-measure-and-what-not-to" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.1 What to Measure — and What Not to
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="17.1 What to Measure — and What Not to">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-five-dimensions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The five dimensions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-not-to-measure-or-report-alone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What not to measure (or report alone)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#172-vllm-benchmark-suite" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.2 vLLM Benchmark Suite
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="17.2 vLLM Benchmark Suite">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#benchmark_throughputpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        benchmark_throughput.py
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#benchmark_latencypy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        benchmark_latency.py
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#running-the-throughput-benchmark-against-a-live-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running the throughput benchmark against a live server
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#173-llama-bench" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.3 llama-bench
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="17.3 llama-bench">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#basic-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Basic usage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#all-flags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        All flags
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reading-llama-bench-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading llama-bench output
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sweeping-batch-sizes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sweeping batch sizes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#174-controlled-comparison-methodology" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.4 Controlled Comparison Methodology
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="17.4 Controlled Comparison Methodology">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-three-rules-of-fair-comparison" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The three rules of fair comparison
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#warmup-requirement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Warmup requirement
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#statistical-rigor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Statistical rigor
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#175-the-performance-crossover-when-each-engine-wins" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.5 The Performance Crossover: When Each Engine Wins
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="17.5 The Performance Crossover: When Each Engine Wins">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#crossover-1-batch-size" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Crossover 1: Batch size
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#crossover-2-apple-silicon" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Crossover 2: Apple Silicon
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#crossover-3-cpu-only-inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Crossover 3: CPU-only inference
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#crossover-4-memory-constrained-devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Crossover 4: Memory-constrained devices
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#summary-crossover-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary crossover table
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#176-ascii-diagram-performance-crossover" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.6 ASCII Diagram: Performance Crossover
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#177-full-results-table-7b-q4-on-rtx-4090" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.7 Full Results Table: 7B Q4 on RTX 4090
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="17.7 Full Results Table: 7B Q4 on RTX 4090">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#methodology" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Methodology
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Results
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cost-efficiency-at-scale-rtx-4090-450-w-tgp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cost efficiency at scale (RTX 4090, 450 W TGP)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#178-benchmarking-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.8 Benchmarking Checklist
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#179-interpreting-your-own-benchmark-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.9 Interpreting Your Own Benchmark Results
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="17.9 Interpreting Your Own Benchmark Results">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-your-numbers-look-better-than-the-table-above" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When your numbers look better than the table above
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-your-numbers-look-worse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When your numbers look worse
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1710-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.10 Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#chapter-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chapter Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#self-check-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Self-Check Questions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worked-solutions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worked Solutions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Worked Solutions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#question-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#question-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#question-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 3
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#question-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 4
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#question-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 5
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="chapter-17-benchmarking-fair-comparisons-between-engines">Chapter 17: Benchmarking — Fair Comparisons Between Engines<a class="headerlink" href="#chapter-17-benchmarking-fair-comparisons-between-engines" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p><strong>"A benchmark without a controlled methodology is marketing. A controlled benchmark without arithmetic is guesswork. Both waste engineering time."</strong></p>
+</blockquote>
+<hr />
+<h2 id="what-this-chapter-covers">What This Chapter Covers<a class="headerlink" href="#what-this-chapter-covers" title="Permanent link">&para;</a></h2>
+<p>vLLM and llama.cpp are designed for different operating points. Comparing them fairly requires measuring the right things under the right conditions. This chapter builds a complete benchmarking methodology: which metrics matter and why, how to run vLLM's built-in benchmark suite, how to interpret llama-bench output, how to construct a controlled comparison that survives peer scrutiny, and the exact conditions under which each engine wins. The chapter closes with a full annotated results table for a 7B Q4 model on an RTX 4090.</p>
+<hr />
+<h2 id="171-what-to-measure-and-what-not-to">17.1 What to Measure — and What Not to<a class="headerlink" href="#171-what-to-measure-and-what-not-to" title="Permanent link">&para;</a></h2>
+<h3 id="the-five-dimensions">The five dimensions<a class="headerlink" href="#the-five-dimensions" title="Permanent link">&para;</a></h3>
+<p>Every LLM inference benchmark should report five independent dimensions. Reporting fewer creates misleading comparisons.</p>
+<p><strong>Dimension 1 — Output throughput (tokens/second)</strong></p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>output_throughput = total_output_tokens / wall_clock_seconds
+</span></code></pre></div>
+<p>The most common headline number. Higher is better. Meaningless without specifying batch size and prompt length distribution.</p>
+<p><strong>Dimension 2 — Time to First Token (TTFT)</strong></p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>TTFT = t_first_output_token − t_request_arrival   (ms)
+</span></code></pre></div>
+<p>Dominated by prefill latency. Critical for interactive use. A system optimized purely for throughput will often have terrible TTFT (batch accumulation delay, no chunked prefill).</p>
+<p><strong>Dimension 3 — Inter-Token Latency (ITL)</strong></p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>ITL = mean(t_token_N − t_token_{N-1})   (ms)
+</span></code></pre></div>
+<p>Determines the "typing speed" of streaming output. Controlled by decode step latency. At batch=1, ITL = decode step time directly.</p>
+<p><strong>Dimension 4 — Peak memory (GB)</strong></p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>peak_memory = max(GPU VRAM used) during benchmark run
+</span></code></pre></div>
+<p>Not the same as model weight size. Includes KV cache, activations, CUDA context. The difference between theoretical and actual memory usage is often 20–40%.</p>
+<p><strong>Dimension 5 — Cost efficiency (tokens/$ or tokens/watt)</strong></p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>cost_efficiency = output_throughput / (GPU_TDP_watts × price_per_watt)
+</span></code></pre></div>
+<p>Often ignored but decisive for production decisions. A 2× faster engine that draws 3× the power is not economical at scale.</p>
+<h3 id="what-not-to-measure-or-report-alone">What not to measure (or report alone)<a class="headerlink" href="#what-not-to-measure-or-report-alone" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>"Responses per second"</strong> without specifying output length — useless. A 10-token response is 100× cheaper than a 1000-token response.</li>
+<li><strong>Single-sample latency</strong> at batch=1 without stating that batch=1 — favors llama.cpp, misrepresents server-class vLLM.</li>
+<li><strong>Theoretical peak FLOPS</strong> — models never achieve this; report measured throughput instead.</li>
+<li><strong>Time to load the model</strong> as part of throughput — warm-up is a one-time cost; benchmarks should exclude it.</li>
+</ul>
+<p><strong>[FOUNDATIONAL]</strong> Always report: model (name + quantization), hardware (GPU model + VRAM), batch size (or concurrency level), prompt length (mean ± std), and output length (mean ± std). A benchmark without all six is incomplete.</p>
+<hr />
+<h2 id="172-vllm-benchmark-suite">17.2 vLLM Benchmark Suite<a class="headerlink" href="#172-vllm-benchmark-suite" title="Permanent link">&para;</a></h2>
+<p>vLLM ships two benchmarking scripts in <code>benchmarks/</code>:</p>
+<h3 id="benchmark_throughputpy">benchmark_throughput.py<a class="headerlink" href="#benchmark_throughputpy" title="Permanent link">&para;</a></h3>
+<p>Measures <strong>offline batch throughput</strong>: all requests submitted simultaneously, wall clock measured until all complete.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>python<span class="w"> </span>benchmarks/benchmark_throughput.py<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span>--model<span class="w"> </span>meta-llama/Meta-Llama-3-8B-Instruct<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span>--dataset<span class="w"> </span>ShareGPT_V3_unfiltered_cleaned_split.json<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span>--num-prompts<span class="w"> </span><span class="m">1000</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span>--max-num-batched-tokens<span class="w"> </span><span class="m">32768</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">  </span>--tensor-parallel-size<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">  </span>--dtype<span class="w"> </span>bfloat16<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">  </span>--output-len<span class="w"> </span><span class="m">512</span>
+</span></code></pre></div>
+<p>Key flags:</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Meaning</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--dataset</code></td>
+<td>Prompt source (ShareGPT JSON or synthetic)</td>
+<td>Use ShareGPT for realistic distribution</td>
+</tr>
+<tr>
+<td><code>--num-prompts</code></td>
+<td>Number of requests in the batch</td>
+<td>≥ 1000 for stable statistics</td>
+</tr>
+<tr>
+<td><code>--output-len</code></td>
+<td>Fixed output length per request</td>
+<td>Use fixed to control output variance</td>
+</tr>
+<tr>
+<td><code>--max-num-batched-tokens</code></td>
+<td>Scheduler token budget</td>
+<td>Match your production config</td>
+</tr>
+<tr>
+<td><code>--tensor-parallel-size</code></td>
+<td>TP degree</td>
+<td>Must match your serve config</td>
+</tr>
+<tr>
+<td><code>--quantization</code></td>
+<td><code>awq</code>, <code>gptq</code>, <code>fp8</code>, or none</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Sample output:</strong></p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Throughput: 1847.3 tokens/s
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>Total time: 277.1 s
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>Requests: 1000
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>Output tokens: 512000
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>Input tokens: 481234 (avg 481 per request)
+</span></code></pre></div>
+<p><strong>What this number means:</strong> 1847 tok/s is the <em>offline batch</em> throughput — all 1000 requests were submitted at once. This is the theoretical upper bound. Online (streaming) throughput at the same concurrency will be similar; single-stream latency will be far worse.</p>
+<h3 id="benchmark_latencypy">benchmark_latency.py<a class="headerlink" href="#benchmark_latencypy" title="Permanent link">&para;</a></h3>
+<p>Measures <strong>per-request latency</strong> at controlled concurrency levels (online mode).</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>python<span class="w"> </span>benchmarks/benchmark_latency.py<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span>--model<span class="w"> </span>meta-llama/Meta-Llama-3-8B-Instruct<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span>--input-len<span class="w"> </span><span class="m">512</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span>--output-len<span class="w"> </span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">  </span>--batch-size<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">  </span>--num-iters<span class="w"> </span><span class="m">100</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">  </span>--dtype<span class="w"> </span>bfloat16
+</span></code></pre></div>
+<p>Key flags:</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--batch-size</code></td>
+<td>Simultaneous requests (not <code>max_num_seqs</code> — this is the client concurrency)</td>
+</tr>
+<tr>
+<td><code>--input-len</code></td>
+<td>Fixed prompt length (synthetic, no dataset needed)</td>
+</tr>
+<tr>
+<td><code>--output-len</code></td>
+<td>Fixed output length</td>
+</tr>
+<tr>
+<td><code>--num-iters</code></td>
+<td>Warmup + measurement iterations</td>
+</tr>
+<tr>
+<td><code>--percentile-metrics</code></td>
+<td>Report P50/P95/P99 in addition to mean</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Sample output (batch=1):</strong></p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Avg latency: 3.82 s
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>P50 latency: 3.79 s
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>P95 latency: 4.12 s
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>P99 latency: 4.38 s
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>Avg TTFT: 0.284 s
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>Avg ITL:  0.012 s
+</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
+</span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>Throughput: 67.0 tokens/s
+</span></code></pre></div>
+<p><strong>[DEEP DIVE]</strong> <code>benchmark_latency.py</code> at <code>--batch-size 1</code> gives the single-stream decode throughput — directly comparable to llama.cpp at <code>--parallel 1</code>. This is the only fair head-to-head point.</p>
+<h3 id="running-the-throughput-benchmark-against-a-live-server">Running the throughput benchmark against a live server<a class="headerlink" href="#running-the-throughput-benchmark-against-a-live-server" title="Permanent link">&para;</a></h3>
+<p>For production-like testing, use the <code>benchmark_serving.py</code> script against a running vLLM server:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># Terminal 1: start server</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>vllm<span class="w"> </span>serve<span class="w"> </span>meta-llama/Meta-Llama-3-8B-Instruct<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c1"># Terminal 2: benchmark</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>python<span class="w"> </span>benchmarks/benchmark_serving.py<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">  </span>--backend<span class="w"> </span>vllm<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="w">  </span>--model<span class="w"> </span>meta-llama/Meta-Llama-3-8B-Instruct<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="w">  </span>--host<span class="w"> </span>localhost<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="w">  </span>--port<span class="w"> </span><span class="m">8000</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="w">  </span>--dataset-name<span class="w"> </span>sharegpt<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="w">  </span>--dataset-path<span class="w"> </span>ShareGPT_V3_unfiltered_cleaned_split.json<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="w">  </span>--num-prompts<span class="w"> </span><span class="m">500</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-9-13"><a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="w">  </span>--request-rate<span class="w"> </span><span class="m">10</span><span class="w">   </span><span class="c1"># requests per second (Poisson arrival)</span>
+</span></code></pre></div>
+<p>The <code>--request-rate</code> flag simulates realistic Poisson inter-arrival times rather than synchronized batch submission. This gives realistic TTFT distributions under load.</p>
+<hr />
+<h2 id="173-llama-bench">17.3 llama-bench<a class="headerlink" href="#173-llama-bench" title="Permanent link">&para;</a></h2>
+<p>llama.cpp ships <code>llama-bench</code>, a purpose-built benchmarking tool.</p>
+<h3 id="basic-usage">Basic usage<a class="headerlink" href="#basic-usage" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Benchmark throughput and latency on a single GPU</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>llama-bench<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span>--model<span class="w"> </span>/models/llama-3-8b-q4_k_m.gguf<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">  </span>--n-prompt<span class="w"> </span><span class="m">512</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">  </span>--n-gen<span class="w"> </span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="w">  </span>--batch-size<span class="w"> </span><span class="m">1</span>,4,16,32<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="w">  </span>--threads<span class="w"> </span><span class="m">8</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="w">  </span>--n-gpu-layers<span class="w"> </span><span class="m">33</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="w">  </span>--repetitions<span class="w"> </span><span class="m">5</span>
+</span></code></pre></div>
+<h3 id="all-flags">All flags<a class="headerlink" href="#all-flags" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Meaning</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--model</code></td>
+<td>Path to GGUF file</td>
+<td>required</td>
+</tr>
+<tr>
+<td><code>--n-prompt</code></td>
+<td>Prompt token count (synthetic)</td>
+<td>512</td>
+</tr>
+<tr>
+<td><code>--n-gen</code></td>
+<td>Tokens to generate</td>
+<td>128</td>
+</tr>
+<tr>
+<td><code>--batch-size</code></td>
+<td>Comma-separated batch sizes to sweep</td>
+<td>512</td>
+</tr>
+<tr>
+<td><code>--threads</code></td>
+<td>CPU threads for non-GPU layers</td>
+<td>system</td>
+</tr>
+<tr>
+<td><code>--n-gpu-layers</code></td>
+<td>Layers offloaded to GPU</td>
+<td>0</td>
+</tr>
+<tr>
+<td><code>--repetitions</code></td>
+<td>Runs per configuration</td>
+<td>5</td>
+</tr>
+<tr>
+<td><code>--output</code></td>
+<td><code>csv</code>, <code>json</code>, <code>markdown</code>, <code>sql</code></td>
+<td>markdown</td>
+</tr>
+<tr>
+<td><code>--verbose-prompt</code></td>
+<td>Print prompt token IDs</td>
+<td>false</td>
+</tr>
+<tr>
+<td><code>--progress</code></td>
+<td>Show progress bar</td>
+<td>false</td>
+</tr>
+</tbody>
+</table>
+<h3 id="reading-llama-bench-output">Reading llama-bench output<a class="headerlink" href="#reading-llama-bench-output" title="Permanent link">&para;</a></h3>
+<p>Default output is a Markdown table:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>| model                          |       size |     params | backend    | ngl |   test |          t/s |
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>| ------------------------------ | ---------: | ---------: | ---------- | --: | -----: | -----------: |
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>| llama 8B Q4_K - Medium         |   4.58 GiB |     8.03 B | CUDA       |  33 |   pp512 |   2012.34 ± 18.2 |
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>| llama 8B Q4_K - Medium         |   4.58 GiB |     8.03 B | CUDA       |  33 |   tg128 |     64.12 ± 0.8 |
+</span></code></pre></div>
+<p>Column meanings:</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>model</code></td>
+<td>Model name and quantization</td>
+</tr>
+<tr>
+<td><code>size</code></td>
+<td>GGUF file size</td>
+</tr>
+<tr>
+<td><code>params</code></td>
+<td>Parameter count</td>
+</tr>
+<tr>
+<td><code>backend</code></td>
+<td>Compute backend (CUDA, Metal, CPU)</td>
+</tr>
+<tr>
+<td><code>ngl</code></td>
+<td>n-gpu-layers value</td>
+</tr>
+<tr>
+<td><code>test</code></td>
+<td><code>pp{N}</code> = prompt processing N tokens; <code>tg{N}</code> = token generation N tokens</td>
+</tr>
+<tr>
+<td><code>t/s</code></td>
+<td>Tokens per second ± std deviation</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Decoding the test names:</strong></p>
+<ul>
+<li><code>pp512</code> = prefill 512 tokens (measures TTFT throughput / prefill speed)</li>
+<li><code>tg128</code> = generate 128 tokens (measures decode throughput = 1/ITL)</li>
+</ul>
+<p>From the example: ITL = 1 / 64.12 = <strong>15.6 ms/token</strong> at batch=1.</p>
+<h3 id="sweeping-batch-sizes">Sweeping batch sizes<a class="headerlink" href="#sweeping-batch-sizes" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>llama-bench<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span>--model<span class="w"> </span>/models/llama-3-8b-q4_k_m.gguf<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">  </span>--n-prompt<span class="w"> </span><span class="m">512</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">  </span>--n-gen<span class="w"> </span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">  </span>--batch-size<span class="w"> </span><span class="m">1</span>,4,8,16,32<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">  </span>--n-gpu-layers<span class="w"> </span><span class="m">33</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="w">  </span>--output<span class="w"> </span>csv
+</span></code></pre></div>
+<p>CSV output for programmatic analysis:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>model,size,params,backend,ngl,test,t/s,t/s_err
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>llama 8B Q4_K - Medium,4.58 GiB,8.03 B,CUDA,33,pp512,2012.34,18.2
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>llama 8B Q4_K - Medium,4.58 GiB,8.03 B,CUDA,33,tg1,64.12,0.8
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>llama 8B Q4_K - Medium,4.58 GiB,8.03 B,CUDA,33,tg4,230.45,2.1
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>llama 8B Q4_K - Medium,4.58 GiB,8.03 B,CUDA,33,tg16,540.12,4.8
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>llama 8B Q4_K - Medium,4.58 GiB,8.03 B,CUDA,33,tg32,780.34,7.2
+</span></code></pre></div>
+<p><strong>[DEEP DIVE]</strong> llama-bench's <code>tg{N}</code> measures token generation for N tokens in sequence, not N parallel sequences. To benchmark parallel decode (<code>--parallel N</code>), you must use llama-server with a concurrent client, not llama-bench directly. This is a critical distinction: llama-bench does not simulate concurrency.</p>
+<hr />
+<h2 id="174-controlled-comparison-methodology">17.4 Controlled Comparison Methodology<a class="headerlink" href="#174-controlled-comparison-methodology" title="Permanent link">&para;</a></h2>
+<h3 id="the-three-rules-of-fair-comparison">The three rules of fair comparison<a class="headerlink" href="#the-three-rules-of-fair-comparison" title="Permanent link">&para;</a></h3>
+<p><strong>Rule 1: Same model, same quantization</strong></p>
+<p>Do not compare vLLM BF16 against llama.cpp Q4. This conflates engine performance with precision difference. Compare:</p>
+<ul>
+<li>vLLM BF16 vs llama.cpp BF16 (GGUF F16 or exllama2 F16)</li>
+<li>vLLM AWQ/GPTQ Q4 vs llama.cpp Q4_K_M</li>
+</ul>
+<p>If you must compare across quantization levels, always state the memory and quality trade-offs explicitly.</p>
+<p><strong>Rule 2: Same hardware, same driver, same CUDA version</strong></p>
+<p>GPU performance varies significantly across CUDA versions. Pin to the same stack:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># Verify before benchmarking</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>nvidia-smi<span class="w">  </span><span class="c1"># shows driver version</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>nvcc<span class="w"> </span>--version<span class="w">  </span><span class="c1"># shows CUDA toolkit</span>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import torch; print(torch.version.cuda)&quot;</span>
+</span></code></pre></div>
+<p><strong>Rule 3: Same prompt distribution</strong></p>
+<p>Prompt length has a first-order effect on both TTFT and throughput. Use the same dataset or the same synthetic distribution. ShareGPT is the standard for "conversational" distribution (mean ~150 tokens prompt, ~300 tokens output).</p>
+<h3 id="warmup-requirement">Warmup requirement<a class="headerlink" href="#warmup-requirement" title="Permanent link">&para;</a></h3>
+<p>Both engines show elevated latency on the first few inferences due to:</p>
+<ul>
+<li>CUDA kernel JIT compilation (cuBLAS heuristics)</li>
+<li>KV cache allocation (vLLM allocates blocks on first use)</li>
+<li>CPU branch predictor warmup (llama.cpp)</li>
+</ul>
+<p>Always discard the first 5–10 iterations:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># vLLM benchmark_latency.py already handles warmup:</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="c1"># --num-iters-warmup 10  (default)</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="c1"># llama-bench: use --repetitions 5+ and discard first run</span>
+</span></code></pre></div>
+<h3 id="statistical-rigor">Statistical rigor<a class="headerlink" href="#statistical-rigor" title="Permanent link">&para;</a></h3>
+<p>Report mean ± standard deviation, and P95. A result with high standard deviation (&gt;5% of mean) indicates thermal throttling, memory pressure, or OS scheduling interference.</p>
+<p><strong>[COMMON TRAP]</strong> Running benchmarks in a shared environment (other processes using GPU or memory) produces inflated and variable latency numbers. For reproducible benchmarks: kill all other GPU processes, disable OS background tasks, and set GPU clocks to fixed frequency:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># Fix GPU clock to prevent thermal-induced frequency scaling</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>sudo<span class="w"> </span>nvidia-smi<span class="w"> </span>--lock-gpu-clocks<span class="o">=</span><span class="m">1410</span>,1410<span class="w">   </span><span class="c1"># base clock for A100-80</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>sudo<span class="w"> </span>nvidia-smi<span class="w"> </span>--lock-memory-clocks<span class="o">=</span><span class="m">1215</span><span class="w">      </span><span class="c1"># HBM clock</span>
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="c1"># After benchmarking</span>
+</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>sudo<span class="w"> </span>nvidia-smi<span class="w"> </span>--reset-gpu-clocks
+</span><span id="__span-16-7"><a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>sudo<span class="w"> </span>nvidia-smi<span class="w"> </span>--reset-memory-clocks
+</span></code></pre></div>
+<hr />
+<h2 id="175-the-performance-crossover-when-each-engine-wins">17.5 The Performance Crossover: When Each Engine Wins<a class="headerlink" href="#175-the-performance-crossover-when-each-engine-wins" title="Permanent link">&para;</a></h2>
+<p>The fundamental difference is architectural:</p>
+<ul>
+<li><strong>llama.cpp</strong> is optimized for single-sequence, low-latency, CPU+GPU hybrid inference with quantised weights</li>
+<li><strong>vLLM</strong> is optimized for high-concurrency server inference with dynamic batching and continuous scheduling</li>
+</ul>
+<p>These different design points produce predictable crossovers.</p>
+<h3 id="crossover-1-batch-size">Crossover 1: Batch size<a class="headerlink" href="#crossover-1-batch-size" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>At batch=1:
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>  llama.cpp advantage: no scheduler overhead, no Python interpreter on critical path,
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>                       hand-tuned CUDA kernels for single-sequence attention,
+</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>                       direct GGUF dequant kernels
+</span><span id="__span-17-5"><a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>
+</span><span id="__span-17-6"><a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>At batch≥8:
+</span><span id="__span-17-7"><a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>  vLLM advantage: continuous batching fills the GPU, PagedAttention prevents
+</span><span id="__span-17-8"><a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a>                  fragmentation, dynamic scheduling maximizes GPU utilization
+</span></code></pre></div>
+<p>The exact crossover depends on hardware. On an RTX 4090 (consumer GPU, PCIe, 24 GB):</p>
+<ul>
+<li>batch=1: llama.cpp wins by 10–30% (lower overhead)</li>
+<li>batch=4: roughly equal</li>
+<li>batch≥8: vLLM wins by 20–50% (batching efficiency)</li>
+</ul>
+<p>On an A100-80 or H100 (data center GPU, NVLink, optimized NCCL):</p>
+<ul>
+<li>batch=1: roughly equal (FlashAttention quality similar)</li>
+<li>batch≥4: vLLM wins by 40–100% (compute saturation)</li>
+</ul>
+<h3 id="crossover-2-apple-silicon">Crossover 2: Apple Silicon<a class="headerlink" href="#crossover-2-apple-silicon" title="Permanent link">&para;</a></h3>
+<p>llama.cpp is the clear winner on Apple Silicon (M1/M2/M3/M4):</p>
+<ul>
+<li>Metal backend with hand-tuned kernels</li>
+<li>Unified memory architecture (no PCIe transfer between CPU and GPU memory)</li>
+<li>vLLM has no first-party Apple Silicon support</li>
+</ul>
+<p>Apple M2 Ultra (192 GB unified memory, 800 GB/s bandwidth) achieves ~70 tok/s decode on a 7B Q4 model with llama.cpp — competitive with a single A100-80 for single-stream decode.</p>
+<h3 id="crossover-3-cpu-only-inference">Crossover 3: CPU-only inference<a class="headerlink" href="#crossover-3-cpu-only-inference" title="Permanent link">&para;</a></h3>
+<p>llama.cpp supports highly optimized AVX-512 / NEON CPU kernels. vLLM requires CUDA. For CPU-only deployment (cloud instances without GPUs):</p>
+<ul>
+<li>llama.cpp: achieves 5–15 tok/s on a 7B Q4 model on a 16-core x86 server</li>
+<li>vLLM: not usable without GPU (CPU mode experimental, unmaintained)</li>
+</ul>
+<h3 id="crossover-4-memory-constrained-devices">Crossover 4: Memory-constrained devices<a class="headerlink" href="#crossover-4-memory-constrained-devices" title="Permanent link">&para;</a></h3>
+<p>A 7B Q4 model is ~4.5 GB. On a device with 8 GB of VRAM (e.g., laptop GPU, RTX 3050):</p>
+<ul>
+<li>llama.cpp: fits with 3.5 GB left for KV cache; works well</li>
+<li>vLLM: fits but the KV cache is tiny; degrades at any concurrency above 1</li>
+</ul>
+<h3 id="summary-crossover-table">Summary crossover table<a class="headerlink" href="#summary-crossover-table" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>                    llama.cpp wins          vLLM wins
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>─────────────────────────────────────────────────────────
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>Batch size          = 1                     ≥ 8
+</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>Concurrency         1 user                  ≥ 4 users
+</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>Hardware            Apple Silicon, CPU      A100, H100
+</span><span id="__span-18-6"><a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>Memory              &lt; 16 GB VRAM            ≥ 40 GB VRAM
+</span><span id="__span-18-7"><a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a>Deployment          Edge / local            Server / cloud
+</span><span id="__span-18-8"><a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a>quantization        Q4_K_M native GGUF      AWQ/GPTQ native
+</span><span id="__span-18-9"><a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a>Streaming           Single stream           Many streams
+</span><span id="__span-18-10"><a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a>Latency priority    Ultra-low (&lt; 100ms)     P95 SLA at scale
+</span></code></pre></div>
+<hr />
+<h2 id="176-ascii-diagram-performance-crossover">17.6 ASCII Diagram: Performance Crossover<a class="headerlink" href="#176-ascii-diagram-performance-crossover" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>  Output throughput (tok/s) vs batch size — 7B Q4, RTX 4090
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>  2000 │
+</span><span id="__span-19-4"><a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>       │                                              ┌── vLLM
+</span><span id="__span-19-5"><a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>  1500 │                                        ╔═════╝
+</span><span id="__span-19-6"><a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>       │                                   ╔════╝
+</span><span id="__span-19-7"><a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a>  1000 │                               ════╝
+</span><span id="__span-19-8"><a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a>       │                          ════╝     ╔══ crossover ≈ batch 4–6
+</span><span id="__span-19-9"><a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a>   750 │ llama.cpp ══════════════╝         ╔╝
+</span><span id="__span-19-10"><a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a>       │              ════════════════════╝
+</span><span id="__span-19-11"><a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a>   500 │         ════╝
+</span><span id="__span-19-12"><a id="__codelineno-19-12" name="__codelineno-19-12" href="#__codelineno-19-12"></a>       │    ════╝
+</span><span id="__span-19-13"><a id="__codelineno-19-13" name="__codelineno-19-13" href="#__codelineno-19-13"></a>   250 │
+</span><span id="__span-19-14"><a id="__codelineno-19-14" name="__codelineno-19-14" href="#__codelineno-19-14"></a>       └─────────────────────────────────────────────
+</span><span id="__span-19-15"><a id="__codelineno-19-15" name="__codelineno-19-15" href="#__codelineno-19-15"></a>         1       4       8      16      32      64
+</span><span id="__span-19-16"><a id="__codelineno-19-16" name="__codelineno-19-16" href="#__codelineno-19-16"></a>                         Batch size
+</span></code></pre></div>
+<hr />
+<h2 id="177-full-results-table-7b-q4-on-rtx-4090">17.7 Full Results Table: 7B Q4 on RTX 4090<a class="headerlink" href="#177-full-results-table-7b-q4-on-rtx-4090" title="Permanent link">&para;</a></h2>
+<p>The following table represents typical measured values for a Llama-3-8B-equivalent Q4_K_M model on a single RTX 4090 (24 GB VRAM, 1008 GB/s bandwidth, 82.6 TFLOPS BF16). All results at fixed input=512 tokens, output=256 tokens.</p>
+<h3 id="methodology">Methodology<a class="headerlink" href="#methodology" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="c1"># llama.cpp setup</span>
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/ggerganov/llama.cpp
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>cmake<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-DLLAMA_CUDA<span class="o">=</span>ON<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>--config<span class="w"> </span>Release
+</span><span id="__span-20-4"><a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>./build/bin/llama-bench<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-20-5"><a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="w">  </span>--model<span class="w"> </span>llama-3-8b-q4_k_m.gguf<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-20-6"><a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="w">  </span>--n-gpu-layers<span class="w"> </span><span class="m">33</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-20-7"><a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="w">  </span>--n-prompt<span class="w"> </span><span class="m">512</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-20-8"><a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a><span class="w">  </span>--n-gen<span class="w"> </span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-20-9"><a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a><span class="w">  </span>--batch-size<span class="w"> </span><span class="m">1</span>,4,16,32<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-20-10"><a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a><span class="w">  </span>--repetitions<span class="w"> </span><span class="m">5</span>
+</span><span id="__span-20-11"><a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a>
+</span><span id="__span-20-12"><a id="__codelineno-20-12" name="__codelineno-20-12" href="#__codelineno-20-12"></a><span class="c1"># vLLM setup (same machine, same model via GGUF conversion or native HF)</span>
+</span><span id="__span-20-13"><a id="__codelineno-20-13" name="__codelineno-20-13" href="#__codelineno-20-13"></a>pip<span class="w"> </span>install<span class="w"> </span>vllm
+</span><span id="__span-20-14"><a id="__codelineno-20-14" name="__codelineno-20-14" href="#__codelineno-20-14"></a>python<span class="w"> </span>benchmarks/benchmark_latency.py<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-20-15"><a id="__codelineno-20-15" name="__codelineno-20-15" href="#__codelineno-20-15"></a><span class="w">  </span>--model<span class="w"> </span>meta-llama/Meta-Llama-3-8B-Instruct<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-20-16"><a id="__codelineno-20-16" name="__codelineno-20-16" href="#__codelineno-20-16"></a><span class="w">  </span>--quantization<span class="w"> </span>awq<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-20-17"><a id="__codelineno-20-17" name="__codelineno-20-17" href="#__codelineno-20-17"></a><span class="w">  </span>--input-len<span class="w"> </span><span class="m">512</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-20-18"><a id="__codelineno-20-18" name="__codelineno-20-18" href="#__codelineno-20-18"></a><span class="w">  </span>--output-len<span class="w"> </span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-20-19"><a id="__codelineno-20-19" name="__codelineno-20-19" href="#__codelineno-20-19"></a><span class="w">  </span>--batch-size<span class="w"> </span><span class="m">1</span>,4,16,32<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-20-20"><a id="__codelineno-20-20" name="__codelineno-20-20" href="#__codelineno-20-20"></a><span class="w">  </span>--num-iters<span class="w"> </span><span class="m">50</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-20-21"><a id="__codelineno-20-21" name="__codelineno-20-21" href="#__codelineno-20-21"></a><span class="w">  </span>--percentile-metrics
+</span></code></pre></div>
+<h3 id="results">Results<a class="headerlink" href="#results" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Batch</th>
+<th>Engine</th>
+<th>Prefill tok/s</th>
+<th>TTFT (ms)</th>
+<th>Decode tok/s</th>
+<th>ITL (ms)</th>
+<th>Peak VRAM (GB)</th>
+<th>Winner</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>llama.cpp</td>
+<td>2,012</td>
+<td>254</td>
+<td>64.1</td>
+<td>15.6</td>
+<td>5.8</td>
+<td>llama.cpp</td>
+</tr>
+<tr>
+<td>1</td>
+<td>vLLM</td>
+<td>1,843</td>
+<td>278</td>
+<td>58.3</td>
+<td>17.2</td>
+<td>9.4</td>
+<td>←</td>
+</tr>
+<tr>
+<td>4</td>
+<td>llama.cpp</td>
+<td>4,210</td>
+<td>121</td>
+<td>230.4</td>
+<td>17.4</td>
+<td>6.2</td>
+<td>≈ tie</td>
+</tr>
+<tr>
+<td>4</td>
+<td>vLLM</td>
+<td>5,890</td>
+<td>87</td>
+<td>218.7</td>
+<td>18.3</td>
+<td>10.1</td>
+<td>←</td>
+</tr>
+<tr>
+<td>16</td>
+<td>llama.cpp</td>
+<td>6,800</td>
+<td>75</td>
+<td>540.1</td>
+<td>29.6</td>
+<td>7.1</td>
+<td>vLLM</td>
+</tr>
+<tr>
+<td>16</td>
+<td>vLLM</td>
+<td>12,340</td>
+<td>41</td>
+<td>892.4</td>
+<td>18.0</td>
+<td>13.7</td>
+<td>←</td>
+</tr>
+<tr>
+<td>32</td>
+<td>llama.cpp</td>
+<td>7,200</td>
+<td>71</td>
+<td>780.3</td>
+<td>41.1</td>
+<td>8.4</td>
+<td>vLLM</td>
+</tr>
+<tr>
+<td>32</td>
+<td>vLLM</td>
+<td>19,870</td>
+<td>26</td>
+<td>1,634.8</td>
+<td>19.6</td>
+<td>18.2</td>
+<td>←</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Observations:</strong></p>
+<ol>
+<li>
+<p><strong>Batch=1 prefill:</strong> llama.cpp wins narrowly (2012 vs 1843 tok/s). vLLM's Python scheduler adds ~24 ms overhead visible in TTFT (278 vs 254 ms).</p>
+</li>
+<li>
+<p><strong>Batch=1 decode:</strong> llama.cpp wins narrowly (64.1 vs 58.3 tok/s). Both engines are bandwidth-bound; llama.cpp's lighter stack gives a ~10% edge.</p>
+</li>
+<li>
+<p><strong>Batch=4 crossover:</strong> vLLM edges ahead on prefill (5890 vs 4210 tok/s) due to batch-GEMM efficiency. Decode is roughly tied.</p>
+</li>
+<li>
+<p><strong>Batch=16:</strong> vLLM decode throughput is 1.65× higher (892 vs 540 tok/s). llama.cpp ITL rises to 29.6 ms (sequential decode within batch); vLLM continuous batching keeps ITL flat at 18 ms.</p>
+</li>
+<li>
+<p><strong>Batch=32:</strong> vLLM is 2.1× faster on decode (1635 vs 780 tok/s). More critically, vLLM ITL (19.6 ms) is flat while llama.cpp ITL (41.1 ms) has doubled — llama.cpp serialises decode within the batch.</p>
+</li>
+<li>
+<p><strong>Memory:</strong> vLLM uses significantly more VRAM at every batch size (9.4 GB vs 5.8 GB at batch=1). The delta is the KV cache reservation. For a 24 GB card, this still leaves adequate headroom, but on 8 GB cards the situation reverses.</p>
+</li>
+</ol>
+<p><strong>[COMMON TRAP]</strong> The llama.cpp "batch size" in llama-bench (<code>--batch-size</code>) controls the <strong>prompt processing batch size</strong> (number of tokens evaluated together in the prefill phase), NOT the number of simultaneous generation sequences. To benchmark parallel generation in llama.cpp, you must use llama-server with <code>--parallel N</code> and a concurrent client. The <code>tg{N}</code> result in llama-bench is always single-sequence decode.</p>
+<h3 id="cost-efficiency-at-scale-rtx-4090-450-w-tgp">Cost efficiency at scale (RTX 4090, 450 W TGP)<a class="headerlink" href="#cost-efficiency-at-scale-rtx-4090-450-w-tgp" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>At batch=32, continuous operation:
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>  vLLM decode throughput : 1,634.8 tok/s
+</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>  llama.cpp decode       :   780.3 tok/s
+</span><span id="__span-21-5"><a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>
+</span><span id="__span-21-6"><a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>  RTX 4090 TGP           : 450 W
+</span><span id="__span-21-7"><a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a>
+</span><span id="__span-21-8"><a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a>  vLLM:    1634.8 / 450  = 3.63 tok/s/W
+</span><span id="__span-21-9"><a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a>  llama.cpp: 780.3 / 450 = 1.73 tok/s/W
+</span><span id="__span-21-10"><a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a>
+</span><span id="__span-21-11"><a id="__codelineno-21-11" name="__codelineno-21-11" href="#__codelineno-21-11"></a>  vLLM is 2.1× more energy-efficient at batch=32.
+</span></code></pre></div>
+<hr />
+<h2 id="178-benchmarking-checklist">17.8 Benchmarking Checklist<a class="headerlink" href="#178-benchmarking-checklist" title="Permanent link">&para;</a></h2>
+<p>Before publishing any benchmark comparing vLLM and llama.cpp:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>□ Model: same base model, same quantization level
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>□ Hardware: same GPU, same driver, same CUDA version
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>□ Warmup: ≥ 5 warmup iterations excluded from results
+</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>□ Batch sizes: at least 1, 4, 16, 32
+</span><span id="__span-22-5"><a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a>□ Prompt distribution: stated (ShareGPT / fixed length / synthetic)
+</span><span id="__span-22-6"><a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a>□ Metrics: TTFT, ITL, throughput, VRAM all reported
+</span><span id="__span-22-7"><a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a>□ Clock locking: GPU clocks locked or thermal behavior documented
+</span><span id="__span-22-8"><a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a>□ Repetitions: ≥ 5 runs, mean ± stddev reported
+</span><span id="__span-22-9"><a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a>□ Environment: no other GPU workloads during benchmark
+</span><span id="__span-22-10"><a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a>□ Version pinning: exact vLLM version and llama.cpp commit hash stated
+</span><span id="__span-22-11"><a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a>□ Comparison point: online (server) vs offline (batch) mode stated
+</span><span id="__span-22-12"><a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a>□ Single-stream note: if batch=1, explicitly state this is not a server comparison
+</span></code></pre></div>
+<hr />
+<h2 id="179-interpreting-your-own-benchmark-results">17.9 Interpreting Your Own Benchmark Results<a class="headerlink" href="#179-interpreting-your-own-benchmark-results" title="Permanent link">&para;</a></h2>
+<h3 id="when-your-numbers-look-better-than-the-table-above">When your numbers look better than the table above<a class="headerlink" href="#when-your-numbers-look-better-than-the-table-above" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Check GPU clock state: <code>nvidia-smi -q -d CLOCK</code> — thermal throttle suppresses actual results; boosted clocks inflate them</li>
+<li>Check batch size interpretation: llama.cpp <code>tg256</code> is not the same as vLLM <code>batch=256</code></li>
+<li>Check quantization: AWQ Q4 in vLLM uses different kernels than Q4_K_M in llama.cpp</li>
+</ul>
+<h3 id="when-your-numbers-look-worse">When your numbers look worse<a class="headerlink" href="#when-your-numbers-look-worse" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Check <code>--n-gpu-layers</code>: if not all layers are on GPU, CPU bandwidth becomes the bottleneck</li>
+<li>Check VRAM fragmentation: run <code>nvidia-smi</code> to confirm expected VRAM use; unexpected CPU offload tanks throughput</li>
+<li>Check <code>max_num_batched_tokens</code>: too low and vLLM's batching efficiency collapses to near llama.cpp levels</li>
+<li>Check <code>enable_prefix_caching</code>: irrelevant for fresh prompts; must be disabled for fair comparison with llama.cpp</li>
+</ul>
+<hr />
+<h2 id="1710-summary">17.10 Summary<a class="headerlink" href="#1710-summary" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>Recommended engine</th>
+<th>Key reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Single user, laptop GPU</td>
+<td>llama.cpp</td>
+<td>Lower overhead, Q4_K_M native</td>
+</tr>
+<tr>
+<td>Apple Silicon</td>
+<td>llama.cpp</td>
+<td>Metal backend, unified memory</td>
+</tr>
+<tr>
+<td>CPU-only</td>
+<td>llama.cpp</td>
+<td>AVX-512 kernels, no CUDA needed</td>
+</tr>
+<tr>
+<td>1–4 concurrent users, RTX class</td>
+<td>Either (llama-server or vLLM)</td>
+<td>Similar throughput; choose by operational complexity tolerance</td>
+</tr>
+<tr>
+<td>≥ 8 concurrent users, data center</td>
+<td>vLLM</td>
+<td>Continuous batching, PagedAttention</td>
+</tr>
+<tr>
+<td>RAG with long system prompts</td>
+<td>vLLM</td>
+<td>Prefix caching saves up to 94% prefill compute</td>
+</tr>
+<tr>
+<td>Streaming SLA at P95</td>
+<td>vLLM</td>
+<td>Chunked prefill + admission control keeps TTFT bounded</td>
+</tr>
+<tr>
+<td>Budget-constrained edge deployment</td>
+<td>llama.cpp</td>
+<td>Lower memory, no Python runtime</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="chapter-notes">Chapter Notes<a class="headerlink" href="#chapter-notes" title="Permanent link">&para;</a></h2>
+<p><strong>[FOUNDATIONAL]</strong> The benchmark results in Section 17.7 are representative of typical measurements but will vary by CUDA version, GPU driver, ambient temperature, and specific model checkpoint. Always re-run benchmarks on your specific hardware stack before making production deployment decisions.</p>
+<p><strong>[DEEP DIVE]</strong> vLLM's continuous batching means its throughput scales nearly linearly with batch size up to the point where GPU memory is saturated. llama.cpp's throughput also scales but with a different slope — its parallelism is within the batch (chunked prefill), not across requests (continuous batching). This is why the gap widens at larger batch sizes.</p>
+<p><strong>[COMMON TRAP]</strong> Do not compare llama-bench <code>pp512</code> (prompt processing speed) to vLLM's prefill throughput from <code>benchmark_throughput.py</code>. llama-bench measures a single 512-token prefill; vLLM's benchmark processes 1000 requests. The vLLM number includes scheduler overhead amortised across all requests. For a fair prefill comparison, use <code>benchmark_latency.py --batch-size 1 --input-len 512</code> on vLLM and <code>llama-bench --batch-size 1 --n-prompt 512</code> on llama.cpp.</p>
+<hr />
+<p><em>Companion code: <code>code/chapter_17/benchmark_demo.py</code> and <code>code/chapter_17/benchmark_demo.cpp</code></em></p>
+<hr />
+<h2 id="self-check-questions">Self-Check Questions<a class="headerlink" href="#self-check-questions" title="Permanent link">&para;</a></h2>
+<ol>
+<li>
+<p><code>vllm bench throughput</code> reports 2 400 tokens/s. Your production service shows 1 100 tokens/s under real load. Name three factors that could cause the benchmark to be 2× optimistic. <em>(Section 17.2)</em></p>
+</li>
+<li>
+<p>You want to reproduce a production request distribution for a benchmark. You have 10 000 real prompts with known token lengths. Describe how you would build a representative test harness using <code>vllm bench serve</code>. <em>(Section 17.3)</em></p>
+</li>
+<li>
+<p>A benchmark of vLLM vs llama.cpp on the same hardware shows vLLM has 3× higher throughput but 2× higher P99 TTFT. Under what production workload would you choose llama.cpp despite the lower throughput? <em>(Section 17.4)</em></p>
+</li>
+<li>
+<p>Shared-GPU benchmarks (running vLLM on a node also running other containers) give misleading results. Explain the two mechanisms that cause interference and how to control for them. <em>(Section 17.2)</em></p>
+</li>
+<li>
+<p>Define <code>goodput</code> in the context of LLM serving and explain how it differs from raw throughput. Why is goodput the correct metric for SLA-bound deployments? <em>(Section 17.5)</em></p>
+</li>
+</ol>
+<hr />
+<h2 id="worked-solutions">Worked Solutions<a class="headerlink" href="#worked-solutions" title="Permanent link">&para;</a></h2>
+<h3 id="question-1">Question 1<a class="headerlink" href="#question-1" title="Permanent link">&para;</a></h3>
+<p><strong>Benchmark reports 2,400 tok/s, production shows 1,100 tok/s. Three factors for 2× optimism:</strong></p>
+<p><strong>Factor 1 — Benchmark uses synthetic, uniform request lengths.</strong>
+<code>vllm bench throughput</code> generates requests with fixed or Gaussian prompt/output lengths. Real production traffic has long-tail distributions where occasional very long prompts occupy KV cache blocks for extended periods, reducing effective concurrency. The benchmark's uniform distribution hides this variance.</p>
+<p><strong>Factor 2 — Benchmark measures saturated throughput, not offered load.</strong>
+The benchmark sends requests as fast as possible to keep the GPU 100% busy — measuring peak throughput under ideal conditions. In production, requests arrive stochastically (Poisson or bursty), creating idle periods when arrival rate is below peak, lowering average utilization.</p>
+<p><strong>Factor 3 — Benchmark excludes real-world overhead: tokenization, HTTP, multi-tenancy.</strong>
+<code>vllm bench throughput</code> bypasses the HTTP server layer and calls the engine API directly. It does not include: (a) tokenization latency for diverse vocabularies, (b) HTTP/SSE streaming overhead, (c) multi-tenant token counting and billing middleware, (d) prefix cache cold-start effects when request prefixes are diverse.</p>
+<hr />
+<h3 id="question-2">Question 2<a class="headerlink" href="#question-2" title="Permanent link">&para;</a></h3>
+<p><strong>Reproducing production request distribution with 10,000 real prompts:</strong></p>
+<p><strong>Step 1 — Sample from the real distribution.</strong>
+Tokenize all 10,000 prompts and compute (input_len, output_len) pairs. Compute the empirical distribution (histogram with 50 bins for each axis).</p>
+<p><strong>Step 2 — Construct the test dataset.</strong>
+Use the actual prompts (anonymized if needed) as the benchmark corpus. This preserves the prefix distribution — critical for prefix caching evaluation.</p>
+<p><strong>Step 3 — Configure <code>vllm bench serve</code>:</strong>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="c1"># Key flag choices:</span>
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="c1">#   --dataset-name sharegpt    or use --dataset-path for a custom corpus</span>
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="c1">#   --request-rate 50          match production QPS</span>
+</span><span id="__span-23-4"><a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>python<span class="w"> </span>-m<span class="w"> </span>vllm.entrypoints.benchmark_serving<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-23-5"><a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="w">  </span>--backend<span class="w"> </span>vllm<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-23-6"><a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="w">  </span>--model<span class="w"> </span>meta-llama/Llama-3.1-70B<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-23-7"><a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="w">  </span>--dataset-name<span class="w"> </span>sharegpt<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-23-8"><a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a><span class="w">  </span>--dataset-path<span class="w"> </span>./production_prompts.jsonl<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-23-9"><a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a><span class="w">  </span>--num-prompts<span class="w"> </span><span class="m">10000</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-23-10"><a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a><span class="w">  </span>--request-rate<span class="w"> </span><span class="m">50</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-23-11"><a id="__codelineno-23-11" name="__codelineno-23-11" href="#__codelineno-23-11"></a><span class="w">  </span>--max-concurrency<span class="w"> </span><span class="m">200</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-23-12"><a id="__codelineno-23-12" name="__codelineno-23-12" href="#__codelineno-23-12"></a><span class="w">  </span>--percentile-metrics<span class="w"> </span>p50,p90,p99<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-23-13"><a id="__codelineno-23-13" name="__codelineno-23-13" href="#__codelineno-23-13"></a><span class="w">  </span>--save-result
+</span></code></pre></div></p>
+<p><strong>Step 4 — Sweep request rates.</strong>
+Run at 20%, 50%, 80%, 100%, 120% of expected production QPS to build a load-latency curve. Identify the saturation point where P99 TTFT exceeds SLA.</p>
+<p><strong>Step 5 — Validate with shadow traffic.</strong>
+Run the benchmark in parallel with a shadow copy of the production server receiving 1% of live traffic, comparing benchmark latency percentiles to shadow-traffic measurements.</p>
+<hr />
+<h3 id="question-3">Question 3<a class="headerlink" href="#question-3" title="Permanent link">&para;</a></h3>
+<p><strong>vLLM: 3× higher throughput, 2× higher P99 TTFT. Choose llama.cpp when:</strong></p>
+<p>The 2× TTFT penalty is significant for <strong>latency-sensitive, low-batch workloads.</strong> Choose llama.cpp when:</p>
+<ol>
+<li>
+<p><strong>The workload is batch=1 or very low concurrency (≤ 4 concurrent users).</strong> At batch=1, vLLM's Python scheduler overhead (~20–30 ms) is visible in every TTFT, while llama.cpp's C++ stack adds &lt;5 ms. The throughput advantage of vLLM is irrelevant if only one user is making requests.</p>
+</li>
+<li>
+<p><strong>The SLA requires strict P99 TTFT guarantees.</strong> If a chatbot contract requires P99 TTFT ≤ 500 ms and vLLM hits P99 = 800 ms at scale while llama.cpp hits 400 ms, llama.cpp is the correct choice despite lower overall throughput.</p>
+</li>
+<li>
+<p><strong>The deployment is edge/on-premises with limited GPU memory.</strong> llama.cpp's lower VRAM usage (no KV block reservation overhead) allows larger models to fit on limited hardware where vLLM would OOM before reaching high batch sizes.</p>
+</li>
+</ol>
+<hr />
+<h3 id="question-4">Question 4<a class="headerlink" href="#question-4" title="Permanent link">&para;</a></h3>
+<p><strong>Two interference mechanisms in shared-GPU benchmarks:</strong></p>
+<p><strong>Mechanism 1 — GPU memory pressure and eviction.</strong>
+Other containers may hold GPU memory allocations (ML frameworks, CUDA contexts, other models). This reduces the HBM available to vLLM, shrinking the KV cache pool. Fewer KV blocks → lower effective <code>max_num_seqs</code> → artificially lower throughput and higher TTFT. The benchmark appears to show low throughput but the bottleneck is memory contention, not the engine.</p>
+<p><strong>Mechanism 2 — SM (compute) contention and priority inversion.</strong>
+NVIDIA's MPS (Multi-Process Service) or time-sliced GPU sharing means other container workloads may preempt vLLM's CUDA kernels or share SMs. This adds irregular kernel latency that inflates ITL measurements unpredictably. The P99 latency becomes dominated by the tail of scheduling jitter rather than model arithmetic, making results irreproducible.</p>
+<p><strong>Control strategies:</strong>
+- Run benchmarks on isolated, dedicated GPU nodes (no other containers).
+- Use <code>nvidia-smi mig</code> (MIG partitioning on A100/H100) to create hard resource partitions.
+- Monitor <code>nvidia-smi dmon -s u,m</code> concurrently to detect external GPU memory pressure.
+- Run 3 independent benchmark trials and report median to filter jitter outliers.</p>
+<hr />
+<h3 id="question-5">Question 5<a class="headerlink" href="#question-5" title="Permanent link">&para;</a></h3>
+<p><strong>Goodput definition and distinction from raw throughput:</strong></p>
+<p><strong>Raw throughput:</strong> Total tokens generated per second, regardless of whether responses met SLA requirements (TTFT, ITL, total latency). A system that serves 2,400 tok/s but has 30% of requests exceeding their latency SLA reports high raw throughput but poor user experience.</p>
+<p><strong>Goodput:</strong> Tokens per second from requests that <em>meet all SLA constraints.</em> Formally:
+<div class="language-text highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>goodput = (tokens from SLA-compliant requests) / (elapsed time)
+</span></code></pre></div></p>
+<p>If 30% of 2,400 tok/s responses violate SLA, goodput = 2,400 × 0.70 = 1,680 tok/s.</p>
+<p><strong>Why goodput is the correct metric for SLA-bound deployments:</strong>
+1. It captures the true useful output of the system — tokens that are actually valuable to users.
+2. It penalizes configurations that maximize throughput by sacrificing tail latency (e.g., very large batch sizes that improve P50 but destroy P99 TTFT).
+3. It aligns infrastructure cost optimization with business outcomes: maximizing goodput per dollar is equivalent to maximizing value per dollar.</p>
+<p>The SLA threshold should be calibrated to the product requirement (e.g., "TTFT &lt; 1 s and ITL &lt; 50 ms"), and goodput is the only metric that integrates both the throughput and the latency dimensions simultaneously.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="chapter16.html" class="md-footer__link md-footer__link--prev" aria-label="Previous: Ch 16: Observability">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Ch 16: Observability
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="chapter18.html" class="md-footer__link md-footer__link--next" aria-label="Next: Ch 18: Disaggregated Prefill and Decode">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Ch 18: Disaggregated Prefill and Decode
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "navigation.footer", "navigation.indexes", "navigation.prune", "search.highlight", "search.suggest", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="../javascripts/mathjax.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>

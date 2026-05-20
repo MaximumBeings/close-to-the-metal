@@ -1,0 +1,6804 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Practitioner's Deep Guide to LLM Inference">
+      
+      
+        <meta name="author" content="Oluwaseyi Awoga, written with AI assistance">
+      
+      
+      
+        <link rel="prev" href="appendix-g.html">
+      
+      
+        <link rel="next" href="appendix-i.html">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>H — Operational Decision Tree - Close to the Metal: LLM Inference from First Principles</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#appendix-h-operational-decision-tree-and-troubleshooting-guide" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../index.html" title="Close to the Metal: LLM Inference from First Principles" class="md-header__button md-logo" aria-label="Close to the Metal: LLM Inference from First Principles" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Close to the Metal: LLM Inference from First Principles
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              H — Operational Decision Tree
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../index.html" title="Close to the Metal: LLM Inference from First Principles" class="md-nav__button md-logo" aria-label="Close to the Metal: LLM Inference from First Principles" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Close to the Metal: LLM Inference from First Principles
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../preface.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Preface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part I — Foundations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part I — Foundations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter01.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 1: Two Engines, One Problem
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter02.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 2: The GPU and CPU Memory Landscapes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter02b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 2.5: GPU Memory Architecture — Registers, Shared Memory, Caches, and Global Memory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter03.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 3: Tokens, Sequences, and the Batch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter03b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 3.5: The Transformer Block
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter04.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 4: Attention Mechanics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter04b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 4.5: Attention Alternatives — Sliding Window, Linear Attention, SSMs, and Mamba
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part1-foundations/chapter05.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 5: Flash Attention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part II — Engine Internals
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part II — Engine Internals
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter06.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 6: PagedAttention and the Block Manager
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter07.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 7: The Scheduler and Request Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter07b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 7.5: Continuous Batching — The Iteration-Level Scheduling Loop
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter08.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 8: Startup and Initialization
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter08b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 8.5: CUDA Graphs — Capture, Replay, and Production Latency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter09.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 9: The Forward Pass — CUDA vs. GGML
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter10.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 10: Quantization Internals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter11.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 11: Prefill, Chunked Prefill, and Prompt Caching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter11b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 11.5: KV Cache Eviction — Attention Sinks, H2O, and SnapKV
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter11c.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 11.6: RadixAttention and Prefix Caching Deep Dive
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter12.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 12: Sampling — From Logits to Tokens
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter12b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 12.5: Structured Generation and Constrained Decoding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part2-engine-internals/chapter13.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 13: Token Streaming — The Last Mile
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part III — Production
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part III — Production
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part3-production/chapter14.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 14: The Eight vLLM Knobs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part3-production/chapter15.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 15: Multi-GPU Serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part3-production/chapter15b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 15.5: Flash Decoding and Context Parallelism
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part3-production/chapter16.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 16: Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part3-production/chapter17.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 17: Benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part3-production/chapter18.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 18: Disaggregated Prefill and Decode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part3-production/chapter19.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 19: Kubernetes and KubeRay
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part3-production/chapter20.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 20: Cost Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part3-production/chapter21.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 21: Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part IV — Advanced Topics
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part IV — Advanced Topics
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter22.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 22: LoRA Serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter23.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 23: Speculative Decoding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter24.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 24: Reasoning Model Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter25.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 25: RL and Serving Policies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter26.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 26: CS336 Alignment Field Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter27.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 27: Long-Context Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter28.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 28: llama.cpp as a Platform
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter29.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 29: Multimodal Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter30.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 30: Semantic Caching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter31.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 31: Model Routing and Cascading
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter32.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 32: Debugging Inference Systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter33.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 33: The Full Engine Landscape — 2026
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part4-advanced/chapter33b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 33.5: Choosing Your Engine — SGLang, TRT-LLM, MLC-LLM, Ollama
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part V — Model Zoo
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part V — Model Zoo
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter34.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 34: DeepSeek — MLA, MoE, FP8
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter35.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 35: Qwen — Multilingual and Long-Context
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter36.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 36: Kimi — Long-Context and Moon-Cache
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter37.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 37: Nemotron and TensorRT-LLM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter38.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 38: The Production Synthesis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter39.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 39: Evaluation and Regression Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter40.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 40: The vLLM V1 Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter41.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 41: Meta Llama 3 — Architecture, Ecosystem, and Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../part5-model-zoo/chapter42.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ch 42: Phi-4 and Gemma 3 — Small Models, Large Impact
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ⌨ Companion Code
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    ⌨ Companion Code
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_01.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 01 — Two Engines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_02.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 02 — Memory Landscapes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_02b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 2.5 — GPU Memory Architecture (Tiled GEMM Harness)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_03.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 03 — Tokens and Batches
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_03b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 3.5 — The Transformer Block
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_04.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 04 — Attention Mechanics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_04b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 4.5 — Attention Alternatives
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_05.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 05 — Flash Attention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_06.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 06 — PagedAttention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_07.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 07 — The Scheduler
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_07b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 7.5 — Continuous Batching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_08.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 08 — Startup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_08b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 8.5 — CUDA Graphs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_09.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 09 — Forward Pass
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_10.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 10 — Quantization
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_11.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 11 — Prefill and Caching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_11b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 11.5 — KV Cache Eviction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_11c.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 11.6 — RadixAttention and Prefix Caching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_12.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 12 — Sampling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_12b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 12.5 — Structured Generation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_13.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 13 — Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_14.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 14 — vLLM Knobs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_15.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 15 — Multi-GPU
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_15b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 15.5 — Flash Decoding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_16.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 16 — Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_17.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 17 — Benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_18.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 18 — Disaggregated Serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_19.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 19 — Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_20.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 20 — Cost Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_21.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 21 — Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_22.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 22 — LoRA Serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_23.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 23 — Speculative Decoding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_24.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 24 — Reasoning Models
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_25.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 25 — RL Serving Policies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_26.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 26 — Alignment Field Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_27.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 27 — Long-Context
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_28.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 28 — llama.cpp Platform
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_29.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 29 — Multimodal
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_30.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 30 — Semantic Caching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_31.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 31 — Model Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_32.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 32 — Debugging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_33.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 33 — Engine Landscape
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_33b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 33.5 — Engine Selection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_34.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 34 — DeepSeek
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_35.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 35 — Qwen
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_36.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 36 — Kimi
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_37.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 37 — Nemotron
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_38.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 38 — Production Synthesis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_39.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 39 — Evaluation Harness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_40.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 40 — vLLM V1 Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_41.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 41 — Meta Llama 3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/chapter_42.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code 42 — Phi-4 and Gemma 3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/appendix_l.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code L — CUDA C++ Introduction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code/appendix_v.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code V — TurboQuant
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Appendices
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Appendices
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-a.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    A — Mathematical Foundations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-a2.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    A.2 — Tensor Contractions: 2D/3D/5D/ND with CUDA, Triton, CUTLASS, Mojo
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-a3.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    A.3 — The Chain Rule: From Scalars to Transformer Backpropagation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-b.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    B — Installation Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-c.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    C — PyTorch for LLM Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-d.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    D — vLLM EngineArgs Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-e.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    E — llama.cpp CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-f.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    F — Production Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-g.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    G — Benchmarking Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    H — Operational Decision Tree
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="appendix-h.html" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    H — Operational Decision Tree
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+  
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#h1-symptom-diagnosis-fix-the-main-decision-tree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.1 Symptom → Diagnosis → Fix: The Main Decision Tree
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="H.1 Symptom → Diagnosis → Fix: The Main Decision Tree">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#h11-ttft-time-to-first-token-is-too-high" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.1.1 TTFT (Time to First Token) is Too High
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#h12-throughput-ceiling-hit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.1.2 Throughput Ceiling Hit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#h13-oom-out-of-memory-crashes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.1.3 OOM (Out of Memory) Crashes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#h14-latency-spikes-p99-much-higher-than-p50" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.1.4 Latency Spikes / p99 Much Higher Than p50
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#h15-output-quality-degraded-after-optimization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.1.5 Output Quality Degraded After Optimization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#h16-cost-per-request-too-high" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.1.6 Cost Per Request Too High
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#h2-the-vllm-flags-quick-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.2 The vLLM Flags Quick Reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#h3-llamacpp-cli-quick-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.3 llama.cpp CLI Quick Reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#h4-memory-budget-worksheet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.4 Memory Budget Worksheet
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#h5-slo-calibration-guide" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.5 SLO Calibration Guide
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="H.5 SLO Calibration Guide">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#metric-definitions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metric Definitions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slo-targets-by-use-case" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SLO Targets by Use Case
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slo-implementation-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SLO Implementation Checklist
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#h6-common-failure-modes-reference-card" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.6 Common Failure Modes Reference Card
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#h7-deployment-topology-quick-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.7 Deployment Topology Quick Reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="H.7 Deployment Topology Quick Reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#single-node-single-gpu-development-small-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Single-Node, Single-GPU (Development / Small Models)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#single-node-multi-gpu-production-small-cluster" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Single-Node, Multi-GPU (Production Small Cluster)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#multi-node-disaggregated-high-scale-production" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-Node, Disaggregated (High-Scale Production)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#self-check-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Self-Check Questions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worked-solutions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worked Solutions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Worked Solutions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#question-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#question-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#question-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 3
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#question-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 4
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#question-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 5
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-i.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    I — C++ Build Patterns
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-j.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    J — libtorch: The C++ API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-k.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    K — std::mdspan for CPU Inference: Multidimensional Views in C++23
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-l.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    L — CUDA C++ Introduction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-m.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    M — Introduction to Triton: Python-Embedded GPU Kernel Programming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-n.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    N — CUTLASS and Tensor Cores: The Compiled Performance Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-o.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    O — Introduction to Mojo: Systems Performance in Python Syntax
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-p.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    P — ROCm and AMD GPU Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-q.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Q — Mobile and Edge Deployment: Android and Apple Silicon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-r.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    R — Edge Inference on Linux SBCs: Raspberry Pi and NVIDIA Jetson
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-s.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    S — CI/CD Pipelines for LLM Inference Systems
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-t.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    T — Embedding and Reranker Model Serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-u.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    U — Quantization Calibration Workflow: AWQ, GPTQ, FP8, and GGUF
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-v.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    V — TurboQuant
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-w.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    W — Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-x.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    X — References
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-y.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Y — Cerebras WSE-3: Wafer-Scale Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-z.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Z — JAX: XLA-Native Python for LLM Inference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="appendix-aa.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AA — Mixture of Experts (MoE): Conditional Computation from First Principles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+  
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#h1-symptom-diagnosis-fix-the-main-decision-tree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.1 Symptom → Diagnosis → Fix: The Main Decision Tree
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="H.1 Symptom → Diagnosis → Fix: The Main Decision Tree">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#h11-ttft-time-to-first-token-is-too-high" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.1.1 TTFT (Time to First Token) is Too High
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#h12-throughput-ceiling-hit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.1.2 Throughput Ceiling Hit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#h13-oom-out-of-memory-crashes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.1.3 OOM (Out of Memory) Crashes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#h14-latency-spikes-p99-much-higher-than-p50" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.1.4 Latency Spikes / p99 Much Higher Than p50
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#h15-output-quality-degraded-after-optimization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.1.5 Output Quality Degraded After Optimization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#h16-cost-per-request-too-high" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.1.6 Cost Per Request Too High
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#h2-the-vllm-flags-quick-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.2 The vLLM Flags Quick Reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#h3-llamacpp-cli-quick-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.3 llama.cpp CLI Quick Reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#h4-memory-budget-worksheet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.4 Memory Budget Worksheet
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#h5-slo-calibration-guide" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.5 SLO Calibration Guide
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="H.5 SLO Calibration Guide">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#metric-definitions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metric Definitions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slo-targets-by-use-case" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SLO Targets by Use Case
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slo-implementation-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SLO Implementation Checklist
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#h6-common-failure-modes-reference-card" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.6 Common Failure Modes Reference Card
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#h7-deployment-topology-quick-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H.7 Deployment Topology Quick Reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="H.7 Deployment Topology Quick Reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#single-node-single-gpu-development-small-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Single-Node, Single-GPU (Development / Small Models)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#single-node-multi-gpu-production-small-cluster" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Single-Node, Multi-GPU (Production Small Cluster)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#multi-node-disaggregated-high-scale-production" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-Node, Disaggregated (High-Scale Production)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#self-check-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Self-Check Questions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worked-solutions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worked Solutions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Worked Solutions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#question-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#question-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#question-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 3
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#question-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 4
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#question-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Question 5
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="appendix-h-operational-decision-tree-and-troubleshooting-guide">Appendix H: Operational Decision Tree and Troubleshooting Guide<a class="headerlink" href="#appendix-h-operational-decision-tree-and-troubleshooting-guide" title="Permanent link">&para;</a></h1>
+<p>This appendix is a production reference. It is organized as decision trees, quick-lookup tables, and fill-in worksheets that a serving engineer can consult during an incident or capacity-planning session without re-reading the main chapters.</p>
+<hr />
+<h2 id="h1-symptom-diagnosis-fix-the-main-decision-tree">H.1 Symptom → Diagnosis → Fix: The Main Decision Tree<a class="headerlink" href="#h1-symptom-diagnosis-fix-the-main-decision-tree" title="Permanent link">&para;</a></h2>
+<p>Each section below starts with an observable symptom and walks through a structured diagnostic sequence. Metrics referenced assume a Prometheus/Grafana stack as described in Chapter 16.</p>
+<hr />
+<h3 id="h11-ttft-time-to-first-token-is-too-high">H.1.1 TTFT (Time to First Token) is Too High<a class="headerlink" href="#h11-ttft-time-to-first-token-is-too-high" title="Permanent link">&para;</a></h3>
+<p><strong>Target</strong>: p95 TTFT &lt; 500 ms for interactive workloads.</p>
+<p><strong>Observable signal</strong>: <code>vllm:time_to_first_token_seconds</code> p95 &gt; 0.5 s.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Is the median prompt length &gt; 4 K tokens?
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── YES → Enable chunked prefill: --enable-chunked-prefill
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│         Set --max-num-batched-tokens to 2048–4096.
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│         Monitor: prefill chunks per request should be &gt; 1.
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│         Expected improvement: 20–50% TTFT reduction for long prompts.
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>├── NO  → Do many requests share the same system prompt?
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│         ├── YES → Enable prefix caching: --enable-prefix-caching
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>│         │         Warm the cache with one representative request before
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│         │         opening traffic. Monitor: prefix_cache_hit_rate &gt; 0.7.
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│         │         Expected improvement: up to 90% TTFT reduction for
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>│         │         identical system prompts.
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>│         │
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>│         └── NO  → Is GPU utilization during prefill &lt; 60%?
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>│                   ├── YES → Increase --max-num-batched-tokens (default 32768).
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>│                   │         Try doubling until GPU utilization reaches 80–90%.
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>│                   │         Warning: too large increases memory pressure.
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>│                   │
+</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>│                   └── NO  → Is this a disaggregated prefill/decode setup?
+</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>│                             ├── YES → Check prefill worker count vs request
+</span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>│                             │         arrival rate. If prefill queue depth &gt; 5,
+</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>│                             │         add prefill replicas.
+</span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>│                             │         See: Chapter 18.
+</span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>│                             │
+</span><span id="__span-0-25"><a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>│                             └── NO  → Profile with torch.profiler:
+</span><span id="__span-0-26"><a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>│                                       python -c &quot;
+</span><span id="__span-0-27"><a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>│                                       import torch.profiler as p
+</span><span id="__span-0-28"><a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>│                                       with p.profile(activities=[
+</span><span id="__span-0-29"><a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>│                                           p.ProfilerActivity.CPU,
+</span><span id="__span-0-30"><a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>│                                           p.ProfilerActivity.CUDA
+</span><span id="__span-0-31"><a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>│                                       ]) as prof:
+</span><span id="__span-0-32"><a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>│                                           # run one representative request
+</span><span id="__span-0-33"><a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>│                                           pass
+</span><span id="__span-0-34"><a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>│                                       prof.export_chrome_trace(&#39;ttft.json&#39;)
+</span><span id="__span-0-35"><a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>│                                       &quot;
+</span><span id="__span-0-36"><a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>│                                       Look for: CPU-bound tokenization,
+</span><span id="__span-0-37"><a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a>│                                       host-to-device copy latency,
+</span><span id="__span-0-38"><a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a>│                                       Python scheduler overhead.
+</span></code></pre></div>
+<p><strong>Quick TTFT checklist</strong>:</p>
+<ul>
+<li>[ ] Chunked prefill enabled for prompts &gt; 4 K tokens</li>
+<li>[ ] Prefix caching enabled if system prompt is shared</li>
+<li>[ ] <code>--max-num-batched-tokens</code> tuned to fill GPU</li>
+<li>[ ] Prefill replicas scaled to match arrival rate</li>
+<li>[ ] No CPU stall visible in profiler trace</li>
+</ul>
+<hr />
+<h3 id="h12-throughput-ceiling-hit">H.1.2 Throughput Ceiling Hit<a class="headerlink" href="#h12-throughput-ceiling-hit" title="Permanent link">&para;</a></h3>
+<p><strong>Target</strong>: tokens/s should scale linearly with GPU count until the roofline limit.</p>
+<p><strong>Observable signal</strong>: adding load increases queue depth but not <code>vllm:generation_tokens_total</code> rate.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Compute roofline ratio: actual_tps / theoretical_tps
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>├── Ratio &lt; 0.5 → Hardware bottleneck.
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>│   ├── Are weights in BF16?
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>│   │   └── YES → Switch to FP8: --quantization fp8
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>│   │             Run perplexity regression (Appendix H.5) before promoting.
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>│   │             Expected: ~2× throughput improvement on H100.
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>│   │             See: Chapter 10, Chapter 37.
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>│   │
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>│   ├── Is batch utilization low (avg batch size &lt; max_num_seqs / 2)?
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>│   │   └── YES → Increase --max-num-seqs (default 256).
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>│   │             Monitor memory: if OOM, reduce --gpu-memory-utilization first.
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>│   │             Target: avg batch size &gt; 0.6 × max_num_seqs.
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>│   │
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>│   ├── Is median context length &gt; 8 K tokens?
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>│   │   └── YES → Flash Decoding is activated automatically when using
+</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>│   │             FlashInfer backend. Verify: check vllm startup logs for
+</span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>│   │             &quot;attention backend: flashinfer&quot;.
+</span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>│   │             If using triton backend, switch: --attention-backend flashinfer
+</span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>│   │
+</span><span id="__span-1-20"><a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>│   └── Is GPU utilization &lt; 70% during decode?
+</span><span id="__span-1-21"><a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>│       └── YES → Disaggregate prefill and decode.
+</span><span id="__span-1-22"><a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>│                 Use vLLM V1 disaggregated scheduler.
+</span><span id="__span-1-23"><a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>│                 Prefill nodes: 1–2 GPUs, decode nodes: remainder.
+</span><span id="__span-1-24"><a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>│                 See: Chapter 18.
+</span><span id="__span-1-25"><a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>│
+</span><span id="__span-1-26"><a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>└── Ratio 0.5–0.9 → Software overhead.
+</span><span id="__span-1-27"><a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>    ├── Check Python scheduler overhead: should be &lt; 1 ms per step.
+</span><span id="__span-1-28"><a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a>    ├── Verify CUDA graphs are enabled (default in vLLM V1).
+</span><span id="__span-1-29"><a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>    └── Profile with nsight systems for kernel launch gaps.
+</span></code></pre></div>
+<p><strong>Throughput optimization sequence</strong> (run in order, measure after each step):
+1. Enable FP8: <code>--quantization fp8</code>
+2. Tune <code>--max-num-seqs</code> and <code>--max-num-batched-tokens</code>
+3. Enable chunked prefill to improve batching efficiency
+4. Switch to FlashInfer backend for long contexts
+5. Disaggregate if single-node throughput is saturated</p>
+<hr />
+<h3 id="h13-oom-out-of-memory-crashes">H.1.3 OOM (Out of Memory) Crashes<a class="headerlink" href="#h13-oom-out-of-memory-crashes" title="Permanent link">&para;</a></h3>
+<p><strong>Observable signals</strong>: <code>CUDA out of memory</code> in logs, <code>vllm:gpu_cache_usage_perc</code> at 100%.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>When does the OOM occur?
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>│
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>├── DURING STARTUP (model loading)
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>│   ├── Reduce --gpu-memory-utilization from 0.9 → 0.85 → 0.80
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>│   │   (each step frees ~5–8 GB on an 80 GB GPU)
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>│   ├── Verify tensor parallel size covers weight memory:
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>│   │   weight_GB = params_B × dtype_bytes / tp_size
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>│   │   Must fit in gpu_memory × gpu_memory_utilization - activations
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>│   ├── Use --load-format safetensors for streaming load (lower peak RAM)
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>│   └── If quantized: verify quantization checkpoint matches --quantization flag
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>│
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>├── DURING A TRAFFIC BURST
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>│   ├── Enable request preemption (default in vLLM; verify not disabled)
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>│   │   --preemption-mode recompute   # lower peak memory, higher latency
+</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>│   │   --preemption-mode swap        # uses CPU RAM, avoid on bandwidth-sensitive paths
+</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>│   ├── Reduce --max-model-len to cap per-sequence KV footprint
+</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>│   │   KV per sequence = 2 × layers × kv_heads × head_dim × max_len × dtype_bytes
+</span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>│   │   Reducing max_len from 32K to 16K frees ~50% of per-sequence KV budget
+</span><span id="__span-2-19"><a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>│   └── Add replica and load-balance: route long requests to dedicated nodes
+</span><span id="__span-2-20"><a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>│
+</span><span id="__span-2-21"><a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>├── WITH LORA ADAPTERS
+</span><span id="__span-2-22"><a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>│   ├── Each LoRA adapter occupies: rank × d_model × 2 × num_layers × dtype_bytes
+</span><span id="__span-2-23"><a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>│   │   Example: rank=16, d_model=4096, 32 layers, BF16 ≈ 268 MB per adapter
+</span><span id="__span-2-24"><a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>│   ├── Reduce --max-loras (default 1; multiple adapters multiply this cost)
+</span><span id="__span-2-25"><a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>│   ├── Use --enable-lora-bias carefully (adds bias vectors per adapter)
+</span><span id="__span-2-26"><a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a>│   └── Consider adapter merging for static-traffic adapters
+</span><span id="__span-2-27"><a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a>│
+</span><span id="__span-2-28"><a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a>└── WEIGHT LOADING OOM (host RAM)
+</span><span id="__span-2-29"><a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a>    ├── Use --load-format safetensors (streams, lower peak host RAM)
+</span><span id="__span-2-30"><a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a>    ├── Verify tensor_parallel_size is set correctly before loading
+</span><span id="__span-2-31"><a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a>    └── Use HF_HOME on a fast NVMe to avoid double-buffering in RAM
+</span></code></pre></div>
+<p><strong>Memory sanity check commands</strong>:
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Before starting vLLM, check available GPU memory</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>nvidia-smi<span class="w"> </span>--query-gpu<span class="o">=</span>memory.free,memory.total<span class="w"> </span>--format<span class="o">=</span>csv
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># Estimate weight memory</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="s2">params_b = 70   # model size in billions</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="s2">dtype_b  = 2    # BF16 = 2 bytes, FP8 = 1 byte</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="s2">tp       = 4    # tensor parallel size</span>
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="s2">print(f&#39;Weight memory per GPU: {params_b * 1e9 * dtype_b / tp / 1e9:.1f} GB&#39;)</span>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="s2">&quot;</span>
+</span></code></pre></div></p>
+<hr />
+<h3 id="h14-latency-spikes-p99-much-higher-than-p50">H.1.4 Latency Spikes / p99 Much Higher Than p50<a class="headerlink" href="#h14-latency-spikes-p99-much-higher-than-p50" title="Permanent link">&para;</a></h3>
+<p><strong>Observable signal</strong>: p99/p50 TPOT ratio &gt; 3×, or periodic latency spikes visible in time-series.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Is vllm:num_preemptions_total rising?
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>├── YES → KV cache pressure causing preemptions.
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>│         ├── Increase GPU memory allocation or reduce max_num_seqs
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>│         ├── Enable chunked prefill to reduce peak KV pressure
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>│         └── Consider prefix caching to reuse existing KV blocks
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>│
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>├── NO  → Are long requests co-scheduled with short requests?
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>│         ├── YES → Enable chunked prefill + priority scheduling:
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>│         │         --enable-chunked-prefill
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>│         │         --scheduler-policy priority   # if available
+</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>│         │         Long requests are chunked, allowing short requests to interleave
+</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>│         │
+</span><span id="__span-4-13"><a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>│         └── NO  → Are spikes correlated with periodic intervals (e.g., every 60s)?
+</span><span id="__span-4-14"><a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>│                   ├── YES → Likely Python garbage collection pause.
+</span><span id="__span-4-15"><a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>│                   │         Add to serving startup:
+</span><span id="__span-4-16"><a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>│                   │         import gc; gc.disable()
+</span><span id="__span-4-17"><a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>│                   │         # Re-enable only outside request hot path
+</span><span id="__span-4-18"><a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>│                   │         Profile with: py-spy record -o gc_trace.svg --pid &lt;PID&gt;
+</span><span id="__span-4-19"><a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a>│                   │
+</span><span id="__span-4-20"><a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a>│                   └── NO  → Are spikes at startup or after idle periods?
+</span><span id="__span-4-21"><a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a>│                             ├── YES → CUDA graph capture stall.
+</span><span id="__span-4-22"><a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a>│                             │         Verify CUDA graphs are pre-captured at startup.
+</span><span id="__span-4-23"><a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a>│                             │         vLLM V1 captures graphs during warmup by default.
+</span><span id="__span-4-24"><a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a>│                             │         Check: &quot;CUDA graph captured for batch size X&quot; in logs.
+</span><span id="__span-4-25"><a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a>│                             │
+</span><span id="__span-4-26"><a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a>│                             └── NO  → Check for thermal throttling:
+</span><span id="__span-4-27"><a id="__codelineno-4-27" name="__codelineno-4-27" href="#__codelineno-4-27"></a>│                                       nvidia-smi dmon -s u -d 5
+</span><span id="__span-4-28"><a id="__codelineno-4-28" name="__codelineno-4-28" href="#__codelineno-4-28"></a>│                                       If GPU clocks drop, check cooling / power limits.
+</span></code></pre></div>
+<p><strong>p99 latency investigation commands</strong>:
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Watch preemption rate in real time</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>watch<span class="w"> </span>-n<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="s1">&#39;curl -s localhost:8000/metrics | grep preemption&#39;</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># Check KV cache utilization</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>curl<span class="w"> </span>-s<span class="w"> </span>localhost:8000/metrics<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>gpu_cache_usage_perc
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="c1"># Profile GC pauses (requires py-spy)</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>pip<span class="w"> </span>install<span class="w"> </span>py-spy
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>py-spy<span class="w"> </span>record<span class="w"> </span>-o<span class="w"> </span>profile.svg<span class="w"> </span>--pid<span class="w"> </span><span class="k">$(</span>pgrep<span class="w"> </span>-f<span class="w"> </span>vllm<span class="k">)</span>
+</span></code></pre></div></p>
+<hr />
+<h3 id="h15-output-quality-degraded-after-optimization">H.1.5 Output Quality Degraded After Optimization<a class="headerlink" href="#h15-output-quality-degraded-after-optimization" title="Permanent link">&para;</a></h3>
+<p><strong>Observable signal</strong>: user complaints, MMLU/perplexity regression, output truncation or repetition.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Which optimization was applied?
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>│
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>├── FP8 QUANTIZATION
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>│   ├── Run perplexity regression immediately:
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>│   │   python -m lm_eval --model vllm --model_args pretrained=&lt;model&gt;,
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>│   │       quantization=fp8 --tasks wikitext --device cuda
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>│   │   Acceptable regression: &lt; 0.3 perplexity points vs BF16 baseline.
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>│   ├── If regression &gt; 0.5: use static FP8 calibration (not dynamic):
+</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>│   │   llm-compressor calibrate --model &lt;path&gt; --calibration-dataset &lt;data&gt;
+</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>│   └── If still regressed: fall back to INT8 weight-only (--quantization bitsandbytes)
+</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>│
+</span><span id="__span-6-12"><a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>├── PREFIX CACHING
+</span><span id="__span-6-13"><a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>│   ├── Verify KV block hash collisions are not occurring:
+</span><span id="__span-6-14"><a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>│   │   Check vllm logs for &quot;hash collision&quot; warnings.
+</span><span id="__span-6-15"><a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>│   │   Hash collision probability ≈ 1 / 2^64 per block pair (negligible).
+</span><span id="__span-6-16"><a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>│   ├── Verify cached blocks are not from a different model revision:
+</span><span id="__span-6-17"><a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>│   │   Restart vLLM when updating model weights (cache is invalidated on restart).
+</span><span id="__span-6-18"><a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>│   └── Verify --enable-prefix-caching is not mixing adapters incorrectly:
+</span><span id="__span-6-19"><a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>│       Each LoRA adapter gets its own prefix cache namespace in vLLM V1.
+</span><span id="__span-6-20"><a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a>│
+</span><span id="__span-6-21"><a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a>├── WEIGHT QUANTIZATION (INT4/AWQ/GPTQ)
+</span><span id="__span-6-22"><a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a>│   ├── Run MMLU benchmark:
+</span><span id="__span-6-23"><a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a>│   │   python -m lm_eval --model vllm --tasks mmlu --num_fewshot 5
+</span><span id="__span-6-24"><a id="__codelineno-6-24" name="__codelineno-6-24" href="#__codelineno-6-24"></a>│   │   Acceptable: &lt; 1% absolute drop vs FP16 baseline.
+</span><span id="__span-6-25"><a id="__codelineno-6-25" name="__codelineno-6-25" href="#__codelineno-6-25"></a>│   ├── INT4 regression &gt; 2%: switch to INT8 or AWQ (usually better than GPTQ)
+</span><span id="__span-6-26"><a id="__codelineno-6-26" name="__codelineno-6-26" href="#__codelineno-6-26"></a>│   └── Check quantization group size: group_size=128 better than group_size=64
+</span><span id="__span-6-27"><a id="__codelineno-6-27" name="__codelineno-6-27" href="#__codelineno-6-27"></a>│       for accuracy; group_size=64 saves ~1% memory.
+</span><span id="__span-6-28"><a id="__codelineno-6-28" name="__codelineno-6-28" href="#__codelineno-6-28"></a>│
+</span><span id="__span-6-29"><a id="__codelineno-6-29" name="__codelineno-6-29" href="#__codelineno-6-29"></a>└── CONTEXT LENGTH EXTENSION (YaRN / RoPE scaling)
+</span><span id="__span-6-30"><a id="__codelineno-6-30" name="__codelineno-6-30" href="#__codelineno-6-30"></a>    ├── Test with needle-in-haystack: inject fact at various context positions
+</span><span id="__span-6-31"><a id="__codelineno-6-31" name="__codelineno-6-31" href="#__codelineno-6-31"></a>    │   and verify retrieval accuracy across the full context window.
+</span><span id="__span-6-32"><a id="__codelineno-6-32" name="__codelineno-6-32" href="#__codelineno-6-32"></a>    └── Regression at long distances (&gt; 50K tokens): reduce RoPE scale factor.
+</span></code></pre></div>
+<hr />
+<h3 id="h16-cost-per-request-too-high">H.1.6 Cost Per Request Too High<a class="headerlink" href="#h16-cost-per-request-too-high" title="Permanent link">&para;</a></h3>
+<p><strong>Observable signal</strong>: cost/1K tokens higher than budget target.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Run 7-layer optimization stack (Chapter 38) in this order:
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>│
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>Layer 1: QUANTIZATION (largest impact)
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>├── BF16 → FP8: ~2× throughput, same GPU count → ~50% cost reduction
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>└── Measure: perplexity regression must be &lt; 0.3 points
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>Layer 2: BATCHING EFFICIENCY
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>├── Check avg_batch_size / max_num_seqs. Target &gt; 0.65.
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>├── If &lt; 0.65: increase --max-num-seqs, tune --max-num-batched-tokens
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>└── Consider request buffering (small latency increase, large cost savings)
+</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>
+</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>Layer 3: PREFIX CACHING
+</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>├── Measure prefix_cache_hit_rate in metrics
+</span><span id="__span-7-14"><a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>├── If system prompt reuse rate &gt; 50%, prefix caching alone cuts prefill cost by 40–80%
+</span><span id="__span-7-15"><a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>└── For RAG: cache document embeddings + KV to avoid re-encoding
+</span><span id="__span-7-16"><a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>
+</span><span id="__span-7-17"><a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>Layer 4: SPECULATIVE DECODING (output-heavy workloads)
+</span><span id="__span-7-18"><a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a>├── Effective when output &gt;&gt; input (e.g., code generation)
+</span><span id="__span-7-19"><a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a>├── 2–3× decode speedup → same GPU serves 2–3× more requests
+</span><span id="__span-7-20"><a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a>└── Requires draft model; adds ~10% memory overhead
+</span><span id="__span-7-21"><a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a>
+</span><span id="__span-7-22"><a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a>Layer 5: AUTO-SCALING
+</span><span id="__span-7-23"><a id="__codelineno-7-23" name="__codelineno-7-23" href="#__codelineno-7-23"></a>├── Scale to zero during off-peak (useful for batch or low-traffic deployments)
+</span><span id="__span-7-24"><a id="__codelineno-7-24" name="__codelineno-7-24" href="#__codelineno-7-24"></a>├── Use KubeRay + vLLM V1 for sub-60s scale-up
+</span><span id="__span-7-25"><a id="__codelineno-7-25" name="__codelineno-7-25" href="#__codelineno-7-25"></a>└── Cost target: 80–90% GPU utilization at peak, NOT 100% (leaves 10% headroom
+</span><span id="__span-7-26"><a id="__codelineno-7-26" name="__codelineno-7-26" href="#__codelineno-7-26"></a>    for bursts, preventing SLO violations that require expensive retries)
+</span><span id="__span-7-27"><a id="__codelineno-7-27" name="__codelineno-7-27" href="#__codelineno-7-27"></a>
+</span><span id="__span-7-28"><a id="__codelineno-7-28" name="__codelineno-7-28" href="#__codelineno-7-28"></a>Layer 6: HARDWARE SELECTION
+</span><span id="__span-7-29"><a id="__codelineno-7-29" name="__codelineno-7-29" href="#__codelineno-7-29"></a>├── H100 vs A100: H100 ~2× cost per hour but ~3× throughput → lower cost/token
+</span><span id="__span-7-30"><a id="__codelineno-7-30" name="__codelineno-7-30" href="#__codelineno-7-30"></a>├── Spot/preemptible instances for batch workloads (save 60–70%)
+</span><span id="__span-7-31"><a id="__codelineno-7-31" name="__codelineno-7-31" href="#__codelineno-7-31"></a>└── NVLink topology matters for TP &gt; 4: always prefer NVLink over PCIe
+</span><span id="__span-7-32"><a id="__codelineno-7-32" name="__codelineno-7-32" href="#__codelineno-7-32"></a>
+</span><span id="__span-7-33"><a id="__codelineno-7-33" name="__codelineno-7-33" href="#__codelineno-7-33"></a>Layer 7: MODEL DISTILLATION / SMALLER MODELS
+</span><span id="__span-7-34"><a id="__codelineno-7-34" name="__codelineno-7-34" href="#__codelineno-7-34"></a>├── Can a smaller model meet quality SLOs?
+</span><span id="__span-7-35"><a id="__codelineno-7-35" name="__codelineno-7-35" href="#__codelineno-7-35"></a>│   70B → 8B with RAG: often matches quality at 8× lower cost
+</span><span id="__span-7-36"><a id="__codelineno-7-36" name="__codelineno-7-36" href="#__codelineno-7-36"></a>└── Measure: A/B test on representative traffic sample before routing all traffic
+</span></code></pre></div>
+<hr />
+<h2 id="h2-the-vllm-flags-quick-reference">H.2 The vLLM Flags Quick Reference<a class="headerlink" href="#h2-the-vllm-flags-quick-reference" title="Permanent link">&para;</a></h2>
+<p>The 20 most important vLLM engine arguments. All flags are passed to <code>vllm serve &lt;model&gt;</code> or set in <code>EngineArgs</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>What it does</th>
+<th>When to change</th>
+<th>Chapter</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--gpu-memory-utilization</code></td>
+<td><code>0.9</code></td>
+<td>Fraction of GPU HBM reserved for vLLM (weights + KV cache)</td>
+<td>Reduce to 0.85 if OOM at startup; increase to 0.95 if GPU memory is underused</td>
+<td>Ch 6</td>
+</tr>
+<tr>
+<td><code>--max-num-seqs</code></td>
+<td><code>256</code></td>
+<td>Maximum concurrent sequences in the engine</td>
+<td>Increase for high-concurrency workloads; reduce if OOM during bursts</td>
+<td>Ch 7</td>
+</tr>
+<tr>
+<td><code>--max-num-batched-tokens</code></td>
+<td><code>32768</code></td>
+<td>Max tokens in a single forward pass (prefill + decode combined)</td>
+<td>Increase for GPU-starved prefill; decrease to reduce TTFT variance</td>
+<td>Ch 11</td>
+</tr>
+<tr>
+<td><code>--max-model-len</code></td>
+<td>model default</td>
+<td>Maximum sequence length (input + output tokens)</td>
+<td>Reduce to save KV cache memory; must be ≤ model's trained context length</td>
+<td>Ch 6</td>
+</tr>
+<tr>
+<td><code>--tensor-parallel-size</code></td>
+<td><code>1</code></td>
+<td>Number of GPUs for tensor parallelism</td>
+<td>Set to number of GPUs on a single node</td>
+<td>Ch 15</td>
+</tr>
+<tr>
+<td><code>--pipeline-parallel-size</code></td>
+<td><code>1</code></td>
+<td>Number of pipeline stages across nodes</td>
+<td>Set to number of nodes for multi-node; adds bubble overhead</td>
+<td>Ch 15</td>
+</tr>
+<tr>
+<td><code>--quantization</code></td>
+<td><code>None</code></td>
+<td>Weight quantization method: <code>fp8</code>, <code>awq</code>, <code>gptq</code>, <code>bitsandbytes</code></td>
+<td>Always enable <code>fp8</code> on H100 for 2× throughput gain</td>
+<td>Ch 10</td>
+</tr>
+<tr>
+<td><code>--enable-prefix-caching</code></td>
+<td><code>False</code> (V0) / <code>True</code> (V1)</td>
+<td>Hash-based KV block deduplication for common prefixes</td>
+<td>Enable whenever system prompts are shared across requests</td>
+<td>Ch 11</td>
+</tr>
+<tr>
+<td><code>--enable-chunked-prefill</code></td>
+<td><code>False</code> (V0) / <code>True</code> (V1)</td>
+<td>Split long prefills into chunks, interleaved with decode</td>
+<td>Enable for interactive workloads with mixed prompt lengths</td>
+<td>Ch 11</td>
+</tr>
+<tr>
+<td><code>--max-loras</code></td>
+<td><code>1</code></td>
+<td>Max simultaneously loaded LoRA adapters</td>
+<td>Increase for multi-tenant LoRA serving; each adapter ~200–500 MB</td>
+<td>Ch 22</td>
+</tr>
+<tr>
+<td><code>--lora-extra-vocab-size</code></td>
+<td><code>0</code></td>
+<td>Extra vocabulary tokens added by LoRA adapters</td>
+<td>Set to adapter's extra vocab size if fine-tuned on new tokens</td>
+<td>Ch 22</td>
+</tr>
+<tr>
+<td><code>--speculative-model</code></td>
+<td><code>None</code></td>
+<td>Path to draft model for speculative decoding</td>
+<td>Set to a small (1–3B) model of same architecture</td>
+<td>Ch 23</td>
+</tr>
+<tr>
+<td><code>--num-speculative-tokens</code></td>
+<td><code>5</code></td>
+<td>Draft tokens proposed per step (γ)</td>
+<td>Tune 3–8; higher γ = better speedup if acceptance rate is high</td>
+<td>Ch 23</td>
+</tr>
+<tr>
+<td><code>--load-format</code></td>
+<td><code>auto</code></td>
+<td>Weight loading format: <code>safetensors</code>, <code>pt</code>, <code>gguf</code>, <code>npcache</code></td>
+<td>Use <code>safetensors</code> for faster streaming load; avoid <code>pt</code> for large models</td>
+<td>Ch 8</td>
+</tr>
+<tr>
+<td><code>--dtype</code></td>
+<td><code>auto</code></td>
+<td>Compute dtype: <code>bfloat16</code>, <code>float16</code>, <code>float32</code></td>
+<td>Use <code>bfloat16</code> always unless model requires <code>float16</code></td>
+<td>Ch 2</td>
+</tr>
+<tr>
+<td><code>--kv-cache-dtype</code></td>
+<td><code>auto</code></td>
+<td>KV cache storage dtype: <code>fp8</code>, <code>fp16</code>, <code>bf16</code></td>
+<td>Use <code>fp8</code> on H100 to reduce KV memory by 2×</td>
+<td>Ch 6</td>
+</tr>
+<tr>
+<td><code>--preemption-mode</code></td>
+<td><code>recompute</code></td>
+<td>How to handle KV cache eviction: <code>recompute</code> or <code>swap</code></td>
+<td>Use <code>recompute</code> (default); <code>swap</code> only if recompute latency is too high</td>
+<td>Ch 7</td>
+</tr>
+<tr>
+<td><code>--attention-backend</code></td>
+<td><code>flashinfer</code> (V1)</td>
+<td>Attention kernel backend: <code>flashinfer</code>, <code>flash_attn</code>, <code>triton</code></td>
+<td>Use <code>flashinfer</code> for best performance on H100/A100</td>
+<td>Ch 5</td>
+</tr>
+<tr>
+<td><code>--swap-space</code></td>
+<td><code>4</code> (GB)</td>
+<td>CPU RAM allocated for KV block swapping</td>
+<td>Increase on nodes with abundant RAM; set 0 to disable swapping</td>
+<td>Ch 7</td>
+</tr>
+<tr>
+<td><code>--disable-log-stats</code></td>
+<td><code>False</code></td>
+<td>Suppress per-step statistics logging</td>
+<td>Enable in production to reduce logging overhead (saves ~2% throughput)</td>
+<td>Ch 16</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Notes</strong>:</p>
+<ul>
+<li>vLLM V1 enables chunked prefill and prefix caching by default. V0 does not.</li>
+<li><code>--quantization fp8</code> requires H100 or newer; on A100, use <code>awq</code> or <code>gptq</code>.</li>
+<li><code>--tensor-parallel-size</code> must evenly divide <code>num_attention_heads</code> and <code>num_key_value_heads</code>.</li>
+</ul>
+<hr />
+<h2 id="h3-llamacpp-cli-quick-reference">H.3 llama.cpp CLI Quick Reference<a class="headerlink" href="#h3-llamacpp-cli-quick-reference" title="Permanent link">&para;</a></h2>
+<p>Key flags for <code>llama-cli</code> and <code>llama-server</code>. Flag names shown for the unified CLI (llama.cpp post-2024 refactor).</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>What it does</th>
+<th>When to change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-n</code> / <code>--predict</code></td>
+<td><code>128</code></td>
+<td>Maximum output tokens to generate</td>
+<td>Set to expected output length; <code>-1</code> for unlimited (use with caution)</td>
+</tr>
+<tr>
+<td><code>-c</code> / <code>--ctx-size</code></td>
+<td><code>512</code></td>
+<td>Context window in tokens (input + output)</td>
+<td>Increase to model's trained max; larger contexts use more RAM</td>
+</tr>
+<tr>
+<td><code>-ngl</code> / <code>--n-gpu-layers</code></td>
+<td><code>0</code></td>
+<td>Number of transformer layers offloaded to GPU</td>
+<td>Set to model's total layer count for full GPU offload; partial for CPU+GPU</td>
+</tr>
+<tr>
+<td><code>-t</code> / <code>--threads</code></td>
+<td>CPU count</td>
+<td>CPU threads for compute</td>
+<td>Set to physical core count (not hyperthreads) for CPU inference</td>
+</tr>
+<tr>
+<td><code>-tb</code> / <code>--threads-batch</code></td>
+<td>same as <code>-t</code></td>
+<td>Threads used during batch/prefill</td>
+<td>Can be set higher than <code>-t</code> for better prefill throughput</td>
+</tr>
+<tr>
+<td><code>-b</code> / <code>--batch-size</code></td>
+<td><code>2048</code></td>
+<td>Prompt batch size (tokens processed per chunk)</td>
+<td>Increase to 4096–8192 for long prompts; limited by RAM</td>
+</tr>
+<tr>
+<td><code>--ubatch-size</code></td>
+<td><code>512</code></td>
+<td>Micro-batch size for physical computation</td>
+<td>Tune for memory: smaller uses less VRAM peak</td>
+</tr>
+<tr>
+<td><code>-m</code> / <code>--model</code></td>
+<td>required</td>
+<td>Path to GGUF model file</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>--mlock</code></td>
+<td><code>false</code></td>
+<td>Lock model weights in RAM (prevent swapping)</td>
+<td>Enable in production to prevent OS from swapping weights to disk</td>
+</tr>
+<tr>
+<td><code>--no-mmap</code></td>
+<td><code>false</code></td>
+<td>Disable memory-mapped file loading</td>
+<td>Enable if mmap causes latency spikes on NFS or slow storage</td>
+</tr>
+<tr>
+<td><code>--numa</code></td>
+<td><code>none</code></td>
+<td>NUMA strategy: <code>distribute</code>, <code>isolate</code>, <code>numactl</code></td>
+<td>On multi-socket servers, use <code>numactl</code> with taskset for best performance</td>
+</tr>
+<tr>
+<td><code>-fa</code> / <code>--flash-attn</code></td>
+<td><code>false</code></td>
+<td>Enable Flash Attention</td>
+<td>Enable always when supported (requires compatible GGUF and CUDA backend)</td>
+</tr>
+<tr>
+<td><code>--cache-type-k</code></td>
+<td><code>f16</code></td>
+<td>KV cache dtype for keys: <code>f16</code>, <code>q8_0</code>, <code>q4_0</code></td>
+<td>Use <code>q8_0</code> to reduce VRAM by ~50% with minimal quality loss</td>
+</tr>
+<tr>
+<td><code>--cache-type-v</code></td>
+<td><code>f16</code></td>
+<td>KV cache dtype for values</td>
+<td>Same as above; can differ from key cache type</td>
+</tr>
+<tr>
+<td><code>-nkvo</code> / <code>--no-kv-offload</code></td>
+<td><code>false</code></td>
+<td>Disable KV cache GPU offload</td>
+<td>Use if VRAM is tight and CPU KV cache is acceptable</td>
+</tr>
+<tr>
+<td><code>--grp-attn-n</code></td>
+<td><code>1</code></td>
+<td>Group attention factor for context extension</td>
+<td>Set to 4–8 for 4–8× context extension (Self-Extend technique)</td>
+</tr>
+<tr>
+<td><code>--temp</code></td>
+<td><code>0.8</code></td>
+<td>Sampling temperature</td>
+<td>0.0 for greedy/deterministic; 0.7–1.0 for creative tasks</td>
+</tr>
+<tr>
+<td><code>--top-p</code></td>
+<td><code>0.95</code></td>
+<td>Nucleus sampling threshold</td>
+<td>Reduce to 0.85 for more focused outputs</td>
+</tr>
+<tr>
+<td><code>--top-k</code></td>
+<td><code>40</code></td>
+<td>Top-K sampling</td>
+<td>Set to 0 to disable; combine with top-p</td>
+</tr>
+<tr>
+<td><code>--repeat-penalty</code></td>
+<td><code>1.1</code></td>
+<td>Penalty for repeated tokens</td>
+<td>Increase to 1.2–1.3 if model loops; decrease if output is too sparse</td>
+</tr>
+<tr>
+<td><code>-sp</code> / <code>--system-prompt</code></td>
+<td><code>""</code></td>
+<td>System prompt string</td>
+<td>Use <code>-spf</code> to load from file</td>
+</tr>
+<tr>
+<td><code>--port</code></td>
+<td><code>8080</code></td>
+<td>HTTP server port (llama-server)</td>
+<td>Change if 8080 is in use</td>
+</tr>
+<tr>
+<td><code>--parallel</code></td>
+<td><code>1</code></td>
+<td>Simultaneous parallel slots (llama-server)</td>
+<td>Increase for multi-user serving; each slot needs separate KV cache</td>
+</tr>
+<tr>
+<td><code>--cont-batching</code></td>
+<td><code>true</code></td>
+<td>Continuous batching (llama-server)</td>
+<td>Keep enabled; disable only for debugging</td>
+</tr>
+</tbody>
+</table>
+<p><strong>llama.cpp performance quick-start</strong> (70B model, single H100 80GB):
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>llama-cli<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span>-m<span class="w"> </span>Meta-Llama-3.1-70B-Instruct-Q4_K_M.gguf<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span>-ngl<span class="w"> </span><span class="m">80</span><span class="w"> </span><span class="se">\ </span><span class="w">          </span><span class="c1"># all 80 layers on GPU</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span>-c<span class="w"> </span><span class="m">32768</span><span class="w"> </span><span class="se">\ </span><span class="w">         </span><span class="c1"># 32K context</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">  </span>-b<span class="w"> </span><span class="m">4096</span><span class="w"> </span><span class="se">\ </span><span class="w">          </span><span class="c1"># large prefill batch</span>
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">  </span>-fa<span class="w"> </span><span class="se">\ </span><span class="w">              </span><span class="c1"># Flash Attention</span>
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">  </span>--mlock<span class="w"> </span><span class="se">\ </span><span class="w">          </span><span class="c1"># lock weights in memory</span>
+</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">  </span>--cache-type-k<span class="w"> </span>q8_0<span class="w"> </span><span class="se">\ </span><span class="w"> </span><span class="c1"># compressed KV cache</span>
+</span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">  </span>-n<span class="w"> </span><span class="m">512</span>
+</span></code></pre></div></p>
+<hr />
+<h2 id="h4-memory-budget-worksheet">H.4 Memory Budget Worksheet<a class="headerlink" href="#h4-memory-budget-worksheet" title="Permanent link">&para;</a></h2>
+<p>Use this template during capacity planning. Fill in values from left to right; each row feeds the next.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>═══════════════════════════════════════════════════════════════════════════
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>                    KV CACHE MEMORY BUDGET WORKSHEET
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>═══════════════════════════════════════════════════════════════════════════
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>MODEL CONFIGURATION
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>  Model name:          ________________
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>  Parameter count:     _____ B  (e.g., 70)
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>  Precision (weights): ______   (BF16=2B, FP8=1B, INT4=0.5B, INT8=1B)
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>  Architecture:        ______   (e.g., Llama-3, Qwen2.5, Mistral)
+</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>
+</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>GPU CONFIGURATION
+</span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>  GPU model:           ___×  ______________________  (e.g., 4× H100 SXM)
+</span><span id="__span-9-13"><a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>  HBM per GPU:         _____ GB   (H100=80, A100=80, A10=24, L40S=48)
+</span><span id="__span-9-14"><a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>  Total HBM:           _____  ×  _____  =  _____ GB
+</span><span id="__span-9-15"><a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>  Tensor parallel:     _____ GPUs  (set to number of GPUs on node)
+</span><span id="__span-9-16"><a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>
+</span><span id="__span-9-17"><a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a>WEIGHT MEMORY (per GPU after tensor parallelism)
+</span><span id="__span-9-18"><a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>  weight_bytes = params_B × 1e9 × dtype_bytes / tp_size
+</span><span id="__span-9-19"><a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a>              = _____ × 1e9 × _____ / _____
+</span><span id="__span-9-20"><a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a>              = _____ GB
+</span><span id="__span-9-21"><a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a>
+</span><span id="__span-9-22"><a id="__codelineno-9-22" name="__codelineno-9-22" href="#__codelineno-9-22"></a>ACTIVATION MEMORY (estimate, typically 1–3 GB per GPU)
+</span><span id="__span-9-23"><a id="__codelineno-9-23" name="__codelineno-9-23" href="#__codelineno-9-23"></a>  activation_GB = _____ GB  (use 2 GB as conservative estimate)
+</span><span id="__span-9-24"><a id="__codelineno-9-24" name="__codelineno-9-24" href="#__codelineno-9-24"></a>
+</span><span id="__span-9-25"><a id="__codelineno-9-25" name="__codelineno-9-25" href="#__codelineno-9-25"></a>KV CACHE BUDGET (per GPU)
+</span><span id="__span-9-26"><a id="__codelineno-9-26" name="__codelineno-9-26" href="#__codelineno-9-26"></a>  kv_budget = total_HBM × gpu_memory_utilization - weight_GB - activation_GB
+</span><span id="__span-9-27"><a id="__codelineno-9-27" name="__codelineno-9-27" href="#__codelineno-9-27"></a>            = _____ × _____ - _____ - _____
+</span><span id="__span-9-28"><a id="__codelineno-9-28" name="__codelineno-9-28" href="#__codelineno-9-28"></a>            = _____ GB
+</span><span id="__span-9-29"><a id="__codelineno-9-29" name="__codelineno-9-29" href="#__codelineno-9-29"></a>
+</span><span id="__span-9-30"><a id="__codelineno-9-30" name="__codelineno-9-30" href="#__codelineno-9-30"></a>KV CACHE PER TOKEN (per GPU, across all sequences)
+</span><span id="__span-9-31"><a id="__codelineno-9-31" name="__codelineno-9-31" href="#__codelineno-9-31"></a>  Architecture parameters:
+</span><span id="__span-9-32"><a id="__codelineno-9-32" name="__codelineno-9-32" href="#__codelineno-9-32"></a>    num_layers:     _____   (e.g., 80 for Llama-3 70B)
+</span><span id="__span-9-33"><a id="__codelineno-9-33" name="__codelineno-9-33" href="#__codelineno-9-33"></a>    num_kv_heads:   _____   (e.g., 8 for GQA in Llama-3 70B)
+</span><span id="__span-9-34"><a id="__codelineno-9-34" name="__codelineno-9-34" href="#__codelineno-9-34"></a>    head_dim:       _____   (typically 128)
+</span><span id="__span-9-35"><a id="__codelineno-9-35" name="__codelineno-9-35" href="#__codelineno-9-35"></a>    kv_dtype_bytes: _____   (FP16/BF16=2, FP8=1, INT8=1)
+</span><span id="__span-9-36"><a id="__codelineno-9-36" name="__codelineno-9-36" href="#__codelineno-9-36"></a>    tp_size:        _____   (same as above)
+</span><span id="__span-9-37"><a id="__codelineno-9-37" name="__codelineno-9-37" href="#__codelineno-9-37"></a>
+</span><span id="__span-9-38"><a id="__codelineno-9-38" name="__codelineno-9-38" href="#__codelineno-9-38"></a>  kv_per_token = 2 × num_layers × (num_kv_heads / tp_size) × head_dim × kv_dtype_bytes
+</span><span id="__span-9-39"><a id="__codelineno-9-39" name="__codelineno-9-39" href="#__codelineno-9-39"></a>               = 2 × _____ × _____ × _____ × _____
+</span><span id="__span-9-40"><a id="__codelineno-9-40" name="__codelineno-9-40" href="#__codelineno-9-40"></a>               = _____ bytes per token
+</span><span id="__span-9-41"><a id="__codelineno-9-41" name="__codelineno-9-41" href="#__codelineno-9-41"></a>
+</span><span id="__span-9-42"><a id="__codelineno-9-42" name="__codelineno-9-42" href="#__codelineno-9-42"></a>MAX SEQUENCE CAPACITY
+</span><span id="__span-9-43"><a id="__codelineno-9-43" name="__codelineno-9-43" href="#__codelineno-9-43"></a>  max_tokens_in_cache = kv_budget_GB × 1e9 / kv_per_token
+</span><span id="__span-9-44"><a id="__codelineno-9-44" name="__codelineno-9-44" href="#__codelineno-9-44"></a>                      = _____ × 1e9 / _____
+</span><span id="__span-9-45"><a id="__codelineno-9-45" name="__codelineno-9-45" href="#__codelineno-9-45"></a>                      = _____ tokens total
+</span><span id="__span-9-46"><a id="__codelineno-9-46" name="__codelineno-9-46" href="#__codelineno-9-46"></a>
+</span><span id="__span-9-47"><a id="__codelineno-9-47" name="__codelineno-9-47" href="#__codelineno-9-47"></a>  Given max_model_len = _____ tokens per sequence:
+</span><span id="__span-9-48"><a id="__codelineno-9-48" name="__codelineno-9-48" href="#__codelineno-9-48"></a>  max_sequences = max_tokens_in_cache / max_model_len
+</span><span id="__span-9-49"><a id="__codelineno-9-49" name="__codelineno-9-49" href="#__codelineno-9-49"></a>                = _____ / _____
+</span><span id="__span-9-50"><a id="__codelineno-9-50" name="__codelineno-9-50" href="#__codelineno-9-50"></a>                = _____ concurrent sequences (theoretical max)
+</span><span id="__span-9-51"><a id="__codelineno-9-51" name="__codelineno-9-51" href="#__codelineno-9-51"></a>
+</span><span id="__span-9-52"><a id="__codelineno-9-52" name="__codelineno-9-52" href="#__codelineno-9-52"></a>  Practical max (apply 0.8 efficiency factor):
+</span><span id="__span-9-53"><a id="__codelineno-9-53" name="__codelineno-9-53" href="#__codelineno-9-53"></a>  practical_max_seqs ≈ max_sequences × 0.8 = _____
+</span><span id="__span-9-54"><a id="__codelineno-9-54" name="__codelineno-9-54" href="#__codelineno-9-54"></a>
+</span><span id="__span-9-55"><a id="__codelineno-9-55" name="__codelineno-9-55" href="#__codelineno-9-55"></a>BLOCK TABLE SIZE
+</span><span id="__span-9-56"><a id="__codelineno-9-56" name="__codelineno-9-56" href="#__codelineno-9-56"></a>  block_size = _____ tokens per block (vLLM default: 16)
+</span><span id="__span-9-57"><a id="__codelineno-9-57" name="__codelineno-9-57" href="#__codelineno-9-57"></a>  num_blocks = max_tokens_in_cache / block_size
+</span><span id="__span-9-58"><a id="__codelineno-9-58" name="__codelineno-9-58" href="#__codelineno-9-58"></a>             = _____ / _____ = _____ blocks
+</span><span id="__span-9-59"><a id="__codelineno-9-59" name="__codelineno-9-59" href="#__codelineno-9-59"></a>
+</span><span id="__span-9-60"><a id="__codelineno-9-60" name="__codelineno-9-60" href="#__codelineno-9-60"></a>WORKED EXAMPLE (Llama-3.1 70B, BF16, 4× H100, max_len=32K)
+</span><span id="__span-9-61"><a id="__codelineno-9-61" name="__codelineno-9-61" href="#__codelineno-9-61"></a>  weight_GB   = 70 × 2 / 4       = 35 GB per GPU
+</span><span id="__span-9-62"><a id="__codelineno-9-62" name="__codelineno-9-62" href="#__codelineno-9-62"></a>  activation  = 2 GB
+</span><span id="__span-9-63"><a id="__codelineno-9-63" name="__codelineno-9-63" href="#__codelineno-9-63"></a>  kv_budget   = 80 × 0.90 - 35 - 2 = 35 GB per GPU
+</span><span id="__span-9-64"><a id="__codelineno-9-64" name="__codelineno-9-64" href="#__codelineno-9-64"></a>  kv_per_tok  = 2 × 80 × (8/4) × 128 × 2 = 81,920 bytes ≈ 80 KB/token
+</span><span id="__span-9-65"><a id="__codelineno-9-65" name="__codelineno-9-65" href="#__codelineno-9-65"></a>  max_tokens  = 35e9 / 81920     ≈ 427,246 tokens
+</span><span id="__span-9-66"><a id="__codelineno-9-66" name="__codelineno-9-66" href="#__codelineno-9-66"></a>  max_seqs    = 427,246 / 32768  ≈ 13 sequences (× 0.8 ≈ 10 practical)
+</span><span id="__span-9-67"><a id="__codelineno-9-67" name="__codelineno-9-67" href="#__codelineno-9-67"></a>
+</span><span id="__span-9-68"><a id="__codelineno-9-68" name="__codelineno-9-68" href="#__codelineno-9-68"></a>  → With FP8 KV cache (kv_dtype=1B):
+</span><span id="__span-9-69"><a id="__codelineno-9-69" name="__codelineno-9-69" href="#__codelineno-9-69"></a>  kv_per_tok  = 2 × 80 × 2 × 128 × 1 = 40,960 bytes
+</span><span id="__span-9-70"><a id="__codelineno-9-70" name="__codelineno-9-70" href="#__codelineno-9-70"></a>  max_tokens  = 35e9 / 40960     ≈ 854,492 tokens
+</span><span id="__span-9-71"><a id="__codelineno-9-71" name="__codelineno-9-71" href="#__codelineno-9-71"></a>  max_seqs    ≈ 20 practical     (2× improvement from KV quantization alone)
+</span><span id="__span-9-72"><a id="__codelineno-9-72" name="__codelineno-9-72" href="#__codelineno-9-72"></a>═══════════════════════════════════════════════════════════════════════════
+</span></code></pre></div>
+<p><strong>Copy-paste calculation script</strong>:
+<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># kv_budget_calc.py</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">params_b</span>        <span class="o">=</span> <span class="mi">70</span>        <span class="c1"># model size in billions</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">weight_dtype_b</span>  <span class="o">=</span> <span class="mi">2</span>         <span class="c1"># BF16</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">tp_size</span>         <span class="o">=</span> <span class="mi">4</span>         <span class="c1"># tensor parallel</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">hbm_per_gpu_gb</span>  <span class="o">=</span> <span class="mi">80</span>        <span class="c1"># H100</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="n">num_gpus</span>        <span class="o">=</span> <span class="mi">4</span>
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="n">gpu_mem_util</span>    <span class="o">=</span> <span class="mf">0.90</span>
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="n">activation_gb</span>   <span class="o">=</span> <span class="mf">2.0</span>
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>
+</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="n">num_layers</span>      <span class="o">=</span> <span class="mi">80</span>
+</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="n">num_kv_heads</span>    <span class="o">=</span> <span class="mi">8</span>
+</span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="n">head_dim</span>        <span class="o">=</span> <span class="mi">128</span>
+</span><span id="__span-10-13"><a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="n">kv_dtype_b</span>      <span class="o">=</span> <span class="mi">2</span>         <span class="c1"># FP16/BF16 KV cache</span>
+</span><span id="__span-10-14"><a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="n">max_model_len</span>   <span class="o">=</span> <span class="mi">32768</span>
+</span><span id="__span-10-15"><a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="n">block_size</span>      <span class="o">=</span> <span class="mi">16</span>
+</span><span id="__span-10-16"><a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>
+</span><span id="__span-10-17"><a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a><span class="n">weight_gb</span>     <span class="o">=</span> <span class="n">params_b</span> <span class="o">*</span> <span class="mf">1e9</span> <span class="o">*</span> <span class="n">weight_dtype_b</span> <span class="o">/</span> <span class="n">tp_size</span> <span class="o">/</span> <span class="mf">1e9</span>
+</span><span id="__span-10-18"><a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a><span class="n">kv_budget_gb</span>  <span class="o">=</span> <span class="n">hbm_per_gpu_gb</span> <span class="o">*</span> <span class="n">gpu_mem_util</span> <span class="o">-</span> <span class="n">weight_gb</span> <span class="o">-</span> <span class="n">activation_gb</span>
+</span><span id="__span-10-19"><a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a><span class="n">kv_per_tok</span>    <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">num_layers</span> <span class="o">*</span> <span class="p">(</span><span class="n">num_kv_heads</span> <span class="o">//</span> <span class="n">tp_size</span><span class="p">)</span> <span class="o">*</span> <span class="n">head_dim</span> <span class="o">*</span> <span class="n">kv_dtype_b</span>
+</span><span id="__span-10-20"><a id="__codelineno-10-20" name="__codelineno-10-20" href="#__codelineno-10-20"></a><span class="n">max_tokens</span>    <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">kv_budget_gb</span> <span class="o">*</span> <span class="mf">1e9</span> <span class="o">/</span> <span class="n">kv_per_tok</span><span class="p">)</span>
+</span><span id="__span-10-21"><a id="__codelineno-10-21" name="__codelineno-10-21" href="#__codelineno-10-21"></a><span class="n">max_seqs</span>      <span class="o">=</span> <span class="n">max_tokens</span> <span class="o">//</span> <span class="n">max_model_len</span>
+</span><span id="__span-10-22"><a id="__codelineno-10-22" name="__codelineno-10-22" href="#__codelineno-10-22"></a><span class="n">num_blocks</span>    <span class="o">=</span> <span class="n">max_tokens</span> <span class="o">//</span> <span class="n">block_size</span>
+</span><span id="__span-10-23"><a id="__codelineno-10-23" name="__codelineno-10-23" href="#__codelineno-10-23"></a>
+</span><span id="__span-10-24"><a id="__codelineno-10-24" name="__codelineno-10-24" href="#__codelineno-10-24"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Weight memory per GPU:  </span><span class="si">{</span><span class="n">weight_gb</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> GB&quot;</span><span class="p">)</span>
+</span><span id="__span-10-25"><a id="__codelineno-10-25" name="__codelineno-10-25" href="#__codelineno-10-25"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;KV cache budget:        </span><span class="si">{</span><span class="n">kv_budget_gb</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> GB&quot;</span><span class="p">)</span>
+</span><span id="__span-10-26"><a id="__codelineno-10-26" name="__codelineno-10-26" href="#__codelineno-10-26"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;KV bytes per token:     </span><span class="si">{</span><span class="n">kv_per_tok</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> bytes (</span><span class="si">{</span><span class="n">kv_per_tok</span><span class="o">/</span><span class="mi">1024</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> KB)&quot;</span><span class="p">)</span>
+</span><span id="__span-10-27"><a id="__codelineno-10-27" name="__codelineno-10-27" href="#__codelineno-10-27"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Max tokens in cache:    </span><span class="si">{</span><span class="n">max_tokens</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</span><span id="__span-10-28"><a id="__codelineno-10-28" name="__codelineno-10-28" href="#__codelineno-10-28"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Max sequences:          </span><span class="si">{</span><span class="n">max_seqs</span><span class="si">}</span><span class="s2"> (theoretical) / </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">max_seqs</span><span class="o">*</span><span class="mf">0.8</span><span class="p">)</span><span class="si">}</span><span class="s2"> (practical)&quot;</span><span class="p">)</span>
+</span><span id="__span-10-29"><a id="__codelineno-10-29" name="__codelineno-10-29" href="#__codelineno-10-29"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Number of KV blocks:    </span><span class="si">{</span><span class="n">num_blocks</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</span></code></pre></div></p>
+<hr />
+<h2 id="h5-slo-calibration-guide">H.5 SLO Calibration Guide<a class="headerlink" href="#h5-slo-calibration-guide" title="Permanent link">&para;</a></h2>
+<p>Service Level Objectives for LLM inference differ fundamentally by use case. The following guidelines are based on industry benchmarks and user perception research (Chapter 16).</p>
+<h3 id="metric-definitions">Metric Definitions<a class="headerlink" href="#metric-definitions" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Definition</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>TTFT</strong></td>
+<td>Time from request send to first output token</td>
+<td>Includes network + queue + prefill time</td>
+</tr>
+<tr>
+<td><strong>TPOT</strong></td>
+<td>Time per output token (inter-token latency)</td>
+<td>= 1 / decode_tokens_per_second</td>
+</tr>
+<tr>
+<td><strong>E2E Latency</strong></td>
+<td>Total time from request to final token</td>
+<td>= TTFT + (output_len - 1) × TPOT</td>
+</tr>
+<tr>
+<td><strong>p50</strong></td>
+<td>Median latency</td>
+<td>Half of requests are faster</td>
+</tr>
+<tr>
+<td><strong>p95</strong></td>
+<td>95th percentile</td>
+<td>1 in 20 requests exceeds this</td>
+</tr>
+<tr>
+<td><strong>p99</strong></td>
+<td>99th percentile</td>
+<td>1 in 100 requests exceeds this</td>
+</tr>
+</tbody>
+</table>
+<h3 id="slo-targets-by-use-case">SLO Targets by Use Case<a class="headerlink" href="#slo-targets-by-use-case" title="Permanent link">&para;</a></h3>
+<p><strong>Interactive Chat (e.g., customer support bot, general assistant)</strong></p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Tight (premium)</th>
+<th>Moderate</th>
+<th>Relaxed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TTFT p50</td>
+<td>&lt; 200 ms</td>
+<td>&lt; 400 ms</td>
+<td>&lt; 800 ms</td>
+</tr>
+<tr>
+<td>TTFT p95</td>
+<td>&lt; 500 ms</td>
+<td>&lt; 800 ms</td>
+<td>&lt; 1,500 ms</td>
+</tr>
+<tr>
+<td>TPOT p50</td>
+<td>&lt; 30 ms</td>
+<td>&lt; 50 ms</td>
+<td>&lt; 80 ms</td>
+</tr>
+<tr>
+<td>TPOT p95</td>
+<td>&lt; 60 ms</td>
+<td>&lt; 100 ms</td>
+<td>&lt; 150 ms</td>
+</tr>
+</tbody>
+</table>
+<p>Human perception notes: TTFT &gt; 1 s feels "slow" to most users. TPOT &gt; 100 ms disrupts the illusion of streaming. TPOT &gt; 50 ms is noticeable for fast readers. 15–30 ms TPOT (≈ 33–67 tokens/s) is comfortable for most.</p>
+<p><strong>Coding Assistant (e.g., inline code completion, docstring generation)</strong></p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Tight</th>
+<th>Moderate</th>
+<th>Relaxed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TTFT p50</td>
+<td>&lt; 100 ms</td>
+<td>&lt; 200 ms</td>
+<td>&lt; 400 ms</td>
+</tr>
+<tr>
+<td>TTFT p95</td>
+<td>&lt; 250 ms</td>
+<td>&lt; 500 ms</td>
+<td>&lt; 800 ms</td>
+</tr>
+<tr>
+<td>TPOT p50</td>
+<td>&lt; 20 ms</td>
+<td>&lt; 35 ms</td>
+<td>&lt; 60 ms</td>
+</tr>
+<tr>
+<td>E2E (512 output)</td>
+<td>&lt; 3 s</td>
+<td>&lt; 6 s</td>
+<td>&lt; 10 s</td>
+</tr>
+</tbody>
+</table>
+<p>Notes: Coding completions require faster TTFT than chat because users are actively waiting. Short outputs (50–200 tokens) mean E2E latency is dominated by TTFT. Prefer smaller, faster models (8B–14B) over larger models unless quality requires it.</p>
+<p><strong>Batch Processing (e.g., document summarization, data extraction, offline eval)</strong></p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Target</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TTFT</td>
+<td>Not a primary SLO (batch jobs are not interactive)</td>
+</tr>
+<tr>
+<td>Throughput</td>
+<td>Maximize tokens/s</td>
+</tr>
+<tr>
+<td>E2E per item</td>
+<td>&lt; N × baseline (define per job type)</td>
+</tr>
+<tr>
+<td>Cost per 1K tokens</td>
+<td>Primary optimization target</td>
+</tr>
+</tbody>
+</table>
+<p>Notes: For batch workloads, sacrifice latency for throughput. Set <code>--max-num-seqs</code> as high as memory allows. Use FP8 and larger batch sizes. Consider offline batching with vLLM's offline API.</p>
+<p><strong>RAG (Retrieval-Augmented Generation)</strong></p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Target</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Retrieval TTFT (pre-LLM)</td>
+<td>&lt; 100 ms (vector DB query)</td>
+</tr>
+<tr>
+<td>LLM TTFT</td>
+<td>&lt; 300 ms p95</td>
+</tr>
+<tr>
+<td>TPOT</td>
+<td>&lt; 40 ms p95</td>
+</tr>
+<tr>
+<td>Total E2E (incl. retrieval)</td>
+<td>&lt; 2 s p95</td>
+</tr>
+</tbody>
+</table>
+<p>Notes: RAG latency budget must account for retrieval time. LLM TTFT must therefore be tighter. Prefix caching is highly effective for RAG: cache the static document KV blocks, only recompute the query KV. Cache hit rate can reach 70–95% if documents are repeated across queries.</p>
+<p><strong>Agentic / Multi-step Reasoning (e.g., tool-calling loops, chain-of-thought)</strong></p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Target</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Per-step TTFT</td>
+<td>&lt; 300 ms</td>
+</tr>
+<tr>
+<td>Per-step E2E</td>
+<td>&lt; 5 s</td>
+</tr>
+<tr>
+<td>Total task completion</td>
+<td>Defined per workflow</td>
+</tr>
+</tbody>
+</table>
+<p>Notes: Agentic workloads compound latency across N steps. A 10-step agent with 1 s per step has 10 s total latency — budget each step accordingly. Caching is critical: cache the growing conversation context across turns.</p>
+<h3 id="slo-implementation-checklist">SLO Implementation Checklist<a class="headerlink" href="#slo-implementation-checklist" title="Permanent link">&para;</a></h3>
+<ul>
+<li>[ ] Define SLOs in terms of p50 AND p95 (p50 alone hides tail behavior)</li>
+<li>[ ] Alert on p99 for early warning; page on p95 breach</li>
+<li>[ ] Set separate SLOs for TTFT and TPOT (they have different root causes)</li>
+<li>[ ] Instrument with Prometheus histograms, not averages</li>
+<li>[ ] Run synthetic load tests at 110% expected peak before production launch</li>
+<li>[ ] Review SLOs quarterly as model size and traffic patterns evolve</li>
+</ul>
+<hr />
+<h2 id="h6-common-failure-modes-reference-card">H.6 Common Failure Modes Reference Card<a class="headerlink" href="#h6-common-failure-modes-reference-card" title="Permanent link">&para;</a></h2>
+<p>Quick-lookup table for on-call engineers. Each row is a distinct failure mode with its diagnostic command and fastest fix.</p>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely Cause</th>
+<th>Diagnostic Command</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TTFT &gt; 2× baseline suddenly</td>
+<td>Prefix cache cold (after restart or model update)</td>
+<td><code>curl localhost:8000/metrics \| grep prefix_cache_hit_rate</code></td>
+<td>Warm cache with representative requests; consider cache persistence in future</td>
+</tr>
+<tr>
+<td>TPOT increases with load</td>
+<td>KV cache filling, preemptions occurring</td>
+<td><code>curl localhost:8000/metrics \| grep num_preemptions</code></td>
+<td>Add GPU replicas; reduce <code>--max-num-seqs</code>; increase <code>--gpu-memory-utilization</code></td>
+</tr>
+<tr>
+<td>Requests timing out</td>
+<td>Queue backed up; decode not keeping up with arrival</td>
+<td><code>curl localhost:8000/metrics \| grep num_waiting</code></td>
+<td>Scale out replicas; enable chunked prefill; shed load via admission control</td>
+</tr>
+<tr>
+<td><code>CUDA out of memory</code> at startup</td>
+<td>Weight + KV reservation exceeds available HBM</td>
+<td><code>nvidia-smi --query-gpu=memory.free --format=csv</code></td>
+<td>Reduce <code>--gpu-memory-utilization</code>; increase <code>--tensor-parallel-size</code></td>
+</tr>
+<tr>
+<td><code>CUDA out of memory</code> during burst</td>
+<td>Peak KV cache usage exceeds reservation</td>
+<td>Check <code>vllm:gpu_cache_usage_perc</code> == 1.0</td>
+<td>Reduce <code>--max-model-len</code>; reduce <code>--max-num-seqs</code>; enable preemption</td>
+</tr>
+<tr>
+<td>Output tokens cut short</td>
+<td><code>max_model_len</code> too small, sequence hits limit</td>
+<td>Check <code>finish_reason: length</code> in API responses</td>
+<td>Increase <code>--max-model-len</code>; ensure sufficient KV budget</td>
+</tr>
+<tr>
+<td>Repetitive / looping output</td>
+<td>Sampling temperature issue or KV cache corruption</td>
+<td>Compare BF16 vs quantized output for same seed</td>
+<td>Increase <code>--repeat-penalty</code>; if after quantization, run perplexity check</td>
+</tr>
+<tr>
+<td>High variance in response quality</td>
+<td>Multiple LoRA adapters mixing up</td>
+<td>Check adapter routing logs</td>
+<td>Verify <code>lora_request.lora_name</code> is set correctly per request</td>
+</tr>
+<tr>
+<td>GPU at 100% but throughput flat</td>
+<td>CUDA kernel serialization or PCIe bottleneck</td>
+<td><code>nsys profile --trace=cuda,nvtx &lt;cmd&gt;</code></td>
+<td>Enable NVLink; reduce tensor parallel communication overhead</td>
+</tr>
+<tr>
+<td>GPU at &lt; 30% during decode</td>
+<td>Batch too small; memory-bandwidth underutilized</td>
+<td><code>nvidia-smi dmon -s u -d 1</code></td>
+<td>Increase <code>--max-num-seqs</code>; implement request queuing to fill batches</td>
+</tr>
+<tr>
+<td>Latency spikes every ~60s</td>
+<td>Python GC pause or log flush</td>
+<td><code>py-spy record --pid &lt;PID&gt; -o trace.svg</code></td>
+<td><code>gc.disable()</code> in critical path; reduce log verbosity</td>
+</tr>
+<tr>
+<td><code>torch.cuda.CUDAError: device-side assert</code></td>
+<td>Vocabulary index out of range in sampling</td>
+<td>Check tokenizer config matches model</td>
+<td>Verify <code>--tokenizer</code> path matches model; check for vocabulary mismatch</td>
+</tr>
+<tr>
+<td>vLLM won't start with quantized model</td>
+<td>Quantization format mismatch</td>
+<td>Check error: <code>quantization config mismatch</code></td>
+<td>Ensure <code>--quantization</code> flag matches checkpoint format exactly</td>
+</tr>
+<tr>
+<td>Health check failing intermittently</td>
+<td>Worker process crashed and restarted</td>
+<td><code>journalctl -u vllm -n 100</code></td>
+<td>Check for OOM kills in kernel log; add memory headroom</td>
+</tr>
+<tr>
+<td>Throughput regression after upgrade</td>
+<td>New vLLM version changed defaults</td>
+<td>Diff vLLM changelogs for flag changes</td>
+<td>Pin to known-good version; compare <code>--max-num-batched-tokens</code> defaults</td>
+</tr>
+<tr>
+<td>LoRA adapter not loading</td>
+<td>Wrong adapter rank or base model mismatch</td>
+<td>Check: <code>ValueError: LoRA rank mismatch</code></td>
+<td>Ensure adapter was trained on same base model and same <code>lora_rank</code></td>
+</tr>
+<tr>
+<td>All requests returning 429</td>
+<td>Rate limiting or admission control triggered</td>
+<td>Check <code>vllm:num_requests_rejected</code></td>
+<td>Tune admission control threshold; scale out replicas</td>
+</tr>
+<tr>
+<td>Degraded quality after FP8 migration</td>
+<td>FP8 calibration data not representative</td>
+<td>Run: <code>lm_eval --tasks wikitext</code></td>
+<td>Re-calibrate FP8 with production-representative data</td>
+</tr>
+<tr>
+<td>High memory usage on CPU</td>
+<td>KV block swapping to CPU RAM overwhelming it</td>
+<td><code>free -h</code> on serving node</td>
+<td>Disable swapping (<code>--swap-space 0</code>) or increase node RAM</td>
+</tr>
+<tr>
+<td>NCCL timeout errors</td>
+<td>Inter-GPU communication failure</td>
+<td><code>NCCL_DEBUG=INFO vllm serve ...</code></td>
+<td>Check NVLink / InfiniBand health; verify all GPUs on same fabric</td>
+</tr>
+<tr>
+<td>Slow first request after idle</td>
+<td>CUDA kernel JIT compilation on cold path</td>
+<td>Time first vs second request</td>
+<td>Pre-warm with synthetic requests; CUDA graphs handle most hot paths</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="h7-deployment-topology-quick-reference">H.7 Deployment Topology Quick Reference<a class="headerlink" href="#h7-deployment-topology-quick-reference" title="Permanent link">&para;</a></h2>
+<p>Common deployment patterns and their recommended configurations.</p>
+<h3 id="single-node-single-gpu-development-small-models">Single-Node, Single-GPU (Development / Small Models)<a class="headerlink" href="#single-node-single-gpu-development-small-models" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>vllm serve &lt;model&gt; \
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>  --dtype bfloat16 \
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>  --gpu-memory-utilization 0.90 \
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>  --max-num-seqs 32 \
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>  --enable-prefix-caching \
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>  --enable-chunked-prefill
+</span></code></pre></div>
+<ul>
+<li>Use case: models up to 13B, local development, single-user demo</li>
+<li>Expected throughput: 500–2,000 tokens/s depending on model size</li>
+</ul>
+<h3 id="single-node-multi-gpu-production-small-cluster">Single-Node, Multi-GPU (Production Small Cluster)<a class="headerlink" href="#single-node-multi-gpu-production-small-cluster" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>vllm serve &lt;model&gt; \
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>  --tensor-parallel-size 8 \
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>  --quantization fp8 \
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>  --gpu-memory-utilization 0.90 \
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>  --max-num-seqs 256 \
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>  --enable-prefix-caching \
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>  --enable-chunked-prefill \
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>  --attention-backend flashinfer
+</span></code></pre></div>
+<ul>
+<li>Use case: 70B models on 8× H100</li>
+<li>Expected throughput: 5,000–15,000 tokens/s</li>
+</ul>
+<h3 id="multi-node-disaggregated-high-scale-production">Multi-Node, Disaggregated (High-Scale Production)<a class="headerlink" href="#multi-node-disaggregated-high-scale-production" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a># Prefill nodes (2 nodes, 8× H100 each)
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>vllm serve &lt;model&gt; --role prefill \
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>  --tensor-parallel-size 8 \
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>  --pipeline-parallel-size 2 \
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>  --quantization fp8
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>
+</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a># Decode nodes (4 nodes, 8× H100 each)
+</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>vllm serve &lt;model&gt; --role decode \
+</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>  --tensor-parallel-size 8 \
+</span><span id="__span-13-10"><a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>  --pipeline-parallel-size 4 \
+</span><span id="__span-13-11"><a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>  --quantization fp8 \
+</span><span id="__span-13-12"><a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>  --max-num-seqs 512
+</span></code></pre></div>
+<ul>
+<li>Use case: 405B models, 10,000+ RPS</li>
+<li>See Chapter 18 for full disaggregated setup</li>
+</ul>
+<hr />
+<p><em>This appendix is a living reference. Flag defaults and recommended values change with vLLM releases. Always verify against the installed version's <code>vllm serve --help</code> output and release notes.</em></p>
+<hr />
+<h2 id="self-check-questions">Self-Check Questions<a class="headerlink" href="#self-check-questions" title="Permanent link">&para;</a></h2>
+<ol>
+<li>
+<p>You are deploying a 7B-parameter model (BF16) on a single A100 80GB GPU to serve an interactive chat API. The service must handle 100 requests per minute with a P99 TTFT below 500 ms. Prompt lengths vary widely, from 128 to 4,096 tokens. Which vLLM flags are most important, and why? <em>(Section H.4)</em></p>
+</li>
+<li>
+<p>Your team needs to serve a 70B-parameter model and expects 1,000 requests per minute. The team has no on-premises GPU cluster and is cost-sensitive. What combination of model format, hardware configuration, and routing strategy would you recommend? <em>(Section H.7)</em></p>
+</li>
+<li>
+<p>You are building a streaming chatbot that must run locally on an Apple M2 MacBook Pro with 16 GB of unified memory, supporting up to 10 concurrent users. Which model, quantization format, and runtime would you choose, and how do you verify the memory budget? <em>(Section H.2)</em></p>
+</li>
+<li>
+<p>A RAG pipeline sends the same 2,048-token system prompt to every user. The service must handle 500 concurrent requests. Which single flag delivers the highest ROI, and what latency improvement should you expect after the cache warms up? <em>(Section H.5)</em></p>
+</li>
+<li>
+<p>You must maintain 99.9% uptime for a production vLLM service that experiences a predictable 10× traffic spike every weekday at 8 AM. Design a Kubernetes autoscaling policy — including baseline replicas, max replicas, scale-up speed, and predictive pre-scaling — to meet the SLA without over-provisioning. <em>(Section H.9)</em></p>
+</li>
+</ol>
+<hr />
+<h2 id="worked-solutions">Worked Solutions<a class="headerlink" href="#worked-solutions" title="Permanent link">&para;</a></h2>
+<h3 id="question-1">Question 1<a class="headerlink" href="#question-1" title="Permanent link">&para;</a></h3>
+<p><strong>Decision: Single GPU deployment, model=7B, 100 req/min, P99 TTFT &lt; 500ms, mixed prompt lengths (128-4096 tokens).</strong></p>
+<p><strong>Working through the decision tree:</strong></p>
+<ol>
+<li><strong>Model fits on one GPU?</strong> 7B BF16 = 14 GB. A100/H100 80 GB: yes. ✓</li>
+<li><strong>Throughput requirement:</strong> 100 req/min ≈ 1.67 req/s. At 200 tok/s throughput (7B on A100) and average 512 output tokens: 0.4 req/s sustained. Need to check if this saturates.</li>
+<li><strong>Mixed prompt lengths:</strong> Chunked prefill needed to prevent large prompts from blocking short ones.</li>
+<li><strong>P99 TTFT &lt; 500ms with 4096-token prompts:</strong> At ~10,000 tok/s prefill throughput, 4096 tokens takes 410ms. Tight but feasible with prefix caching for repeated system prompts.</li>
+</ol>
+<p><strong>Recommended configuration:</strong>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>vllm<span class="w"> </span>serve<span class="w"> </span>meta-llama/Llama-3.1-7B-Instruct<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span>--gpu-memory-utilization<span class="w"> </span><span class="m">0</span>.90<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">  </span>--enable-chunked-prefill<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="w">  </span>--enable-prefix-caching<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="w">  </span>--max-num-seqs<span class="w"> </span><span class="m">64</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="w">  </span>--max-num-batched-tokens<span class="w"> </span><span class="m">4096</span>
+</span></code></pre></div></p>
+<hr />
+<h3 id="question-2">Question 2<a class="headerlink" href="#question-2" title="Permanent link">&para;</a></h3>
+<p><strong>Decision: 70B model, 1000 req/min, cost-sensitive, team has no GPU cluster.</strong></p>
+<p><strong>Decision path:</strong>
+1. <strong>Own GPU cluster?</strong> No -&gt; consider cloud or quantization.
+2. <strong>Cost-sensitive?</strong> Yes -&gt; FP8 or GGUF quantization to reduce GPU count.
+3. <strong>70B FP8:</strong> ~70 GB -&gt; fits on 1x H100 80GB with 10GB KV headroom.
+4. <strong>1000 req/min = 16.7 req/s:</strong> At 500 tok/s (70B FP8, H100) with avg 300 output tokens: 1.67 req/s per GPU. Need 10x H100s.</p>
+<p><strong>More cost-effective path:</strong>
+- Use Q4_K_M (GGUF, ~40 GB) on 1x H100, serving at ~120 tok/s decode.
+- 1000 req/min at avg 300 tokens out = 5,000 tok/s needed. Requires ~42 H100s with GGUF.</p>
+<p><strong>Recommendation:</strong> Model routing. Route 70% of requests to a 7B model (handles simple queries at $0.10x cost), escalate 30% to 70B. Effective GPU count drops 7x. See Chapter 31.</p>
+<hr />
+<h3 id="question-3">Question 3<a class="headerlink" href="#question-3" title="Permanent link">&para;</a></h3>
+<p><strong>Decision: Streaming chatbot, 10 concurrent users max, Apple M2 MacBook Pro (16 GB RAM).</strong></p>
+<p><strong>Decision path:</strong>
+1. <strong>GPU available?</strong> Apple Silicon MPS (unified memory) — limited VRAM.
+2. <strong>16 GB unified memory:</strong> Model must fit within ~12 GB (leaving 4 GB for OS/app).
+3. <strong>Model choice:</strong> Llama-3.2-3B Q4_K_M (~2 GB) or Qwen2.5-7B Q4_K_M (~4.5 GB).
+4. <strong>10 concurrent users:</strong> llama.cpp <code>--parallel 10</code> allocates 10 KV cache slots.</p>
+<p><strong>Configuration:</strong>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>llama-server<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="w">  </span>--model<span class="w"> </span>qwen2.5-7b-instruct-q4_k_m.gguf<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">  </span>--parallel<span class="w"> </span><span class="m">10</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="w">  </span>--ctx-size<span class="w"> </span><span class="m">4096</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="w">  </span>--n-gpu-layers<span class="w"> </span><span class="m">99</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-15-6"><a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="w">  </span>--flash-attn
+</span></code></pre></div></p>
+<p>KV per slot: 4096 x 128 KB = 512 MB. Total KV: 10 x 512 MB = 5 GB. Model: 4.5 GB. Total: 9.5 GB &lt; 12 GB available. ✓</p>
+<hr />
+<h3 id="question-4">Question 4<a class="headerlink" href="#question-4" title="Permanent link">&para;</a></h3>
+<p><strong>Decision: RAG pipeline, same 2048-token system prompt for all users, 500 concurrent requests.</strong></p>
+<p><strong>Key insight:</strong> All users share the same 2048-token system prompt — prefix caching eliminates 100% of system prompt prefill cost after the first request.</p>
+<p><strong>Decision:</strong>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>vllm<span class="w"> </span>serve<span class="w"> </span>&lt;model&gt;<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">  </span>--enable-prefix-caching<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">  </span>--enable-chunked-prefill<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">  </span>--max-num-seqs<span class="w"> </span><span class="m">500</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="w">  </span>--gpu-memory-utilization<span class="w"> </span><span class="m">0</span>.92
+</span></code></pre></div></p>
+<p><strong>Expected benefit:</strong> With 2048-token shared prefix at 500 concurrent users, prefix cache hit rate approaches 99%+ after warm-up. TTFT drops from ~200ms (prefill) to ~5ms (cache hit) for subsequent requests. This is the highest-ROI single optimization for RAG deployments.</p>
+<hr />
+<h3 id="question-5">Question 5<a class="headerlink" href="#question-5" title="Permanent link">&para;</a></h3>
+<p><strong>Decision: Production service, need 99.9% uptime, traffic spikes 10x on weekday mornings.</strong></p>
+<p><strong>Decision path:</strong>
+1. <strong>High availability (99.9% uptime):</strong> Minimum 2 replicas at all times (one can fail while the other serves).
+2. <strong>10x traffic spike:</strong> HPA with scale-up headroom + predictive scaling for known morning spikes.
+3. <strong>Kubernetes + KubeRay:</strong> Necessary for automated scaling.</p>
+<p><strong>Architecture:</strong>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># HPA configuration</span>
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span><span class="w">   </span><span class="c1"># always-on baseline</span>
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20</span><span class="w">  </span><span class="c1"># handles 10x spike</span>
+</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="nt">scaleUp</span><span class="p">:</span>
+</span><span id="__span-17-5"><a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="w">  </span><span class="nt">stabilizationWindowSeconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30</span><span class="w">  </span><span class="c1"># react in 30s</span>
+</span><span id="__span-17-6"><a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="w">  </span><span class="nt">policies</span><span class="p">:</span>
+</span><span id="__span-17-7"><a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Pods</span>
+</span><span id="__span-17-8"><a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4</span><span class="w">    </span><span class="c1"># add 4 pods at a time</span>
+</span><span id="__span-17-9"><a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="w">    </span><span class="nt">periodSeconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30</span>
+</span></code></pre></div></p>
+<p><strong>Predictive scaling:</strong> Schedule a CronJob to pre-scale to 8 replicas at 7:45 AM weekdays (before the 8 AM traffic spike), then allow HPA to handle residual variance. This eliminates the cold-start penalty during the predictable morning ramp.</p>
+<p><strong>Minimum viable SLA configuration:</strong> PodDisruptionBudget with <code>minAvailable: 1</code>, <code>terminationGracePeriodSeconds</code> = max_sequence_length x ITL, and node anti-affinity spreading replicas across availability zones.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="appendix-g.html" class="md-footer__link md-footer__link--prev" aria-label="Previous: G — Benchmarking Reference">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                G — Benchmarking Reference
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="appendix-i.html" class="md-footer__link md-footer__link--next" aria-label="Next: I — C++ Build Patterns">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                I — C++ Build Patterns
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "navigation.footer", "navigation.indexes", "navigation.prune", "search.highlight", "search.suggest", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="../javascripts/mathjax.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
