@@ -1161,11 +1161,9 @@ A common confusion: "does vLLM see updated weights during rollout generation?" T
 
 ## 26.20 Companion Code
 
-`code/chapter_26/alignment_demo.py` is a self-contained module implementing all functions from this chapter. It runs without a GPU: a `MockRewardFn` and `MockModel` simulate the reward and model respectively, so every function can be exercised and unit-tested on a laptop.
+The [Chapter 26 companion code](../code/chapter_26.md) is a self-contained module implementing all functions from this chapter. It runs without a GPU: a `MockRewardFn` and `MockModel` simulate the reward and model respectively, so every function can be exercised and unit-tested on a laptop.
 
-Running `python alignment_demo.py` executes 50 steps of simulated GRPO training, prints a reward curve, and verifies that advantages, log-probs, and losses are numerically correct.
-
-`code/chapter_26/alignment_demo.cpp` implements the mathematical kernels — group normalization, GRPO-Clip, DPO loss — as standalone functions with worked examples in `main()`. Compile with `g++ -std=c++17 -O2 alignment_demo.cpp -o alignment_demo`.
+Running the companion code executes 50 steps of simulated GRPO training, prints a reward curve, and verifies that advantages, log-probs, and losses are numerically correct. It also includes C++ implementations of the mathematical kernels — group normalization, GRPO-Clip, DPO loss — with worked examples.
 
 ---
 
