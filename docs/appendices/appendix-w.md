@@ -114,7 +114,7 @@ A high-performance attention kernel library that serves as vLLM's default attent
 Count of floating point multiply-add operations. Used to measure model complexity and compare hardware performance. Common in roofline analysis. Note: FLOPs ≠ FLOPS (the latter is per second). → Appendix A
 
 **FLOPS (Floating Point Operations Per Second)**
-Hardware throughput metric. H100 SXM: 989 TFLOPS BF16, 1,979 TFLOPS FP8. → Appendix L
+Hardware throughput metric. H100 SXM: 1,979 TFLOPS BF16 dense, 3,958 TFLOPS FP8 dense. → Appendix L
 
 **FP8**
 8-bit floating point format. Two variants: E4M3 (4 exponent bits, 3 mantissa bits, range ±448) and E5M2 (5 exponent bits, 2 mantissa bits, wider range). H100 Tensor Cores natively execute FP8 GEMMs at 2× the FLOPS of BF16. Requires calibration. → Chapter 10, Chapter 37
@@ -152,7 +152,7 @@ Attention variant where multiple query heads share the same key/value heads. Red
 A KV cache eviction policy that retains tokens with the highest cumulative attention scores ("heavy hitters") plus a fixed set of recent tokens, evicting all others when the cache is full. Heavy hitters are identified by accumulating attention weight statistics during generation; tokens that have been attended to most across all past steps are deemed most important. → Chapter 11.5
 
 **H100**
-NVIDIA Hopper architecture GPU with 80GB HBM3 memory, 3.35 TB/s bandwidth, 989 TFLOPS BF16, 1,979 TFLOPS FP8. The primary GPU for LLM serving as of 2024-2025. → Chapter 2
+NVIDIA Hopper architecture GPU with 80GB HBM3 memory, 3.35 TB/s bandwidth, 1,979 TFLOPS BF16 dense, 3,958 TFLOPS FP8 dense. The primary GPU for LLM serving as of 2024-2025. → Chapter 2
 
 **HBM (High Bandwidth Memory)**
 Memory technology used in data center GPUs. Stacked DRAM dies with very wide memory bus. H100 HBM3: 3.35 TB/s. H200 HBM3e: 4.8 TB/s. Model weights and KV cache are stored in HBM during inference. → Chapter 2
@@ -281,7 +281,7 @@ SGLang's KV cache sharing mechanism that organizes cached KV blocks in a radix t
 Number of completed requests per second. Distinct from token throughput. Depends on output length distribution and batching efficiency. → Chapter 17
 
 **Ridge Point (Roofline)**
-The arithmetic intensity at which performance transitions from memory-bandwidth-bound to compute-bound. = Peak FLOPS / Peak Memory Bandwidth. H100: ~295 FLOPs/byte (BF16). → Appendix A
+The arithmetic intensity at which performance transitions from memory-bandwidth-bound to compute-bound. = Peak FLOPS / Peak Memory Bandwidth. H100: ~591 FLOPs/byte (BF16 dense). → Appendix A
 
 **RoPE (Rotary Position Encoding)**
 Positional encoding method encoding token positions by rotating Q and K vectors. Key property: dot product depends only on relative position (m-n), not absolute positions. Used by Llama, Qwen, Mistral, DeepSeek. → Appendix A

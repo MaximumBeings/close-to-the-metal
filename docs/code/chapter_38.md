@@ -41,8 +41,8 @@ from typing import List, Dict, Optional, Tuple
 H100_COST_PER_HR   = 28.0    # USD/hr (H100 SXM cloud, on-demand)
 H100_HBM_BW_GBS    = 3350    # GB/s
 H100_HBM_GB        = 80      # GB
-H100_TFLOPS_BF16   = 989     # TFLOPS
-H100_TFLOPS_FP8    = 1979    # TFLOPS
+H100_TFLOPS_BF16   = 1979    # TFLOPS BF16 dense
+H100_TFLOPS_FP8    = 3958    # TFLOPS FP8 dense
 
 HOURS_PER_MONTH    = 720     # 30 days × 24 hrs
 BASELINE_MONTHLY   = 1_200_000.0   # $1.2M/month — starting point
@@ -1229,8 +1229,8 @@ g++ -std=c++17 -O2 -o production_demo production_demo.cpp -lm
 static const double H100_COST_PER_HR   = 28.0;
 static const double H100_HBM_BW_GBS   = 3350.0;
 static const double H100_HBM_GB       = 80.0;
-static const double H100_TFLOPS_BF16  = 989.0;
-static const double H100_TFLOPS_FP8   = 1979.0;
+static const double H100_TFLOPS_BF16  = 1979.0;  // BF16 dense
+static const double H100_TFLOPS_FP8   = 3958.0;  // FP8 dense
 static const double HOURS_PER_MONTH   = 720.0;
 static const double BASELINE_MONTHLY  = 1'200'000.0;
 static const double TARGET_MONTHLY    = 108'000.0;

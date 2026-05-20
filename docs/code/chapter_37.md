@@ -34,11 +34,11 @@ from typing import List, Dict, Optional, Tuple
 # ─────────────────────────────────────────────────────────────────────────────
 H100_HBM_GB              = 80          # GB per GPU
 H100_HBM_BW_GBS          = 3350        # GB/s HBM3 bandwidth
-H100_TFLOPS_BF16         = 989         # TFLOPS BF16 (dense)
-H100_TFLOPS_FP8          = 1979        # TFLOPS FP8 (dense) — 2× BF16
-H100_TFLOPS_BF16_SPARSE  = 1978        # TFLOPS BF16 + 2:4 sparsity — 2× dense
-H100_TFLOPS_FP8_SPARSE   = 3958        # TFLOPS FP8 + 2:4 sparsity — 4× BF16 dense
-H100_RIDGE_POINT_BF16    = H100_TFLOPS_BF16 * 1e12 / (H100_HBM_BW_GBS * 1e9)  # ~295 FLOPs/byte
+H100_TFLOPS_BF16         = 1979        # TFLOPS BF16 (dense)
+H100_TFLOPS_FP8          = 3958        # TFLOPS FP8 (dense) — 2× BF16 dense
+H100_TFLOPS_BF16_SPARSE  = 3958        # TFLOPS BF16 + 2:4 sparsity — 2× BF16 dense
+H100_TFLOPS_FP8_SPARSE   = 7916        # TFLOPS FP8 + 2:4 sparsity — 4× BF16 dense
+H100_RIDGE_POINT_BF16    = H100_TFLOPS_BF16 * 1e12 / (H100_HBM_BW_GBS * 1e9)  # ~591 FLOPs/byte
 H100_COST_PER_HR         = 28.0        # USD/hr cloud spot (H100 SXM)
 H100_NVLINK_BW_GBS       = 900         # GB/s NVLink 4.0 (per GPU, bidirectional)
 PCIE5_BW_GBS             = 128         # GB/s PCIe 5.0 (CPU↔GPU)
@@ -140,10 +140,10 @@ class GPUConfig:
         return self.bw_gbs  # per-GPU bandwidth is the bottleneck during decode
 
 GPU_CONFIGS: Dict[str, GPUConfig] = {
-    "1xH100":  GPUConfig("1× H100 SXM",   1, 80, 3350, 989,  1979, 28.0),
-    "2xH100":  GPUConfig("2× H100 SXM",   2, 80, 3350, 989,  1979, 56.0),
-    "4xH100":  GPUConfig("4× H100 SXM",   4, 80, 3350, 989,  1979, 112.0),
-    "8xH100":  GPUConfig("8× H100 SXM",   8, 80, 3350, 989,  1979, 224.0),
+    "1xH100":  GPUConfig("1× H100 SXM",   1, 80, 3350, 1979, 3958, 28.0),
+    "2xH100":  GPUConfig("2× H100 SXM",   2, 80, 3350, 1979, 3958, 56.0),
+    "4xH100":  GPUConfig("4× H100 SXM",   4, 80, 3350, 1979, 3958, 112.0),
+    "8xH100":  GPUConfig("8× H100 SXM",   8, 80, 3350, 1979, 3958, 224.0),
     "8xH200":  GPUConfig("8× H200 SXM",   8, 141, 4800, 1000, 2000, 400.0),
 }
 
@@ -425,7 +425,7 @@ DEMO 2 — FP8 Precision: 2× TFLOPS via H100 Tensor Core
         print(f"    {m.name:<25}  BF16: {bf16_gb:>7.1f} GB  →  FP8: {fp8_gb:>7.1f} GB  "
               f"(saves {bf16_gb - fp8_gb:.1f} GB, fits on {math.ceil(fp8_gb/75)} fewer GPUs)")
 
-    # Verify FP8 is approximately 2× BF16 (1979 vs 989 — within 1 TFLOP rounding)
+    # Verify FP8 is approximately 2× BF16 (3958 vs 1979 — within 1 TFLOP rounding)
     assert abs(H100_TFLOPS_FP8 - 2 * H100_TFLOPS_BF16) <= 2, \
         f"FP8 should be ~2× BF16 TFLOPS, got {H100_TFLOPS_FP8} vs 2×{H100_TFLOPS_BF16}={2*H100_TFLOPS_BF16}"
     assert NEMOTRON_FAMILY[0].weight_gb("fp8") == NEMOTRON_FAMILY[0].weight_gb("bf16") / 2
@@ -1272,7 +1272,7 @@ g++ -std=c++17 -O2 -o nemotron_demo nemotron_demo.cpp -lm
 
 static const double H100_HBM_GB             = 80.0;
 static const double H100_HBM_BW_GBS         = 3350.0;
-static const double H100_TFLOPS_BF16        = 989.0;
+static const double H100_TFLOPS_BF16        = 1979.0;
 static const double H100_TFLOPS_FP8         = 1979.0;
 static const double H100_TFLOPS_BF16_SPARSE = 1978.0;
 static const double H100_TFLOPS_FP8_SPARSE  = 3958.0;

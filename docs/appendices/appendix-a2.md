@@ -1886,7 +1886,7 @@ Decode Q projection  [1,1,4096]@[4096,4096]   (S=1)
 
 ─────────────────────────────────────────────────────────────────────────────────────────
 A100 ridge (BF16): 312 TFLOPS / 2.0 TB/s = 156 FLOP/byte
-H100 ridge (BF16): 989 TFLOPS / 3.35 TB/s = 295 FLOP/byte
+H100 ridge (BF16 dense): 1,979 TFLOPS / 3.35 TB/s = 591 FLOP/byte
 Compute-bound if AI > ridge; memory-bound if AI < ridge.
 ─────────────────────────────────────────────────────────────────────────────────────────
 ```

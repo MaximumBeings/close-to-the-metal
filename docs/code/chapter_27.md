@@ -256,9 +256,9 @@ def simulate_chunked_prefill(
     ~chunk_size * prefill_tflops_per_token / H100_TFLOPS seconds, and we
     can slot one mini-decode batch per chunk.
 
-    H100 BF16 dense throughput: ~989 TFLOPs
+    H100 BF16 dense throughput: ~1,979 TFLOPs
     """
-    H100_TFLOPS = 989.0
+    H100_TFLOPS = 1979.0
     n_chunks = math.ceil(context_len / chunk_size)
 
     # Time per chunk (ms): FLOPs = chunk_size * model_flops_per_token
@@ -694,11 +694,11 @@ struct ChunkedPrefillStats {
 /**
  * Model chunked prefill timing on H100.
  * Llama-3.1-8B: ~16 GFLOPs/token for non-attention MLP forward pass.
- * H100 BF16 dense: ~989 TFLOPs.
+ * H100 BF16 dense: ~1,979 TFLOPs.
  * Each chunk also incurs attention: O(T_chunk * T_accum) but < 10% at early chunks.
  */
 static ChunkedPrefillStats sim_chunked_prefill(int context_len, int chunk_size) {
-    const double H100_TFLOPS   = 989.0;
+    const double H100_TFLOPS   = 1979.0;
     const double GFLOPS_PER_TOK = 16.0;   // Llama-3.1-8B dense layers
 
     int n_chunks = (context_len + chunk_size - 1) / chunk_size;

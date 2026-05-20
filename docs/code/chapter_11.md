@@ -43,7 +43,7 @@ def compute_arithmetic_intensity(
 
     Arithmetic intensity = FLOPs / bytes_read_from_HBM
 
-    H100 ridge point ≈ 295 FLOP/byte (989 TFLOP/s FP16 / 3.35 TB/s HBM3)
+    H100 ridge point ≈ 591 FLOP/byte (1,979 TFLOP/s BF16 dense / 3.35 TB/s HBM3)
     Above ridge point: compute-bound.
     Below ridge point: memory-bandwidth-bound.
     """
@@ -63,7 +63,7 @@ def compute_arithmetic_intensity(
 
     intensity = flops / total_bytes
 
-    H100_RIDGE_POINT = 295.0  # FLOP/byte
+    H100_RIDGE_POINT = 591.0  # FLOP/byte (1,979 TFLOPS BF16 dense / 3.35 TB/s)
     bound = "compute-bound" if intensity > H100_RIDGE_POINT else "memory-bandwidth-bound"
 
     return {
@@ -107,7 +107,7 @@ def demo_compute_intensity():
         )
 
     print()
-    print("Ridge point (H100 FP16): ~295 FLOP/byte")
+    print("Ridge point (H100 BF16 dense): ~591 FLOP/byte")
     print("Above ridge → compute-bound (tensor core utilization matters)")
     print("Below ridge → memory-bandwidth-bound (HBM bandwidth is the limit)")
     print()
@@ -865,8 +865,8 @@ struct IntensityResult {
  * Decode:  input = [B, 1, d_model], Weight = [d_model, d_model]
  *          FLOPs = 2 * B * d_model * d_model   (B sequences, 1 token each)
  *
- * H100 ridge point: ~295 FLOP/byte
- *   (989 TFLOP/s BF16 / 3.35 TB/s HBM3)
+ * H100 ridge point: ~591 FLOP/byte
+ *   (1,979 TFLOP/s BF16 dense / 3.35 TB/s HBM3)
  */
 IntensityResult compute_arithmetic_intensity(
     int  prompt_tokens,
@@ -874,7 +874,7 @@ IntensityResult compute_arithmetic_intensity(
     int  d_model     = 4096,
     bool is_prefill  = true)
 {
-    static const double H100_RIDGE = 295.0;
+    static const double H100_RIDGE = 591.0;  // 1,979 TFLOPS BF16 dense / 3.35 TB/s
 
     long long m = is_prefill ? prompt_tokens : batch_size;
     long long k = d_model;
@@ -938,7 +938,7 @@ void demo_arithmetic_intensity() {
                   << "  " << r.bound << "\n";
     }
 
-    std::cout << "\nRidge point (H100 BF16): ~295 FLOP/byte\n";
+    std::cout << "\nRidge point (H100 BF16 dense): ~591 FLOP/byte\n";
     std::cout << "Above ridge -> compute-bound (tensor cores saturated)\n";
     std::cout << "Below ridge -> memory-BW-bound (HBM bandwidth is the limit)\n\n";
 }

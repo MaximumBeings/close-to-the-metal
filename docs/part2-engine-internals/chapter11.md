@@ -154,10 +154,10 @@ PREFILL — compute-bound:
     Bytes:  weight read = 4096 × 4096 × 2 = 33.6 MB
     Intensity = 1.07 × 10¹² / 33.6 × 10⁶ ≈ 31 800 FLOP/byte
 
-  H100 ridge point: ~148 (FP16 TFLOP/s / HBM bandwidth)
-    = 989 × 10¹² / 3.35 × 10¹² = ~295 FLOP/byte
+  H100 ridge point (BF16 dense / HBM bandwidth)
+    = 1,979 × 10¹² / 3.35 × 10¹² = ~591 FLOP/byte
 
-  31 800 >> 295 → deeply compute-bound
+  31 800 >> 591 → deeply compute-bound
 
 DECODE — memory-bandwidth-bound:
 

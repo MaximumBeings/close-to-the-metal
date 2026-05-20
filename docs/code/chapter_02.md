@@ -401,7 +401,7 @@ def arithmetic_intensity(
 
 def is_bandwidth_bound(
     intensity: float,
-    hardware_flops_per_s: float,   # peak FLOPS (e.g. H100 = 989e12)
+    hardware_flops_per_s: float,   # peak FLOPS (e.g. H100 = 1979e12)
     hardware_bw_bytes_per_s: float # peak bandwidth (e.g. H100 = 3.35e12)
 ) -> tuple[bool, float]:
     """
@@ -419,7 +419,7 @@ def print_arithmetic_intensity():
     print("="*70)
 
     # H100 SXM specs
-    h100_bf16_flops = 989e12    # ~989 TFLOP/s BF16 tensor core
+    h100_bf16_flops = 1979e12   # ~1,979 TFLOP/s BF16 dense tensor core
     h100_bw         = 3.35e12   # 3.35 TB/s
 
     ridge = h100_bf16_flops / h100_bw
@@ -1063,7 +1063,7 @@ static void print_arithmetic_intensity() {
     print_section("§2.6  Arithmetic Intensity — Bandwidth-Bound vs Compute-Bound");
 
     // H100 SXM
-    const double h100_bf16_flops = 989e12;   // ~989 TFLOP/s BF16
+    const double h100_bf16_flops = 1979e12;  // ~1,979 TFLOP/s BF16 dense
     const double h100_bw         = 3.35e12;  // 3.35 TB/s
 
     auto [_, ridge] = is_bandwidth_bound(0, h100_bf16_flops, h100_bw);
@@ -1194,9 +1194,9 @@ static void run_assertions() {
     long long kv = kv_cache_bytes(m, 1, 4096, "BF16");
     assert(kv == 536870912LL);
 
-    // Ridge point check: H100 989 TFLOP/s ÷ 3.35 TB/s = ~295 FLOPs/byte
-    auto [_, ridge] = is_bandwidth_bound(0, 989e12, 3.35e12);
-    assert(ridge > 290.0 && ridge < 300.0);
+    // Ridge point check: H100 1,979 TFLOP/s BF16 dense ÷ 3.35 TB/s = ~591 FLOPs/byte
+    auto [_, ridge] = is_bandwidth_bound(0, 1979e12, 3.35e12);
+    assert(ridge > 585.0 && ridge < 600.0);
 
     // Offload: 8B INT4 ~4.7 GB on 24 GB GPU, 32 layers
     auto r = llamacpp_offload("test", 32, 4.7, 24.0);

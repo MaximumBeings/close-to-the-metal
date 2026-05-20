@@ -290,7 +290,7 @@ def demo_chunked_prefill():
     print(f"{'='*70}")
 
     model = KIMI_MODEL
-    h100_tflops = 989e12       # 989 TFLOPS BF16
+    h100_tflops = 1979e12      # 1,979 TFLOPS BF16 dense
     chunk_size = 2048          # tokens per chunk
     context_len = 131072       # 128K tokens
 
@@ -1061,7 +1061,7 @@ static void demo_chunked_prefill() {
     printf("DEMO 4 — Chunked Prefill Analysis\n");
     printf("%s\n", "══════════════════════════════════════════════════════════════════════");
 
-    const double h100_tflops = 989.0;
+    const double h100_tflops = 1979.0;  // 1,979 TFLOPS BF16 dense
     const int ctx_128k = 131072;
     // FLOPs for prefill ≈ 2 × params × tokens
     const double prefill_flops = 2.0 * 70e9 * ctx_128k;

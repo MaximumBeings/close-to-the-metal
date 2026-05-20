@@ -732,7 +732,7 @@ DEMO 9 — Batch Size Interaction: The Efficiency Cliff
   Roofline analysis:
     Decode intensity = (2 × params × batch) / (params_bytes)
                      = batch FLOPs/byte
-    Ridge point (H100 BF16): ~295 FLOPs/byte
+    Ridge point (H100 BF16 dense): ~591 FLOPs/byte
 
     Batch where target becomes compute-bound: 295 / 2 ≈ 147
     (In practice, batch ~32–64 is where speculative decoding starts to lose)

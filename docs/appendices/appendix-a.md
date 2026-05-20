@@ -441,9 +441,9 @@ If Intensity < Ridge Point → memory-bandwidth-bound (bandwidth is bottleneck)
 Ridge Point = Peak FLOPS / Peak Memory Bandwidth
 
 H100 SXM:
-  Peak TFLOPS (BF16): 989 × 10¹²
+  Peak TFLOPS (BF16 dense): 1,979 × 10¹²
   Peak HBM Bandwidth: 3.35 × 10¹²  bytes/s
-  Ridge Point: 989 / 3.35 ≈ 295 FLOPs/byte
+  Ridge Point: 1,979 / 3.35 ≈ 591 FLOPs/byte
 ```
 
 ### A.9.2 Arithmetic Intensity of LLM Operations
@@ -469,7 +469,7 @@ Decode attention (GEMV, batch=1):
 At batch=1 (decode):
   Intensity ≈ 1 FLOPs/byte → bandwidth-limited
   Increasing batch to B: Intensity ≈ B FLOPs/byte
-  At batch=32: Intensity ≈ 32 FLOPs/byte (still below ridge at 295)
+  At batch=32: Intensity ≈ 32 FLOPs/byte (still below ridge at 591)
   
   This explains why decode throughput scales linearly with batch size
   (until memory is full) — it's still bandwidth-bound at typical batch sizes.

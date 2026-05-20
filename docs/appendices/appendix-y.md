@@ -69,11 +69,11 @@ Recall from Chapter 1 that the ridge point separates memory-bound from compute-b
 ```
 Ridge point = Peak FLOPS/s ÷ Peak Bandwidth (bytes/s)
 
-H100 SXM5 (BF16 dense):   989 × 10¹²  / 3.35 × 10¹²  ≈  295 FLOPs/byte
+H100 SXM5 (BF16 dense):   1,979 × 10¹²  / 3.35 × 10¹²  ≈  591 FLOPs/byte
 WSE-3 (BF16):             125 × 10¹⁵  / 21.6 × 10¹⁵  ≈    6 FLOPs/byte
 ```
 
-The WSE-3 ridge point is approximately **6 FLOPs/byte**. This is a radical shift. On the H100, a batch-1 decode step at ~1 FLOP/byte is 295× below the ridge — deeply memory-bound. On the WSE-3, 1 FLOP/byte is only 6× below the ridge, and the "penalty" for being memory-bound is paid in the currency of 21.6 PB/s on-chip fabric rather than 3.35 TB/s HBM.
+The WSE-3 ridge point is approximately **6 FLOPs/byte**. This is a radical shift. On the H100, a batch-1 decode step at ~1 FLOP/byte is 591× below the ridge — deeply memory-bound. On the WSE-3, 1 FLOP/byte is only 6× below the ridge, and the "penalty" for being memory-bound is paid in the currency of 21.6 PB/s on-chip fabric rather than 3.35 TB/s HBM.
 
 ### Y.3.2 Theoretical Token Throughput
 
@@ -399,8 +399,8 @@ Cerebras excels for workloads where response latency is the primary business met
 | Process | TSMC 4N | TSMC 5nm |
 | On-chip memory | 50 MB L2 + 228 KB SMEM/SM | 44 GB SRAM |
 | Memory bandwidth | 3.35 TB/s (HBM3) | 21.6 PB/s (on-chip) |
-| Peak BF16 compute | 989 TFLOPS | 125 PFLOPS |
-| Ridge point (BF16) | ~295 FLOPs/byte | ~6 FLOPs/byte |
+| Peak BF16 compute | 1,979 TFLOPS | 125 PFLOPS |
+| Ridge point (BF16) | ~591 FLOPs/byte | ~6 FLOPs/byte |
 | Memory technology | HBM3 (near-chip, 2.5D) | SRAM (on-chip) |
 | External memory | 80 GB HBM (always used) | MemoryX (optional) |
 | Cluster fabric | NVLink / InfiniBand | SwarmX |
