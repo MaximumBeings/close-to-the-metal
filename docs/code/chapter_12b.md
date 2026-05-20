@@ -77,7 +77,7 @@ for idx in allowed_start:
 allowed_after_key = [tok2id[':']]
 masked_colon = apply_logit_mask(raw_logits, allowed_after_key)
 print(f"\nAfter key: forced next token = {id2tok[allowed_after_key[0]]!r} "
-      f"(prob = {softmax(masked_colon)[tok2id[':']:.3f})")
+      f"(prob = {softmax(masked_colon)[tok2id[':']]:.3f})")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -627,7 +627,7 @@ At JSON start: allowed = {'{', '['}
 FSM START only allows '{'
 Valid JSON walk reaches DONE
 ...
-9/9 checks passed ✓
+10/10 checks passed ✓
 ```
 
 ## Key Takeaways from the Code

@@ -245,32 +245,32 @@ Output:  logits = hidden_state × Eᵀ             (matrix multiply)
 ```
 
 This halves the memory for these two weight matrices combined. For Gemma 3 27B
-with d_model = 4,608 and vocab_size = 256,000:
+with d_model = 5,120 and vocab_size = 262,144:
 
 ```
 Without tied embeddings:
-  Embedding:  256,000 × 4,608 × 2 bytes = 2.36 GB
-  lm_head:    4,608 × 256,000 × 2 bytes = 2.36 GB
-  Total:      4.72 GB
+  Embedding:  262,144 × 5,120 × 2 bytes = 2.68 GB
+  lm_head:    5,120 × 262,144 × 2 bytes = 2.68 GB
+  Total:      5.37 GB
 
 With tied embeddings:
-  Shared matrix: 2.36 GB
-  Saving:        2.36 GB (11% of total 27B model ≈ 54 GB in FP16)
+  Shared matrix: 2.68 GB
+  Saving:        2.68 GB (≈5% of total 27B model ≈ 54 GB in FP16)
 ```
 
 **Inference implication**: vLLM and llama.cpp handle tied embeddings
 transparently — the weight is loaded once and referenced at both positions.
 No configuration change is needed.
 
-### 42.3.4 The 256K Vocabulary
+### 42.3.4 The 262K Vocabulary
 
-Gemma 3 uses a SentencePiece vocabulary of 256,000 tokens — twice Llama 3's
+Gemma 3 uses a SentencePiece vocabulary of 262,144 tokens — twice Llama 3's
 128K and 8× Llama 2's 32K.
 
 The larger vocabulary reduces the number of tokens needed to represent a given
 text, which improves throughput (fewer decode steps) but increases:
 
-- Softmax compute (256K logits vs 128K)
+- Softmax compute (262K logits vs 128K)
 - lm_head memory (but halved by tied embeddings)
 - Embedding lookup table size
 
@@ -566,7 +566,7 @@ model.model.embed_tokens.requires_grad_(True)
 model.lm_head.requires_grad_(True)
 ```
 
-This increases memory by 2.36 GB (the size of the embedding matrix) during
+This increases memory by 2.68 GB (the size of the embedding matrix) during
 fine-tuning. For inference, re-tie or keep separate — either works.
 
 ---
@@ -741,7 +741,7 @@ def test_tied_embedding_saving():
     dtype_bytes = 2
     single_matrix_bytes = vocab_size * d_model * dtype_bytes
     saving_gb = single_matrix_bytes / 1e9
-    assert abs(saving_gb - 2.359) < 0.01, f"Expected ~2.36 GB saving, got {saving_gb:.3f}"
+    assert abs(saving_gb - 2.684) < 0.01, f"Expected ~2.68 GB saving, got {saving_gb:.3f}"
     print(f"PASS: Tied embedding saves {saving_gb:.2f} GB")
 
 
@@ -794,7 +794,7 @@ if __name__ == "__main__":
 ```
 PASS: Gemma 3 27B KV/token = 1,015,808 bytes (1.02 MB)
 PASS: Phi-4 KV/token = 204,800 bytes (200 KB)
-PASS: Tied embedding saves 2.36 GB
+PASS: Tied embedding saves 2.68 GB
 PASS: attention reduction at 32K = 4.56× vs all-global
 PASS: image KV cost = 260.0 MB for 256 tokens
 PASS: Gemma 3 27B FP16 cost = $0.69/M tokens
@@ -900,15 +900,15 @@ The query at position 49,999 (near the end) can attend to position 45,000 in the
 Without tying: embedding matrix (vocab_size x d_model) + lm_head (d_model x vocab_size) = 2 matrices.
 With tying: one matrix serves both roles = 1 matrix.
 
-For Gemma 3 27B (d_model=4,608, vocab_size=256,000):
+For Gemma 3 27B (d_model=5,120, vocab_size=262,144):
 ```
-single_matrix = 256,000 x 4,608 = 1.18B parameters
-memory = 1.18B x 2 bytes (BF16) = 2.36 GB
-without_tying = 2 x 2.36 = 4.72 GB
-saving = 2.36 GB per deployment
+single_matrix = 262,144 x 5,120 = 1.342B parameters
+memory = 1.342B x 2 bytes (BF16) = 2.68 GB
+without_tying = 2 x 2.68 = 5.37 GB
+saving = 2.68 GB per deployment
 ```
 
-**Why this is non-trivial for inference:** The lm_head is read from HBM at every decode step (to compute logits over 256K vocab). A 2.36 GB matrix is loaded every step; at A100 bandwidth (2 TB/s): 2.36/2000 = 1.18 ms overhead per token just for lm_head. Tied embeddings eliminate the duplicate storage while providing identical inference latency -- the matrix is loaded once regardless.
+**Why this is non-trivial for inference:** The lm_head is read from HBM at every decode step (to compute logits over 262K vocab). A 2.68 GB matrix is loaded every step; at A100 bandwidth (2 TB/s): 2.68/2000 = 1.34 ms overhead per token just for lm_head. Tied embeddings eliminate the duplicate storage while providing identical inference latency -- the matrix is loaded once regardless.
 
 **Training note:** Tied embeddings constrain the gradient updates -- the same delta applies to both the input representation and output scoring roles. This can limit model expressiveness for very large vocabularies but is standard practice for efficiency.
 

@@ -173,38 +173,56 @@ print(f"\n{SEPARATOR}")
 print("PART 3 — State Space Models (S4-style discretised)")
 print(SEPARATOR)
 
-def ssm_step(x_t, h_prev, A, B, C):
+def ssm_step(x_t, h_prev, A, B, C, D=0.0):
     """
-    Single SSM step: h_t = A h_{t-1} + B x_t,  y_t = C h_t.
-    A: (d_state, d_state),  B: (d_state,),  C: (d_state,)
+    Single SSM step: h_t = A h_{t-1} + B x_t,  y_t = C h_t + D x_t.
+    A: (d_state, d_state),  B: (d_state, d_in),  C: (d_out, d_state)
+    x_t: (d_in,)            h_prev: (d_state,)
     """
-    h_t = A @ h_prev + B * x_t
-    y_t = C @ h_t
+    h_t = A @ h_prev + B @ x_t
+    y_t = C @ h_t + D * x_t
     return h_t, y_t
 
 
-def ssm_sequence(inputs, A, B, C):
-    """Run SSM over a full sequence.  inputs: (seq_len,)"""
+def ssm_sequence(inputs, A, B, C, D=0.0):
+    """Run SSM over a full sequence.  inputs: (seq_len, d_in)
+    Returns (h_states, y_outputs) each shape (seq_len, d_state/d_out)."""
     d_state = A.shape[0]
     h = np.zeros(d_state, dtype=np.float32)
-    outputs = []
-    for x in inputs:
-        h, y = ssm_step(x, h, A, B, C)
-        outputs.append(y)
-    return np.array(outputs)
+    h_states, y_outputs = [], []
+    for x_t in inputs:
+        h, y = ssm_step(x_t, h, A, B, C, D)
+        h_states.append(h.copy())
+        y_outputs.append(y.copy())
+    return np.array(h_states), np.array(y_outputs)
 
 
-# Toy 1-D SSM: d_state=2
-D_STATE = 2
-# Stable diagonal A (eigenvalues < 1)
-A_ssm = np.diag([0.9, 0.7]).astype(np.float32)
-B_ssm = np.array([1.0, 0.5], dtype=np.float32)
-C_ssm = np.array([1.0, 1.0], dtype=np.float32)
+# Exact §4.3 four-token walkthrough — d_state=4, d_in=4
+# A = diag(0.9, 0.8, 0.7, 0.6), B=(4×4), C=(4×4), D=0.1
+A_ssm = np.diag([0.9, 0.8, 0.7, 0.6]).astype(np.float32)
+B_ssm = np.array([[ 0.3, -0.1,  0.2,  0.4],
+                   [ 0.1,  0.5, -0.2,  0.3],
+                   [-0.2,  0.3,  0.4,  0.1],
+                   [ 0.4, -0.3,  0.1,  0.2]], dtype=np.float32)
+C_ssm = np.array([[ 0.5,  0.2, -0.3,  0.1],
+                   [-0.1,  0.4,  0.6, -0.2],
+                   [ 0.3, -0.2,  0.1,  0.5],
+                   [ 0.2,  0.3, -0.1,  0.4]], dtype=np.float32)
+D_ssm = 0.1
 
-seq_in = np.array([1, 0, 0, 1, 0, 0], dtype=np.float32)
-ssm_out = ssm_sequence(seq_in, A_ssm, B_ssm, C_ssm)
-print(f"SSM output (d_state={D_STATE}): {ssm_out}")
-print("  Note: impulse at t=0 decays; second impulse at t=3 partially summed.")
+inputs_ssm = np.array([
+    [1.0, 0.0, 0.5, 0.2],   # "The"
+    [0.3, 0.8, 0.1, 0.4],   # "next"
+    [0.7, 0.2, 0.3, 0.6],   # "day"
+    [0.2, 0.5, 0.8, 0.1],   # "is"
+], dtype=np.float32)
+
+h_states, ssm_out = ssm_sequence(inputs_ssm, A_ssm, B_ssm, C_ssm, D_ssm)
+print("SSM hidden states (§4.3 exact):")
+print(f"  h_0 = {h_states[0]}  (expected [0.48, 0.06, 0.02, 0.49])")
+print(f"  h_1 = {h_states[1]}  (expected [0.622, 0.578, 0.274, 0.264])")
+print(f"  h_2 = {h_states[2]}  (expected [1.050, 0.752, 0.292, 0.528])")
+print(f"  h_3 = {h_states[3]}  (expected [1.155, 0.742, 0.644, 0.347])")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PART 4 — MAMBA SELECTIVE SCAN (§5)
@@ -289,11 +307,15 @@ results.append(check("Linear: recurrent==parallel (tol 1e-5)", max_diff < 1e-5,
 # Linear attention: output shape
 results.append(check("Linear attention output shape", rec_out.shape == (SEQ_LEN, D_HEAD)))
 
-# SSM: impulse response decays
-results.append(check("SSM impulse decays", ssm_out[0] > ssm_out[1] > ssm_out[2]))
+# SSM: §4.3 exact h_0 check
+results.append(check("SSM h_0 matches §4.3",
+    np.allclose(h_states[0], [0.48, 0.06, 0.02, 0.49], atol=0.01),
+    got=h_states[0].round(3), expected="[0.48,0.06,0.02,0.49]"))
 
-# SSM: second impulse increases output
-results.append(check("SSM second impulse raises output", ssm_out[3] > ssm_out[2]))
+# SSM: §4.3 exact h_1 check
+results.append(check("SSM h_1 matches §4.3",
+    np.allclose(h_states[1], [0.622, 0.578, 0.274, 0.264], atol=0.01),
+    got=h_states[1].round(3), expected="[0.622,0.578,0.274,0.264]"))
 
 # Mamba: output shape
 results.append(check("Mamba output shape", mamba_out.shape == (SEQ_LEN,)))

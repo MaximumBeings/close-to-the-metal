@@ -109,9 +109,9 @@ USER_A = SYSTEM_PROMPT + list(range(32, 64))   # A = system + unique part A
 USER_B = SYSTEM_PROMPT + list(range(64, 96))   # B = system + unique part B
 USER_C = SYSTEM_PROMPT + list(range(96, 128))  # C = system + unique part C
 
-# First request — cold cache
-cache.insert(USER_A)
+# First request — cold cache (lookup BEFORE insert to see cold miss)
 hit_a_cold = cache.lookup(USER_A)
+cache.insert(USER_A)
 print(f"Request A (cold): {hit_a_cold} blocks hit / {len(USER_A)//BLOCK_SIZE} total")
 
 # Second request shares system prompt — should hit 2 blocks
@@ -701,7 +701,7 @@ Request A (cold): 0 blocks hit / 4 total
 Request B (warm): 2 blocks hit (system prompt shared) / 4 total
 Overall hit rate: 40.0%
 ...
-7/7 checks passed ✓
+9/9 checks passed ✓
 ```
 
 ## Key Takeaways from the Code

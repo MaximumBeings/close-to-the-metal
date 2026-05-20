@@ -169,16 +169,17 @@ W = 4, sequence growing token by token:
 ### 2.3 Cache Size Formula
 
 ```
-cache_SW = 4 × W × H × D × L × bytes_per_element
+cache_SW = 2 × W × H × D × L × bytes_per_element
 ```
 
 | Term | Meaning |
 |---|---|
-| 4 | Factor of 2 for K+V, factor of 2 for float16 rounding |
+| 2 | Factor for K and V (two tensors) |
 | W | Window size — the constant cap (e.g. 4 096 for Mistral-7B) |
 | H | Number of KV heads |
 | D | d_head dimension |
 | L | Number of layers |
+| bytes_per_element | 2 for FP16/BF16, 4 for FP32 |
 
 At N = 100 K, W = 4 K:
 
